@@ -1,0 +1,13 @@
+/* @tailwind base;
+@tailwind components;
+@tailwind utilities; */
+
+/* body{
+    width: 400px;
+    height: 400px;
+} */
+.from-orange-400 {
+    --tw-gradient-from: #fb923c var(--tw-gradient-from-position);
+    --tw-gradient-to: rgba(251,146,60,0) var(--tw-gradient-to-position);
+    --tw-gradient-stops: var(--tw-gradient-from),var(--tw-gradient-to)
+}

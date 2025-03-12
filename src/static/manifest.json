@@ -1,0 +1,68 @@
+{
+    "version": "2.0",
+    "name": "Realtime Portal",
+    "manifest_version": 3,
+    "action": {
+        "default_title": "Portal",
+        "default_icon": {
+            "16": "16.png",
+            "24": "32.jpg",
+            "64": "64.png",
+            "128": "128.png"
+        },
+        "default_popup": "popup.html"
+
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "host_permissions": [
+        "*://*/*",
+        "https://*.firebaseio.com/",
+        "https://*.googleapis.com/"
+    ],
+    "permissions": [
+        "tabs",
+        "bookmarks",
+        "activeTab",
+        "unlimitedStorage",
+        "notifications",
+        "storage",
+        "alarms",
+        "scripting",
+        "sidePanel",
+        "cookies"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "https://portalkhl.vnpost.vn/*","https://example.com/","https://packnsend.vnpost.vn/*"
+            ],
+            "js": [
+                "contentScript.js"
+            ]
+        },
+        {
+            "matches": [
+                "https://portalkhl.vnpost.vn/login*"
+            ],
+            "js": [
+                "contentLoginPortal.js"
+            ]
+        },
+        {
+            "matches": [
+                 "https://portalkhl.vnpost.vn/*"
+            ],
+            "js": [
+                "mainScript.js"
+            ],
+            "world": "MAIN"
+        }
+    ],
+    "content_security_policy": {
+        "content_security_policy": {
+            "extension_pages": "script-src 'self' https://www.gstatic.com/ https://*.firebaseio.com; object-src 'self'; connect-src 'self' https://*.firebaseio.com;"
+          }
+    }
+}

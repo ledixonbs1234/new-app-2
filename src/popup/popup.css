@@ -1,0 +1,7 @@
+body{
+    background-image: linear-gradient(to right, var(--tw-gradient-stops));
+    --tw-gradient-from: #fcd34d var(--tw-gradient-from-position);
+    --tw-gradient-to: rgb(252 211 77 / 0) var(--tw-gradient-to-position);
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
+    --tw-gradient-to: #f97316 var(--tw-gradient-to-position);
+}

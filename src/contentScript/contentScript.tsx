@@ -1,0 +1,575 @@
+import { KhachLeProps, KhachNuocMamProps } from "../states/states";
+
+type KhachHangProps = {
+  Index: number;
+  BuuGuis: BuuGuiProps[];
+  MaKH: string;
+  MaTin: string;
+  TenKH: string;
+  TenNguoiGui: string;
+  TimeNhanTin: string;
+};
+function base64ToBlob(
+  base64: string,
+  contentType: string = "",
+  sliceSize: number = 512
+): Blob | null {
+  if (base64 == null) {
+    return null;
+  }
+  const byteCharacters = atob(base64);
+  const byteArrays = [];
+
+  for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+    const slice = byteCharacters.slice(offset, offset + sliceSize);
+
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+
+  const blob = new Blob(byteArrays, { type: contentType });
+  return blob;
+}
+type BuuGuiProps = {
+  index: number;
+  KhoiLuong: string;
+  MaBuuGui: string;
+  TrangThai: string;
+  ListDo: string[] | null;
+  TimeTrangThai: string;
+};
+window.onload = () => {
+  console.log("CONTENT SCRIPT");
+};
+chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
+  (async () => {
+    console.log("ON MESSAGE CONTENT SCRIPT");
+    try {
+      if (msg) {
+        if (msg.message === "ADD") {
+          chrome.runtime.sendMessage({
+            event: "BADGE",
+            content: "Run",
+          });
+          // waitForElm('.have').then((e)=>{})
+          isRunning = true;
+          isFirstRun = true;
+          currentMH = msg.current;
+          list = msg.list;
+          let maKH = msg.makh;
+          // var iCurrent = list.findIndex((m) => m.index === currentMH.index);
+          var iCurrent = list.findIndex(
+            (m) => m.MaBuuGui === currentMH.MaBuuGui
+          );
+          chrome.runtime.sendMessage({
+            event: "BADGE",
+            content: iCurrent,
+          });
+          // chrome.action.setBadgeText({text:currentMH.index.toString()});
+
+          var isError = false;
+          if (iCurrent !== -1) {
+            console.log("iCurrent ", iCurrent);
+
+            for (let i = iCurrent; i < list.length; i++) {
+              if (!isRunning) break;
+              const element = list[i];
+              chrome.runtime.sendMessage({
+                event: "BADGE",
+                content: i + 1,
+              });
+              await chrome.runtime.sendMessage({
+                event: "CONTENT",
+                message: "CURRENT",
+                content: element,
+              });
+              await chrome.storage.local.set({
+                selectedbg: JSON.stringify(element),
+              });
+
+              await startSendCurrentCode(element, maKH, msg.keyMessage,msg.options);
+              if (!isRunning) {
+                isError = true;
+                chrome.runtime.sendMessage({
+                  event: "BADGE",
+                  content: "Dừng Tại" + (i + 1).toString(),
+                });
+                break
+              };
+            }
+            // showNotification("Hoàn Thành");
+
+            if (!isError) {
+              chrome.runtime.sendMessage({
+                event: "BADGE",
+                content: "Xong",
+              });
+            }
+          } else {
+          }
+          callback("Price is 500");
+        }
+        else if (msg.message === "ADDKHACHLE") {
+          var currentKhachLe: KhachLeProps = msg.current;
+          try {
+            console.log("start send Mam", currentKhachLe.MaHieu);
+            // 'body > div.MuiDialog-root'
+            const selector = await waitForElm("#customerName");
+            if (selector !== null) {
+              // await waitForElm(selector)
+              var customerName: HTMLInputElement | null = document.querySelector('#customerName')!;
+              var customerPhone: HTMLInputElement | null = document.querySelector('#customerPhone')!;
+              var customerAddress: HTMLInputElement | null = document.querySelector('#customerAddress')!;
+
+              customerName.value = currentKhachLe.NameSend;
+              var event = new Event('input', { bubbles: true });
+              customerName.dispatchEvent(event);
+              customerPhone.value = currentKhachLe.PhoneSend;
+              customerPhone.dispatchEvent(event);
+              customerAddress.value = currentKhachLe.AddressSend;
+              customerAddress.dispatchEvent(event);
+
+
+              var receiverName: HTMLInputElement = document.querySelector('#receiverName')!;
+              var receiverAddress: HTMLInputElement = document.querySelector("#receiverAddress")!;
+              var receiverPhone: HTMLInputElement = document.querySelector("#receiverPhone")!;
+              receiverName.value = currentKhachLe.NameReceive;
+              receiverName.dispatchEvent(event);
+              receiverAddress.value = currentKhachLe.AddressReceive;
+              receiverAddress.dispatchEvent(event);
+              receiverPhone.value = currentKhachLe.PhoneReceive;
+              receiverPhone.dispatchEvent(event);
+              var maHieu: HTMLInputElement = document.querySelector("#ttNumber")!;
+              maHieu.value = currentKhachLe.MaHieu;
+              maHieu.dispatchEvent(event);
+              window.postMessage({
+                type: "CONTENT",
+                message: "ADDWEIGHT",
+                data: "",
+                kl: currentKhachLe.KhoiLuongThucTe,
+              });
+              var chidan: HTMLTextAreaElement = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea")!
+              chidan.value = "Ngày chấp nhận thực tế " + currentKhachLe.NgayChapNhan
+              chidan.dispatchEvent(event);
+              await delay(400);
+            }
+          } catch (error) { }
+
+        }
+        else if (msg.message === "STOP") {
+          isRunning = false;
+        } else if (msg.message === "CHECKKL") {
+          isCheckedKL = msg.isChecked;
+        } else if (msg.message === "KHOITAOPORTAL") {
+          console.log("Content OnMessage KHOITAOPORTAL ", msg);
+
+          //kiêmr tra xem có form không
+          var form = await waitForElm(
+            "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form"
+          );
+          if (form == null) {
+            callback({ data: "Không tìm thấy ô tìm kiếm" });
+            return;
+          }
+          // forcus vào ô tìm kiếm
+          // const searchDetailBox = document.querySelector(
+          //   "#searchDetailBox"
+          // ) as HTMLInputElement;
+          // searchDetailBox?.focus();
+          var customerCode: HTMLInputElement | null =
+            document.querySelector("#customerCode");
+
+          // gán giá trị cho ô tìm kiếm
+          customerCode?.focus();
+
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDTIMKIEMTEXT",
+            data: msg.MaKH,
+          });
+          await delay(200);
+          customerCode?.dispatchEvent(new Event("blur"));
+
+          // click vào nút địa chỉ
+          // var address: HTMLInputElement | null =
+          // document.querySelector("#customerAddress");
+          // address?.focus();
+
+          await delay(1000);
+
+          if (msg.IsChooseHopDong) {
+            //kiem tra neu co hop dong thi check
+            let iCheck = msg.STTHopDong;
+            //check hợp đồng
+            var checker: HTMLInputElement | null = document.querySelector(
+              `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(${iCheck}) > div > div:nth-child(1) > div > input`
+            );
+            if (checker !== null) {
+              (checker as HTMLInputElement)?.click();
+              (
+                document.querySelector(
+                  "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+                ) as HTMLButtonElement
+              )?.click();
+
+              await delay(1000);
+            }
+          }
+          //ghi địa chỉ
+          if (msg.Address !== "") {
+            window.postMessage({
+              type: "CONTENT",
+              message: "ADDADDRESSTEXT",
+              data: msg.Address,
+            });
+            console.log("ghi địa chỉ");
+          }
+          var maHopDong: HTMLInputElement | null = document.querySelector(
+            "#customerContractNumber"
+          );
+          //thucw hien lay hop dong va send tin nhan
+          chrome.runtime.sendMessage({
+            event: "CONTENT",
+            message: "SEND_MAHD",
+            content: maHopDong?.value ?? "",
+            keyMessage: msg.keyMessage,
+          });
+
+          await delay(200);
+          // callback({ data: "callback khoi tao ok" });
+          var btnLuuVaTim: HTMLInputElement | null = document.querySelector(
+            "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
+          );
+          if (btnLuuVaTim) {
+            btnLuuVaTim?.click();
+            await delay(1500);
+            var searchBox = document.querySelector(
+              "#ttNumberSearch"
+            ) as HTMLInputElement;
+            if (searchBox) {
+              searchBox.focus();
+              callback({ data: "ok" });
+            } else {
+              callback({ data: "Lỗi không tìm thấy ô tìm kiếm Mã bưu gửi" });
+            }
+          } else {
+            callback({ data: "Lỗi không tìm thấy nút lưu và tìm" });
+          }
+
+          return true;
+        } else if (msg.message === "KHOITAOPNS") {
+          //thuc hien lay capchar
+          var c = document.createElement("canvas");
+          var ctx = c.getContext("2d");
+          var img: any = document.getElementById("CaptchaImage");
+          if (img) {
+            ctx?.drawImage(img, 0, 0, 200, 70);
+            //send message to popup
+            await chrome.runtime.sendMessage({
+              event: "CONTENT",
+              message: "SEND_CAPCHAR",
+              content: c.toDataURL(),
+              keyMessage: msg.keyMessage,
+            });
+          }
+          await delay(1000);
+          callback({ data: "ok" });
+        } else if (msg.message === "SENDCAPCHAR") {
+          var capchar: HTMLInputElement | null =
+            document.querySelector("#CaptchaText");
+          if (capchar) {
+            capchar.value = msg.content;
+            (document.getElementById("userid") as HTMLInputElement).value =
+              "593280_phuhv";
+            (document.getElementById("password") as HTMLInputElement).value =
+              "Abc@123456";
+
+            var btnLogin = document.querySelector(
+              "body > div.content > div.row > div > div > div > form > fieldset > div:nth-child(4) > div:nth-child(4) > div.form-group > button"
+            ) as HTMLButtonElement;
+            btnLogin.click();
+          }
+        } else if (msg.message === "GETIDKH") {
+          window.postMessage({
+            type: "CONTENT",
+            message: "GETIDKH",
+          });
+        } else if (msg.message === "PRINTBLOB") {
+          console.log("PRINTBLOB");
+          debugger
+          // var blob = new Blob([msg.content], { type: "application/pdf" });
+          chrome.storage.local.get("blobs", (result) => {
+          let blob = base64ToBlob(result.blobs, "application/pdf");
+            const url = URL.createObjectURL(blob!);
+
+            var printWindow = window.open(url);
+            if (printWindow == null) return;
+            printWindow.onload = function () {
+              if (printWindow == null) return;
+              printWindow.print();
+            };
+          });
+        }
+      }
+      return true;
+    } catch (e) {
+      console.log(e);
+      callback({ data: "Lỗi không xác định" });
+    }
+  })();
+  return true;
+});
+
+let isFirstRun = true;
+
+window.addEventListener("message", (event) => {
+  if (event.data.type === "MAIN") {
+    if (event.data.message === "GETIDKH") {
+      chrome.runtime.sendMessage({
+        event: "CONTENT",
+        message: "SEND_IDKH",
+        content: event.data.data
+      });
+
+    } else if (event.data.message === "SENDTOKEN") {
+      chrome.runtime.sendMessage({
+        event: "CONTENT",
+        message: "SEND_TOKEN",
+        content: event.data.data,
+        keyMessage: event.data.keyMessage
+      });
+    }
+  }
+});
+const delay = (ms: number | undefined) =>
+  new Promise((res) => setTimeout(res, ms));
+// const getElementByXpath = (path: string): HTMLDivElement | null => {
+//   return document.evaluate(
+//     path,
+//     document,
+//     null,
+//     XPathResult.FIRST_ORDERED_NODE_TYPE,
+//     null
+//   ).singleNodeValue as HTMLDivElement | null;
+// }
+
+const startSendCurrentCode = async (
+  buuGui: BuuGuiProps,
+  maKH: any,
+  keyMessage: string,
+  options: any
+) => {
+  try {
+    console.log("start send ", buuGui.MaBuuGui);
+    const selector = await waitForElm("body > div.MuiDialog-root");
+    const numberSearch = await waitForElm("#ttNumberSearch", 10);
+    if (!selector || !numberSearch) return (isRunning = false);
+
+    if (!isRunning) return;
+
+    window.postMessage({
+      type: "CONTENT",
+      message: "ADDCODE",
+      data: buuGui.MaBuuGui,
+    });
+
+
+    await delay(500);
+
+    // Kiểm tra hộp thông báo
+    const alertBox = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
+    if (alertBox?.innerText) {
+      const textShow = alertBox.innerText.split("\n").pop() ?? "";
+      console.log("Alert:", textShow);
+
+      await chrome.runtime.sendMessage({
+        event: "CONTENT",
+        message: "SEND_TEXT",
+        content: textShow,
+        keyMessage,
+      });
+
+      if (textShow.includes("Bưu gửi đã được xử lý")) return (isRunning = false);
+    }
+
+   const notNumberSearch = await waitForNotElm("#ttNumberSearch", 10);
+    if (notNumberSearch !== "ok") {
+      console.log("notNumberSearch");
+      return (isRunning = false);
+    }
+
+
+    if (!isRunning) return;
+
+    if (isFirstRun) {
+      isFirstRun = false;
+      console.log("Pre-check money...");
+      await delay(1000);
+    }
+
+    const moneyInput = await waitForElm(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
+    );
+
+    if (maKH === "C002446626") {
+      const firstChar = buuGui.MaBuuGui[0].toUpperCase();
+      const dichVu = firstChar === "C" ? "CTN009" : firstChar === "E" ? "ETN037" : null;
+      if (dichVu) {
+        window.postMessage({ type: "CONTENT", message: "CHANGEDICHVU", dichvu: dichVu });
+        await delay(1000);
+      }
+    }
+
+
+    if (maKH === "C007445066" && Number(moneyInput?.value) < 200) {
+      window.postMessage({
+        type: "CONTENT",
+        message: "ADDWEIGHT",
+        data: buuGui.MaBuuGui,
+        kl: "5000",
+      });
+      await delay(1000);
+    } else {
+      await delay(500);
+      const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
+      if (weightThucTe && buuGui.KhoiLuong.toString() !== weightThucTe.value.replace(".", "")) {
+        window.postMessage({
+          type: "CONTENT",
+          message: "ADDWEIGHT",
+          data: buuGui.MaBuuGui,
+          kl: buuGui.KhoiLuong,
+        });
+        await delay(400);
+      }
+      if (buuGui.ListDo) {
+        window.postMessage({
+          type: "CONTENT",
+          message: "ADDKICHTHUOC",
+          data: buuGui.MaBuuGui,
+          kt: buuGui.ListDo,
+        });
+        await delay(1000);
+      }
+    }
+
+    // Xử lý nút tìm kiếm
+    const findAndSearchBtn = await waitForElm(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
+    );
+    if (!findAndSearchBtn) return (isRunning = false);
+    if (!isRunning) return;
+
+    (findAndSearchBtn as HTMLElement).click();
+    await delay(500);
+
+    // Kiểm tra hộp thông báo sau khi bấm nút
+    const alertBoxAfterClick = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
+    if (alertBoxAfterClick?.innerText) {
+      const textShow = alertBoxAfterClick.innerText.split("\n").pop() ?? "";
+      console.log("Alert:", textShow);
+
+      await chrome.runtime.sendMessage({
+        event: "CONTENT",
+        message: "SEND_TEXT",
+        content: textShow,
+        keyMessage,
+      });
+
+      if (textShow.includes("Bưu gửi đã được xử lý")) return (isRunning = false);
+    }
+
+    // Kiểm tra lại phần nhập mã số
+    if (!await waitForElm("#ttNumberSearch", 10)) return (isRunning = false);
+    if (!isRunning) return;
+
+    const moneyThuHo = document.querySelector<HTMLInputElement>(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
+    );
+
+    // Gửi dữ liệu lên popup hoặc Firebase
+    await chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "SEND_MH",
+      content: buuGui.MaBuuGui,
+      content1: moneyThuHo?.value ?? "ko biết",
+      keyMessage,
+    });
+
+  } catch (error) {
+    console.error("Error in startSendCurrentCode:", error);
+    isRunning = false;
+  }
+};
+
+function waitForNotElm(selector: any, timeout: number = 5) {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+    const checkElement = () => {
+      if (!document.querySelector(selector)) {
+        resolve("ok");
+      } else if (Date.now() - startTime >= timeout * 1000) {
+        reject(new Error(`Timeout exceeded (${timeout} seconds)`));
+      } else if (!isRunning) {
+        reject(new Error(`Stopped`));
+      } else {
+        setTimeout(checkElement, 100);
+      }
+    };
+    checkElement();
+  });
+}
+
+function waitForElm(selector: string, timeout: number = 5): Promise<HTMLInputElement|null> {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    const checkElement = () => {
+      const element:HTMLInputElement|null = document.querySelector(selector);
+      if (element) {
+        return resolve(element);
+      }
+
+      if (Date.now() - startTime >= timeout * 1000) {
+        return reject(new Error(`Timeout exceeded (${timeout} seconds) for selector: ${selector}`));
+      }
+
+      if (!isRunning) {
+        return reject(new Error("Stopped before finding element."));
+      }
+
+      requestAnimationFrame(checkElement);
+    };
+
+    checkElement();
+  });
+}
+
+// function waitForElm(selector: any) {
+//   return new Promise((resolve) => {
+//     if (document.querySelector(selector)) {
+//       return resolve(document.querySelector(selector));
+//     }
+
+//     const observer = new MutationObserver(() => {
+//       if (!isRunning) observer.disconnect();
+//       if (document.querySelector(selector)) {
+//         observer.disconnect();
+//         resolve(document.querySelector(selector));
+//       }
+//     });
+
+//     // If you get "parameter 1 is not of type 'Node'" error, see https://stackoverflow.com/a/77855838/492336
+//     observer.observe(document.body, {
+//       childList: true,
+//       subtree: true,
+//     });
+
+let currentMH: BuuGuiProps;
+let list: BuuGuiProps[] = [];
+let isRunning = false;
+let isCheckedKL = false;
