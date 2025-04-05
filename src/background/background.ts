@@ -237,13 +237,84 @@ const preParePrintMaHieus = async (maHieus: string[]) => {
 }
 
 const handleSendAutoToPortal = async (doiTuong: any) => {
-  console.log("handleSendAutoToPortal", doiTuong);
-  var isKhoiTaoOK = await handleKhoiTao(doiTuong);
-  if (isKhoiTaoOK)
-    handleSendToPortal(doiTuong.DoiTuong);
-  else 
-    updateToPhone("message", "Chưa khởi tạo Portal, vui lòng thử lại sau", keyMessage);
-}
+  console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...", doiTuong);
+  let foundReadyTabId: number | null = null;
+  let readyTabInfo: chrome.tabs.Tab | null = null; // Lưu thông tin tab tìm thấy
+
+  try {
+      // 1. Tìm các tab Portal có URL khớp
+      const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/accept-api*" });
+      console.log(`handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`);
+
+      // 2. Duyệt qua các tab và kiểm tra element
+      for (const tab of portalTabs) {
+          if (!tab.id) continue; // Bỏ qua nếu tab không có ID
+          console.log(`handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`);
+          try {
+              // *** ĐÁNH DẤU: Tiêm script để kiểm tra sự tồn tại của #ttNumberSearch ***
+              const injectionResults = await chrome.scripting.executeScript({
+                  target: { tabId: tab.id },
+                  func: () => !!document.querySelector("#ttNumberSearch") // Hàm kiểm tra trực tiếp
+              });
+
+              // executeScript trả về một mảng kết quả, kiểm tra phần tử đầu tiên
+              if (injectionResults && injectionResults[0] && injectionResults[0].result === true) {
+                  console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
+                  foundReadyTabId = tab.id;
+                  readyTabInfo = tab; // Lưu lại thông tin tab
+                  break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
+              } else {
+                  console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
+              }
+          } catch (injectionError: any) {
+              // Có thể tab đã đóng hoặc không có quyền tiêm script
+              console.warn(`handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`);
+              // Bỏ qua và tiếp tục với tab tiếp theo (nếu có)
+          }
+      }
+
+      // 3. Xử lý dựa trên kết quả kiểm tra
+      if (foundReadyTabId && readyTabInfo) {
+          // *** ĐÁNH DẤU: Nếu tìm thấy tab sẵn sàng ***
+          console.log(`handleSendAutoToPortal: Đã tìm thấy tab Portal (ID: ${foundReadyTabId}). Kích hoạt và gửi trực tiếp...`);
+          updateToPhone("message", `Đã tìm thấy tab Portal sẵn sàng. Đang gửi...`, keyMessage);
+
+          // *** Kích hoạt (đưa lên focus) tab đã tìm thấy ***
+          await chrome.tabs.update(foundReadyTabId, { active: true });
+          // Có thể cần chờ một chút để đảm bảo tab đã active hoàn toàn, mặc dù thường không cần
+          await delay(300);
+
+          // *** Gọi trực tiếp handleSendToPortal ***
+          // Hàm này sẽ tự động lấy tab đang active (chính là tab vừa được kích hoạt)
+          // Thêm await nếu handleSendToPortal là async và bạn cần đợi nó xong
+          await handleSendToPortal(doiTuong.DoiTuong);
+
+      } else {
+          // *** ĐÁNH DẤU: Nếu không tìm thấy tab nào sẵn sàng ***
+          console.log("handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...");
+          updateToPhone("message", "Đang khởi tạo Portal...", keyMessage);
+
+          // Gọi hàm khởi tạo (đã được sửa để trả về boolean)
+          const isKhoiTaoOK: boolean = await handleKhoiTao(doiTuong); // Giả sử handleKhoiTao trả về boolean
+
+          if (isKhoiTaoOK) {
+              console.log("handleSendAutoToPortal: Khởi tạo thành công. Đang gửi dữ liệu...");
+              // Sau khi khởi tạo thành công, tab đích đã sẵn sàng và active, gọi gửi dữ liệu
+              // Thêm await nếu handleSendToPortal là async
+              await handleSendToPortal(doiTuong.DoiTuong);
+          } else {
+              console.error("handleSendAutoToPortal: Khởi tạo Portal thất bại.");
+              // handleKhoiTao đã gửi thông báo lỗi rồi, không cần gửi lại ở đây
+              // updateToPhone("message", "Khởi tạo Portal thất bại, vui lòng thử lại sau.", keyMessage);
+          }
+      }
+
+  } catch (error: any) {
+      // 4. Xử lý lỗi chung (ví dụ: lỗi khi query tabs)
+      console.error("Lỗi trong handleSendAutoToPortal:", error);
+      updateToPhone("message", `Lỗi khi tự động gửi Portal: ${error.message}`, keyMessage);
+  }
+};
 
 const handleSendToPortal = async (doiTuong: any) => {
   //change to compat
