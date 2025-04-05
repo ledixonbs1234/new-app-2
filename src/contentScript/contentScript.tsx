@@ -1,14 +1,13 @@
-import { KhachLeProps, KhachNuocMamProps } from "../states/states";
+import { KhachLeProps } from "../states/states";
+import { handlePortalHCCPage, handlePortalPage } from "./handlePortalPage";
+import { delay, waitForElm, waitForNotElm } from "./utils";
 
-type KhachHangProps = {
-  Index: number;
-  BuuGuis: BuuGuiProps[];
-  MaKH: string;
-  MaTin: string;
-  TenKH: string;
-  TenNguoiGui: string;
-  TimeNhanTin: string;
+export const sharedState = {
+  isRunning: false,
+  idKH: null,
+  token: null
 };
+
 function base64ToBlob(
   base64: string,
   contentType: string = "",
@@ -35,6 +34,7 @@ function base64ToBlob(
   const blob = new Blob(byteArrays, { type: contentType });
   return blob;
 }
+
 type BuuGuiProps = {
   index: number;
   KhoiLuong: string;
@@ -45,7 +45,15 @@ type BuuGuiProps = {
 };
 window.onload = () => {
   console.log("CONTENT SCRIPT");
+
+  if (window.location.href.startsWith("https://portalkhl.vnpost.vn/itemhdr/?id=")) {
+    handlePortalPage();
+  } else if (window.location.href.startsWith("https://portalkhl.vnpost.vn/public-service?id=")) {
+    handlePortalHCCPage();
+
+  }
 };
+
 chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
   (async () => {
     console.log("ON MESSAGE CONTENT SCRIPT");
@@ -57,7 +65,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             content: "Run",
           });
           // waitForElm('.have').then((e)=>{})
-          isRunning = true;
+          sharedState.isRunning = true;
           isFirstRun = true;
           currentMH = msg.current;
           list = msg.list;
@@ -77,7 +85,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             console.log("iCurrent ", iCurrent);
 
             for (let i = iCurrent; i < list.length; i++) {
-              if (!isRunning) break;
+              if (!sharedState. isRunning) break;
               const element = list[i];
               chrome.runtime.sendMessage({
                 event: "BADGE",
@@ -92,8 +100,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
                 selectedbg: JSON.stringify(element),
               });
 
-              await startSendCurrentCode(element, maKH, msg.keyMessage,msg.options);
-              if (!isRunning) {
+              await startSendCurrentCode(element, maKH, msg.keyMessage, msg.options);
+              if (!sharedState.isRunning) {
                 isError = true;
                 chrome.runtime.sendMessage({
                   event: "BADGE",
@@ -162,11 +170,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
         }
         else if (msg.message === "STOP") {
-          isRunning = false;
+        sharedState. isRunning = false;
         } else if (msg.message === "CHECKKL") {
           isCheckedKL = msg.isChecked;
         } else if (msg.message === "KHOITAOPORTAL") {
-          console.log("Content OnMessage KHOITAOPORTAL ", msg);
+          console.log("Content Đang chạy KHOITAOPORTAL ", msg);
 
           //kiêmr tra xem có form không
           var form = await waitForElm(
@@ -186,6 +194,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
           // gán giá trị cho ô tìm kiếm
           customerCode?.focus();
+          chrome.runtime.sendMessage({
+            event: "CONTENT",
+            message: "SEND_MAKH",
+            content: msg.MaKH,
+            keyMessage: msg.keyMessage,
+          });
 
           window.postMessage({
             type: "CONTENT",
@@ -196,9 +210,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
           customerCode?.dispatchEvent(new Event("blur"));
 
           // click vào nút địa chỉ
-          // var address: HTMLInputElement | null =
-          // document.querySelector("#customerAddress");
-          // address?.focus();
+          var address: HTMLInputElement | null =
+          document.querySelector("#customerAddress");
+          address?.focus();
+          chrome.runtime.sendMessage({
+            event: "CONTENT",
+            message: "MESSAGE",
+            content: "Đang khởi tạo", 
+            keyMessage: msg.keyMessage,
+          });
 
           await delay(1000);
 
@@ -220,6 +240,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               await delay(1000);
             }
           }
+          
           //ghi địa chỉ
           if (msg.Address !== "") {
             window.postMessage({
@@ -229,6 +250,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             });
             console.log("ghi địa chỉ");
           }
+
           var maHopDong: HTMLInputElement | null = document.querySelector(
             "#customerContractNumber"
           );
@@ -300,11 +322,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             message: "GETIDKH",
           });
         } else if (msg.message === "PRINTBLOB") {
-          console.log("PRINTBLOB");
-          debugger
           // var blob = new Blob([msg.content], { type: "application/pdf" });
           chrome.storage.local.get("blobs", (result) => {
-          let blob = base64ToBlob(result.blobs, "application/pdf");
+            let blob = base64ToBlob(result.blobs, "application/pdf");
             const url = URL.createObjectURL(blob!);
 
             var printWindow = window.open(url);
@@ -313,6 +333,26 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               if (printWindow == null) return;
               printWindow.print();
             };
+          });
+        } else if (msg.message === "EXPORTEXCEL") {
+          console.log("Export Excel");
+          chrome.storage.local.get("excel", (result) => {
+            console.log("result", result);
+            const byteCharacters = atob(result.excel);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+              byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/vnd.ms-excel.sheet.macroEnabled.12' });
+            const url = URL.createObjectURL(blob!);
+            console.log("url", url);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = msg.ten + ".xlsx";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
           });
         }
       }
@@ -330,13 +370,23 @@ let isFirstRun = true;
 window.addEventListener("message", (event) => {
   if (event.data.type === "MAIN") {
     if (event.data.message === "GETIDKH") {
+      sharedState.idKH = event.data.data;
+      console.log("IDKH", sharedState.idKH);
       chrome.runtime.sendMessage({
         event: "CONTENT",
         message: "SEND_IDKH",
         content: event.data.data
       });
 
+    }
+    if (event.data.message === "GETIDKHEXCEL") {
+      sharedState.idKH = event.data.data;
+      sharedState.token = event.data.token;
+      console.log("IDKH", sharedState.idKH);
+      console.log("Token", sharedState.token);
+
     } else if (event.data.message === "SENDTOKEN") {
+      sharedState.token = event.data.data;
       chrome.runtime.sendMessage({
         event: "CONTENT",
         message: "SEND_TOKEN",
@@ -346,17 +396,6 @@ window.addEventListener("message", (event) => {
     }
   }
 });
-const delay = (ms: number | undefined) =>
-  new Promise((res) => setTimeout(res, ms));
-// const getElementByXpath = (path: string): HTMLDivElement | null => {
-//   return document.evaluate(
-//     path,
-//     document,
-//     null,
-//     XPathResult.FIRST_ORDERED_NODE_TYPE,
-//     null
-//   ).singleNodeValue as HTMLDivElement | null;
-// }
 
 const startSendCurrentCode = async (
   buuGui: BuuGuiProps,
@@ -368,9 +407,9 @@ const startSendCurrentCode = async (
     console.log("start send ", buuGui.MaBuuGui);
     const selector = await waitForElm("body > div.MuiDialog-root");
     const numberSearch = await waitForElm("#ttNumberSearch", 10);
-    if (!selector || !numberSearch) return (isRunning = false);
+    if (!selector || !numberSearch) return (sharedState.isRunning = false);
 
-    if (!isRunning) return;
+    if (!sharedState.isRunning) return;
 
     window.postMessage({
       type: "CONTENT",
@@ -394,17 +433,17 @@ const startSendCurrentCode = async (
         keyMessage,
       });
 
-      if (textShow.includes("Bưu gửi đã được xử lý")) return (isRunning = false);
+      if (textShow.includes("Bưu gửi đã được xử lý")) return (sharedState.isRunning = false);
     }
 
-   const notNumberSearch = await waitForNotElm("#ttNumberSearch", 10);
+    const notNumberSearch = await waitForNotElm("#ttNumberSearch", 10);
     if (notNumberSearch !== "ok") {
       console.log("notNumberSearch");
-      return (isRunning = false);
+      return (sharedState.isRunning = false);
     }
 
 
-    if (!isRunning) return;
+    if (!sharedState.isRunning) return;
 
     if (isFirstRun) {
       isFirstRun = false;
@@ -424,7 +463,85 @@ const startSendCurrentCode = async (
         await delay(1000);
       }
     }
+    await delay(500);
+    const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
+    const weightNotDot = weightThucTe?.value.replace(".", "")
+    if (weightThucTe) {
+      if (
+        buuGui.KhoiLuong.toString() !== weightNotDot) {
+        window.postMessage({
+          type: "CONTENT",
+          message: "ADDWEIGHT",
+          data: buuGui.MaBuuGui,
+          kl: buuGui.KhoiLuong,
+        });
+        await delay(400);
+      }
+      else if (options) {
+        if (options.selectedOption === "changeKLFromTo") {
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDWEIGHT",
+            data: buuGui.MaBuuGui,
+            kl: options.changeKLFromTo,
+          });
+          await delay(1000);
+        } else if (options.selectedOption === "contentChange") {
+          debugger
+          const contentItem = document.querySelector<HTMLInputElement>("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(7) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > textarea")
+          if (contentItem) {
+            var changes = options.contentChanges;
+            //chuyen khong dau va viet thuong
+            var content = contentItem.value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+            var klHienTai = 0;
+            var klThem = 0;
 
+            for (let i = 0; i < changes.length; i++) {
+              if (content.indexOf(changes[i].content) !== -1) {
+                if (changes[i].content.startsWith("+")) {
+                  klThem += Number(changes[i].khoiLuong);
+                } else {
+                  klHienTai = Number(changes[i].khoiLuong);
+                }
+              }
+            }
+            var klAll = klHienTai + klThem;
+
+            if (klAll > 0) {
+              window.postMessage({
+                type: "CONTENT",
+                message: "ADDWEIGHT",
+                data: buuGui.MaBuuGui,
+                kl: klAll,
+              });
+              await delay(400);
+            }
+          }
+        }
+        else if (options.selectedOption === "increaseKL") {
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDWEIGHT",
+            data: buuGui.MaBuuGui,
+            kl: (Number(weightNotDot) + Number(options.increaseKL)).toString(),
+          });
+          await delay(400);
+
+
+
+        }
+      }
+    }
+
+    if (buuGui.ListDo) {
+      window.postMessage({
+        type: "CONTENT",
+        message: "ADDKICHTHUOC",
+        data: buuGui.MaBuuGui,
+        kt: buuGui.ListDo,
+      });
+      await delay(1000);
+    }
 
     if (maKH === "C007445066" && Number(moneyInput?.value) < 200) {
       window.postMessage({
@@ -434,35 +551,14 @@ const startSendCurrentCode = async (
         kl: "5000",
       });
       await delay(1000);
-    } else {
-      await delay(500);
-      const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
-      if (weightThucTe && buuGui.KhoiLuong.toString() !== weightThucTe.value.replace(".", "")) {
-        window.postMessage({
-          type: "CONTENT",
-          message: "ADDWEIGHT",
-          data: buuGui.MaBuuGui,
-          kl: buuGui.KhoiLuong,
-        });
-        await delay(400);
-      }
-      if (buuGui.ListDo) {
-        window.postMessage({
-          type: "CONTENT",
-          message: "ADDKICHTHUOC",
-          data: buuGui.MaBuuGui,
-          kt: buuGui.ListDo,
-        });
-        await delay(1000);
-      }
     }
 
     // Xử lý nút tìm kiếm
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
     );
-    if (!findAndSearchBtn) return (isRunning = false);
-    if (!isRunning) return;
+    if (!findAndSearchBtn) return (sharedState.isRunning = false);
+    if (!sharedState.isRunning) return;
 
     (findAndSearchBtn as HTMLElement).click();
     await delay(500);
@@ -480,12 +576,12 @@ const startSendCurrentCode = async (
         keyMessage,
       });
 
-      if (textShow.includes("Bưu gửi đã được xử lý")) return (isRunning = false);
+      if (textShow.includes("Bưu gửi đã được xử lý")) return (sharedState.isRunning = false);
     }
 
     // Kiểm tra lại phần nhập mã số
-    if (!await waitForElm("#ttNumberSearch", 10)) return (isRunning = false);
-    if (!isRunning) return;
+    if (!await waitForElm("#ttNumberSearch", 10)) return (sharedState.isRunning = false);
+    if (!sharedState.isRunning) return;
 
     const moneyThuHo = document.querySelector<HTMLInputElement>(
       "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
@@ -502,74 +598,10 @@ const startSendCurrentCode = async (
 
   } catch (error) {
     console.error("Error in startSendCurrentCode:", error);
-    isRunning = false;
+    sharedState.isRunning = false;
   }
 };
 
-function waitForNotElm(selector: any, timeout: number = 5) {
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-    const checkElement = () => {
-      if (!document.querySelector(selector)) {
-        resolve("ok");
-      } else if (Date.now() - startTime >= timeout * 1000) {
-        reject(new Error(`Timeout exceeded (${timeout} seconds)`));
-      } else if (!isRunning) {
-        reject(new Error(`Stopped`));
-      } else {
-        setTimeout(checkElement, 100);
-      }
-    };
-    checkElement();
-  });
-}
-
-function waitForElm(selector: string, timeout: number = 5): Promise<HTMLInputElement|null> {
-  return new Promise((resolve, reject) => {
-    const startTime = Date.now();
-
-    const checkElement = () => {
-      const element:HTMLInputElement|null = document.querySelector(selector);
-      if (element) {
-        return resolve(element);
-      }
-
-      if (Date.now() - startTime >= timeout * 1000) {
-        return reject(new Error(`Timeout exceeded (${timeout} seconds) for selector: ${selector}`));
-      }
-
-      if (!isRunning) {
-        return reject(new Error("Stopped before finding element."));
-      }
-
-      requestAnimationFrame(checkElement);
-    };
-
-    checkElement();
-  });
-}
-
-// function waitForElm(selector: any) {
-//   return new Promise((resolve) => {
-//     if (document.querySelector(selector)) {
-//       return resolve(document.querySelector(selector));
-//     }
-
-//     const observer = new MutationObserver(() => {
-//       if (!isRunning) observer.disconnect();
-//       if (document.querySelector(selector)) {
-//         observer.disconnect();
-//         resolve(document.querySelector(selector));
-//       }
-//     });
-
-//     // If you get "parameter 1 is not of type 'Node'" error, see https://stackoverflow.com/a/77855838/492336
-//     observer.observe(document.body, {
-//       childList: true,
-//       subtree: true,
-//     });
-
 let currentMH: BuuGuiProps;
 let list: BuuGuiProps[] = [];
-let isRunning = false;
 let isCheckedKL = false;

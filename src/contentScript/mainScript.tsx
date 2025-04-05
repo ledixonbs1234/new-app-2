@@ -1,18 +1,18 @@
-window.addEventListener("message",  (event) => {
+window.addEventListener("message", (event) => {
   if (event.data.type === "CONTENT") {
     console.log("MAIN SCRIPT CONTENT")
     switch (event.data.message) {
       case "GETTOKEN":
         var header: HTMLElement | null = document.querySelector(
-        "#root > div.layout > div.header"
+          "#root > div.layout > div.header"
         );
         const headerR: any = FindReact(header);
         if (headerR) {
           window.postMessage({
             type: "MAIN",
             message: "SENDTOKEN",
-            keyMessage:event.data.keyMessage,
-            data:headerR.props.currentUser.tokenFe
+            keyMessage: event.data.keyMessage,
+            data: headerR.props.currentUser.tokenFe
           });
         }
         break;
@@ -33,16 +33,16 @@ window.addEventListener("message",  (event) => {
           searchButton?.click();
         }
         break;
-        case "CHANGEDICHVU":
-          var form: HTMLElement | null = document.querySelector(
-            "#content > div > div > div.sub-content.multiple-item-no-footer > form"
-          );
-          const formDichVuR: any = FindReact(form);
-  
-          formDichVuR.setState({
-            formValue: { ...formDichVuR.state.formValue, serviceCode: event.data.dichvu },
-          });
-          break;
+      case "CHANGEDICHVU":
+        var form: HTMLElement | null = document.querySelector(
+          "#content > div > div > div.sub-content.multiple-item-no-footer > form"
+        );
+        const formDichVuR: any = FindReact(form);
+
+        formDichVuR.setState({
+          formValue: { ...formDichVuR.state.formValue, serviceCode: event.data.dichvu },
+        });
+        break;
 
       case "ADDWEIGHT":
         var form: HTMLElement | null = document.querySelector(
@@ -50,7 +50,7 @@ window.addEventListener("message",  (event) => {
         );
         const formR: any = FindReact(form);
         //change "5000" to "5.000"
-        var klTemp =event.data.kl.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
+        var klTemp = event.data.kl.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
 
         formR.setState({
           formValue: { ...formR.state.formValue, weight: klTemp },
@@ -65,7 +65,7 @@ window.addEventListener("message",  (event) => {
         //change "5000" to "5.000"
 
         formR3.setState({
-          formValue: { ...formR3.state.formValue, widthSize: event.data.kt[0],lengthSize:event.data.kt[1],heightSize:event.data.kt[2] },
+          formValue: { ...formR3.state.formValue, widthSize: event.data.kt[0], lengthSize: event.data.kt[1], heightSize: event.data.kt[2] },
         });
         break;
       case "ADDLOGIN":
@@ -77,10 +77,10 @@ window.addEventListener("message",  (event) => {
         if (formLoginR) {
           var eventInput = new Event('input', { bubbles: true });
           debugger;
-          const user: HTMLInputElement|null = document.querySelector("#username")
+          const user: HTMLInputElement | null = document.querySelector("#username")
           user!.value = event.data.account
           user!.dispatchEvent(eventInput);
-          const password: HTMLInputElement|null = document.querySelector("#password")
+          const password: HTMLInputElement | null = document.querySelector("#password")
           password!.value = event.data.password
           password!.dispatchEvent(eventInput);
 
@@ -99,10 +99,10 @@ window.addEventListener("message",  (event) => {
         }
         break;
       case "ADDTIMKIEMTEXT":
-        var form1 :HTMLInputElement|null= document.querySelector(
+        var form1: HTMLInputElement | null = document.querySelector(
           "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form"
         );
-     
+
         //active form1
 
         const formR1: any = FindReact(form1);
@@ -116,11 +116,11 @@ window.addEventListener("message",  (event) => {
         formR1.forceUpdate();
 
         break;
-        case "ADDADDRESSTEXT":
-        var form2 :HTMLInputElement|null= document.querySelector(
+      case "ADDADDRESSTEXT":
+        var form2: HTMLInputElement | null = document.querySelector(
           "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form"
         );
-     
+
         //active form1
 
         const formR2: any = FindReact(form2);
@@ -135,17 +135,37 @@ window.addEventListener("message",  (event) => {
         formR2.forceUpdate();
 
         break;
-        case "GETIDKH":
-          var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
-          var c1 = FindReact(c)
-          var id = c1.props.itemHdrId
+      case "GETIDKH":
+        var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
+        var c1 = FindReact(c)
+        var id = c1.props.itemHdrId
+        window.postMessage({
+          type: "MAIN",
+          message: "GETIDKH",
+          data: id
+        });
+
+        break;
+      case "GETIDKHEXCEL":
+        var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
+        var c1 = FindReact(c)
+        var id = c1.props.itemHdr.id
+        var header: HTMLElement | null = document.querySelector(
+          "#root > div.layout > div.header"
+        );
+        const headerR1: any = FindReact(header);
+        if (headerR1) {
           window.postMessage({
             type: "MAIN",
-            message: "GETIDKH",
-            data:id
+            message: "GETIDKHEXCEL",
+            data: id,
+            token: headerR1.props.currentUser.tokenFe
           });
 
-          break;
+        }
+
+
+        break;
 
 
       default:

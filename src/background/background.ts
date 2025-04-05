@@ -1,8 +1,8 @@
-
 importScripts('firebase-app-compat.js', 'firebase-database-compat.js');
+importScripts("xlsxtool.js")
 import { BuuGuiProps, DataSnapshotProps, KhachHangProps } from '../states/states';
 import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
-import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString } from './util';
+import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
 import { delay, createOrActiveTab, waitForTabToLoad } from './util';
 type FirebaseConfig = {
   apiKey: string;
@@ -100,93 +100,70 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     saveToken(tokenTemp);
     token = tokenTemp;
   }
-  switch (data.Lenh) {
-
-    case "printMaHieus":
-
-      await printMaHieus(JSON.parse(data.DoiTuong))
-      break;
-    case "laylan":
-      var maHieus = await handleGetMaHieus(data);
-      //sendMahieu to pc
+  const commandHandlers: { [key: string]: (data: any) => Promise<void> } = {
+    "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
+    "laylan": async (data: any) => {
+      const maHieus = await handleGetMaHieus(data);
       const codes: string[] = maHieus!.map(element => element.Code);
       const codesIDs: string[] = maHieus!.map(element => element.IDCODE);
-
       const result = {
         isSorted: false,
         codes: codes,
         isAutoBD: false,
         isPrinted: true,
-        codeIDs: codesIDs // Thêm nếu có ID tương ứng
+        codeIDs: codesIDs
       };
       console.log('Result:', result);
       updateToPC("checkdingoais", JSON.stringify(result));
-      break;
-    case "preparePrintMaHieus":
-      await preParePrintMaHieus(JSON.parse(data.DoiTuong))
-      break;
-    case "hoanTatTin":
-      await hoanTatTin(JSON.parse(data.DoiTuong))
-      break;
-    case "dieuTin":
-      await dieuTin(JSON.parse(data.DoiTuong))
-      break;
-    // case "SEND_TEST":
-    //   setTestText(data.DoiTuong)
-    //   chrome.storage.local.set({ "token": data.DoiTuong + 1 });
-    //   break;
-    // case "autologin":
-    //   var jsonDoiTuong = JSON.parse(data.DoiTuong)
-    //   handleSaveAccount(jsonDoiTuong.account, jsonDoiTuong.password)
-    //   await autoLogin(jsonDoiTuong)
-    //   break;
-    case "sendtoportal":
-      handleSendToPortal(data.DoiTuong)
-      break;
-    case "edithanghoa":
-      handleEditHangHoa(data);
-      break;
-    case "getpns":
+    },
+    "preparePrintMaHieus": async (data: any) => await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
+    "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
+    "dieuTin": async (data: any) => await dieuTin(JSON.parse(data.DoiTuong)),
+    "sendtoportal": async (data: any) => handleSendToPortal(data.DoiTuong),
+    "sendautotoportal": async (data: any) => handleSendAutoToPortal(data),
+    "edithanghoa": async (data: any) => handleEditHangHoa(data),
+    "getpns": async (data: any) => {
       let dayLast;
       try {
         dayLast = JSON.parse(data.DoiTuong).day;
       } catch (error) {
         console.error("Error parsing JSON:", error);
-        dayLast = "-2"; // hoặc xử lý lỗi khác
+        dayLast = "-2";
       }
       await handleGetPNS(dayLast ?? "-2");
-      break;
-    case "khoitao":
-      await handleKhoiTao(data);
-      break;
-
-    case "edittoportal":
+    },
+    "addpns": async (data: any) => {
+      let dayLast1;
+      try {
+        dayLast1 = JSON.parse(data.DoiTuong).day;
+      } catch (error) {
+        console.error("Error parsing JSON:", error);
+        dayLast1 = "-2";
+      }
+      await handleAddPNS(dayLast1 ?? "-2");
+    },
+    "khoitao": async (data: any) => { await handleKhoiTao(data); },
+    "edittoportal": async (data: any) => {
       try {
         const bgs = await getBuuGuisFromFirebase();
-
         const temp1 = JSON.parse(data.DoiTuong);
         const s = findBuuGuiIndex(bgs, temp1.maBG);
         if (s === -1) {
           console.warn("BuuGui not found");
           return;
         }
-
         const tabId = await getActiveTabId();
         await sendMessageToTab(tabId, bgs, bgs[s], temp1.maKH, keyMessage);
+        return;
       } catch (error) {
         console.error("Error in edittoportal case:", error);
       }
-      break;
-    case "stoptoportal":
-      // handleStop();
-      break;
-    case "loginpns":
-      //thuc hien tim kiem tab voi ten packnsend.vnpost.vn
-      var listTab = await chrome.tabs.query({});
+    },
+    "loginpns": async (data: any) => {
+      const listTab = await chrome.tabs.query({});
       if (listTab.length === 0) return;
       for (let i = 0; i < listTab.length; i++) {
         if (listTab[i].url?.indexOf("packnsend.vnpost.vn") !== -1) {
-          //thuc hien viec gui capchar to content
           chrome.tabs.sendMessage(
             listTab[i].id!,
             {
@@ -204,58 +181,25 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
           break;
         }
       }
-
-      // neu co thi gui capchar content vao it
-      //neu khong co thi thong bao
-      break;
-    case "getPortal":
-      await handleGetPortal(data.DoiTuong);
-      break;
-    // case "test":
-    //   var isSended = await chrome.runtime.sendMessage({ "event": "getToken" });
-    //   break;
-    // case "getToken":
-    //   await getToken(data)
-    //   break;
-    case "printPage":
-      await handlePrintPage(data.DoiTuong);
-      break;
-    case "printPageSort":
-      await handlePrintPageSort(data);
-      break;
-
-    // case "printPageByIDs":
-    //   await handlePrintPageByIDs();
-    //   break;
-    // case "printBD1New":
-    //   printPageById(data.DoiTuong, tokenRef.current, data);
-    //   break;
-    case "getMaHieus":
-      var maHieus = await handleGetMaHieus(data);
+    },
+    "getPortal": async (data: any) => await handleGetPortal(data.DoiTuong),
+    "printPage": async (data: any) => await handlePrintPage(data.DoiTuong),
+    "printPageSort": async (data: any) => await handlePrintPageSort(data),
+    "getMaHieus": async (data: any) => {
+      const maHieus = await handleGetMaHieus(data);
       await updateToPhone("getMaHieus", JSON.stringify(maHieus));
-      break;
+    },
+  };
 
-    // case "printMaHieusToFile":
-    //   await handlePrintMaHieusToFile(data);
-    //   break;
-    // case "getMaHieusFromEditPage":
-    //   await handleGetMaHieusFromEditPage(data);
-    //   break;
-    // case "printbd1":
-    //   const tab = await getActiveTab();
-    //   if (tab && tab.id) {
-    //     await sendMessageToContentScript(tab.id, "GETIDKH", keyMessage);
-    //   }
-    //   break;
-    default:
-      break;
+  if (data.Lenh && commandHandlers[data.Lenh]) {
+    await commandHandlers[data.Lenh](data);
   }
 }
 initFirebase();
 setUpAlarm()
 
 chrome.runtime.onMessage.addListener(
-  function (request, sender, sendResponse) {
+  async function (request, sender, sendResponse) {
     // Kiểm tra xem tin nhắn có đúng event và message bạn mong đợi không
     if (request.event === "CONTENT")
       if (request.message === "SEND_CAPCHAR") {
@@ -271,12 +215,36 @@ chrome.runtime.onMessage.addListener(
           request.content + "|" + request.content1,
           request.keyMessage
         );
+      } else if (request.message === "REQUEST_EXCEL") {
+        let a = [];
+        a.push(request.content);
+        getMaHieusFromPortalId(a, request.token).then((res) => {
+          if (!res) {
+            alert("Không lấy được dữ liệu từ Portal")
+          }
+          openAndExportExcel(res, request.request, request.ishcc);
+
+        });
+        return true; // Ensure the response is sent back
+      }
+      else if (request.message === "MESSAGE") {
+        updateToPhone("message", request.content, request.keyMessage);
       }
   }
 );
 const preParePrintMaHieus = async (maHieus: string[]) => {
   await prepareBlobs(maHieus);
 }
+
+const handleSendAutoToPortal = async (doiTuong: any) => {
+  console.log("handleSendAutoToPortal", doiTuong);
+  var isKhoiTaoOK = await handleKhoiTao(doiTuong);
+  if (isKhoiTaoOK)
+    handleSendToPortal(doiTuong.DoiTuong);
+  else 
+    updateToPhone("message", "Chưa khởi tạo Portal, vui lòng thử lại sau", keyMessage);
+}
+
 const handleSendToPortal = async (doiTuong: any) => {
   //change to compat
 
@@ -309,7 +277,7 @@ const handleSendToPortal = async (doiTuong: any) => {
     tabId,
     {
       message: "ADD",
-      list: bgs,options:temp1.options,
+      list: bgs, options: temp1.options,
       current: bgs[s],
       makh: temp1.maKH,
       keyMessage: keyMessage,
@@ -420,6 +388,9 @@ function saveToken(token: string): void {
 async function saveStorage(value: string): Promise<void> {
   await chrome.storage.local.set({ "blobs": value });
 }
+async function saveStorageExcel(value: string): Promise<void> {
+  await chrome.storage.local.set({ "excel": value });
+}
 
 const handleGetMaHieus = async (data: any) => {
   const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
@@ -492,12 +463,12 @@ const printMaHieus = async (maHieus: string[]) => {
   var tab = await createOrActiveTab(
     "https://example.com/",
     "https://example.com/",
+
     false, false, true
   );
   var blob = await convertBlobsToBlob(blobs)
   var base64String = await pdfBlobTo64(blob);
   await saveStorage(base64String);
-
   //waiting 1 s
   await delay(1000);
   await chrome.tabs.sendMessage(tab!.id!, { message: "PRINTBLOB" });
@@ -654,11 +625,14 @@ const khoitaoPNS = async () => {
     }
   );
 };
+
+
 const handleGetPNS = async (dayLast: any) => {
   updateToPhone("message", "Đã nhận lệnh lấy dữ liệu từ PNS");
   let khachHangsTemp = await handleGetDataFromPNS(dayLast);
   if (khachHangsTemp.length > 0) {
-    console.log(khachHangsTemp)
+    //tổng hợp trạng thái khachHangsTemp[0]
+
     khachHangsTemp.forEach((m) => {
       m.countState.countChapNhan = m.BuuGuis.filter(
         (m) => m.TrangThai === "Đã chấp nhận"
@@ -701,102 +675,126 @@ const getCookieFromWeb = async (url: string) => {
   return cookiesText;
 };
 
-const khoiTaoPortal = async (data: any, infoAccount: any) => {
+const khoiTaoPortal = async (data: any): Promise<boolean> => {
   try {
-    var tab = await createOrActiveTab(
+    let loginSuccess = false;
+    let loadedTab: chrome.tabs.Tab | undefined = undefined;
+    let originalUrl: string | undefined;
+    var initialTab = await createOrActiveTab(
       "https://portalkhl.vnpost.vn/accept-api",
       "portalkhl.vnpost.vn",
       true
     );
-    // var tab = await createOrActiveTab(
-    //   "https://genk.vn",
-    //   "https://genk.vn",
-    //   true
-    // );
 
-    // Chờ cho tab tải xong
-    const loadedTab: any = await waitForTabToLoad(tab!.id!);
-
-    if (tab === undefined || loadedTab === undefined) {
-      return;
+    if (!initialTab || !initialTab.id) {
+      console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
+      updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
+      return false;
     }
+    const tabId = initialTab.id;
 
-    let isLoginOK = false;
+    console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
+    // Chờ cho tab tải xong
+    loadedTab = await waitForTabToLoad(tabId);
+    console.log(`Tab ${tabId} tải xong lần đầu tại URL: ${loadedTab.url}`);
+
 
 
     //check loadedTab url
-    if (loadedTab.url.indexOf('login') != -1) {
-      isLoginOK = false;
-      console.log("Tab đang ở trang login và đang đăng nhập vào Portal");
-      var tabs: any = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tabs.length > 0) {
-        console.log("xong lay tab ", tabs[0].id)
-        chrome.scripting.executeScript({
-          target: { tabId: tabs[0].id },
-          func: (mAccount, mPassword) => {
-            // Gửi tin nhắn đến mainscript.js
-            window.postMessage({
-              type: "CONTENT",
-              message: "ADDLOGIN",
-              account: mAccount,
-              password: mPassword,
-            })
-          },
-          args: [accountPortal, passwordPortal]
-        }, res => {
-          console.log("xong lay scripting")
-          return true
-        })
+    if (loadedTab.url && loadedTab.url.includes('login')) {
+      console.log("Tab đang ở trang login. Thực hiện đăng nhập...");
+      updateToPhone("message", "Đang đăng nhập vào Portal...");
+      originalUrl = loadedTab.url; // *** LƯU LẠI URL TRANG LOGIN ***
+
+      // Gửi lệnh đăng nhập tới content script
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: (mAccount, mPassword) => {
+          // Gửi tin nhắn đến mainscript.js
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDLOGIN",
+            account: mAccount,
+            password: mPassword,
+          })
+        },
+        args: [accountPortal, passwordPortal]
+      });
+      console.log("Đã tiêm script đăng nhập vào tab", tabId);
+
+
+      // *** CHỜ CHO ĐẾN KHI TAB TẢI XONG SAU KHI ĐĂNG NHẬP ***
+      console.log(`Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`);
+      loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 6000); // Chờ tối đa 45s, kiểm tra URL đã khác trang login chưa
+      console.log(`Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`);
+      // *** KẾT THÚC PHẦN CẬP NHẬT QUAN TRỌNG ***
+
+      // Kiểm tra lại xem đăng nhập thành công không (không còn ở trang login)
+      if (loadedTab?.url?.includes('login')) {
+        console.error("Đăng nhập thất bại, vẫn ở trang login.");
+        updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
+        loginSuccess = false;
+      } else if (!loadedTab?.url) {
+        console.error("Không lấy được URL cuối cùng của tab sau khi chờ.");
+        updateToPhone("message", "Lỗi: Không xác định được trạng thái sau đăng nhập.");
+        loginSuccess = false;
       }
-      await delay(2000)
-      console.log("dangkyxong sau khi cho 2s và chuẩn bị chờ tab load", loadedTab);
-      // const login2: any = await waitForTabToLoad(tab!.id);
-      // console.log("tabid ",login2!)
-      // if(login2.url.indexOf('login')!= -1){
-      //   isLoginOK = false;
-      // }else{
-      isLoginOK = true;
-      // }
+      else {
+        console.log("Đăng nhập thành công (đã rời trang login).");
+        loginSuccess = true;
+      }
     }
     else {
-      isLoginOK = true
+      console.log("Tab không ở trang login, giả sử đã đăng nhập.");
+      loginSuccess = true; // Giả sử đã đăng nhập nếu không thấy trang login
     }
-    console.log('cho 1 s')
-    await delay(1000)
-    if (isLoginOK) {
-      console.log('login thanh cong va chay tiep')
-      // var isSended = await chrome.runtime.sendMessage("getToken");
 
 
-      var res = await chrome.tabs.sendMessage(loadedTab.id!, {
+    // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
+    if (loginSuccess && loadedTab?.id) {
+      console.log(`Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`);
+      updateToPhone("message", "Đang khởi tạo hợp đồng...");
+      await delay(1000)
+
+      const response = await chrome.tabs.sendMessage(loadedTab.id, {
         message: "KHOITAOPORTAL",
-        ...data,
+        ...data, // Đảm bảo 'data' chứa MaKH, Address, IsChooseHopDong, STTHopDong...
         keyMessage: keyMessage,
       });
-
-
-      if (!chrome.runtime.lastError) {
-        console.log("Đã nhận tin nhắn từ content KhoiTaoPortal", res);
-        updateToPhone("checkhopdong", res.data);
+      console.log("Phản hồi từ content script KHOITAOPORTAL:", response);
+      // Xử lý phản hồi từ content script
+      if (response && response.data === "ok") {
+        updateToPhone("message", "Khởi tạo thành công.");
+        return true; // *** ĐÁNH DẤU: Điểm thành công duy nhất ***
       } else {
-        console.log("Lỗi khi nhận tin nhắn từ content KhoiTaoPortal", res);
+        const errorMsg = (response && response.data) ? response.data : "Phản hồi không hợp lệ từ content script.";
+        console.error("Lỗi từ content script KHOITAOPORTAL:", errorMsg);
+        updateToPhone("message", `Lỗi khởi tạo: ${errorMsg}`);
+        return false; // *** ĐÁNH DẤU: Điểm thất bại 3 (Phản hồi không đúng) ***
       }
-    } else {
-      console.log("Đăng nhập vào Portal thất bại");
+    } else if (!loginSuccess) {
+      console.log("Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.");
+      return false;
+      // Tin nhắn lỗi đã được gửi ở trên nếu đăng nhập thất bại
     }
 
     // await createTab("https://google.com.vn");
-  } catch (error) {
-    console.log("Error ", error);
+  } catch (error: any) {
+    console.error("Lỗi trong hàm khoiTaoPortal:", error);
+    updateToPhone("message", `Lỗi nghiêm trọng: ${error.message || "Lỗi không xác định khi khởi tạo."}`);
+    return false
+    // Gửi trạng thái lỗi nghiêm trọng về điện thoại
   }
+  console.warn("khoiTaoPortal chạy đến cuối mà không return tường minh.");
+  return false;
 };
-const handleKhoiTao = async (data: any) => {
+const handleKhoiTao = async (data: any): Promise<boolean> => {
   updateToPhone("message", "Đã nhận lệnh khởi tạo");
 
   const temp = JSON.parse(data.DoiTuong);
   const snapshot = await db.ref("PORTAL/HopDongs/" + temp.maKH).get();
   const hopDong = snapshot.val();
-  await khoiTaoPortal(hopDong, temp);
+  return await khoiTaoPortal(hopDong);
 };
 const handleGetDataFromPNS = async (dayLast: any): Promise<KhachHangProps[]> => {
   // var cookie = await getCookieFromWeb("packnsend.vnpost.vn");
@@ -1064,3 +1062,131 @@ const loginDirect = async (account: string, password: string): Promise<string | 
 function sendPong() {
   db.ref(`PORTAL/STATUS/${keyMessage}`).set({ timestamp: Date.now(), online: true });
 }
+
+
+
+async function openAndExportExcel(res: any, request: any = null, ishcc: boolean = false) {
+  let itemDetails = res[0].itemDetails;
+  let fileName = '/temp.xlsx';
+  console.log(ishcc)
+  if (ishcc) {
+    fileName = '/temphcc.xlsx';
+  }
+
+  // Read and modify temp.xlsx
+  fetch(chrome.runtime.getURL(fileName)).then(async (response) => {
+
+    const arrayBuffer = await response.arrayBuffer();
+    const data = new Uint8Array(arrayBuffer);
+    const workbook = XLSX.read(data, { type: 'array' });
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+
+    let indexStart = 4;
+    for (let index = 0; index < itemDetails.length; index++) {
+      const element = itemDetails[index];
+      if (!ishcc) {
+        worksheet[`A${indexStart + index}`] = { v: element.serviceCode };
+        worksheet[`D${indexStart + index}`] = { v: '2-Bộ' };
+        worksheet[`E${indexStart + index}`] = { v: element.ttNumber };
+
+        worksheet[`H${indexStart + index}`] = { v: element.receiverName };
+        worksheet[`I${indexStart + index}`] = { v: element.receiverPhone };
+        worksheet[`M${indexStart + index}`] = { v: element.receiverAddress };
+        worksheet[`S${indexStart + index}`] = { v: element.weight };
+        worksheet[`Z${indexStart + index}`] = { v: element.serviceGtgt };
+        worksheet[`AB${indexStart + index}`] = { v: element.codAmount };
+        worksheet[`AK${indexStart + index}`] = { v: '1-Chuyển hoàn ngay' };
+        worksheet[`AL${indexStart + index}`] = { v: '3-Chuyển hoàn về bưu cục gốc' };
+        worksheet[`BQ${indexStart + index}`] = { v: request };
+      } else {
+        worksheet[`A${indexStart + index}`] = { v: element.serviceCode };
+        worksheet[`B${indexStart + index}`] = { v: element.procedureId };
+        worksheet[`C${indexStart + index}`] = { v: element.procedureCategoryId };
+        worksheet[`D${indexStart + index}`] = { v: element.procedureType == "1" ? '1-Tiếp nhận' : '2-Chuyển trả' };
+        worksheet[`F${indexStart + index}`] = { v: element.ttNumber };
+
+        worksheet[`H${indexStart + index}`] = { v: element.receiverName };
+        worksheet[`I${indexStart + index}`] = { v: element.receiverPhone };
+        worksheet[`M${indexStart + index}`] = { v: element.receiverAddress };
+        worksheet[`U${indexStart + index}`] = { v: element.weight };
+        worksheet[`Z${indexStart + index}`] = { v: element.serviceGtgt };
+        // worksheet[`AB${indexStart + index}`] = { v: element.codAmount };
+        worksheet[`CJ${indexStart + index}`] = { v: request };
+      }
+
+    }
+
+    // Cập nhật lại phạm vi của sheet để bao gồm các hàng mới
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    // Điều chỉnh số hàng cuối cùng nếu cần
+    range.e.r = Math.max(range.e.r, indexStart + itemDetails.length - 1);
+    worksheet['!ref'] = XLSX.utils.encode_range(range);
+
+    // Ghi workbook mới ra một ArrayBuffer
+    const newWorkbookArrayBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array"
+    });
+    // // Convert the array buffer to a base64 string
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(newWorkbookArrayBuffer)));
+    await saveStorageExcel(base64);
+    var tab = await createOrActiveTab(
+      "https://example.com/",
+      "https://example.com/",
+
+      false, false, true
+    );
+    // Read the base64 string back into a workbook
+    //  const workbookFromBase64 = XLSX.read(base64, { type: 'base64' });
+    //  const sheet = workbookFromBase64.Sheets[workbookFromBase64.SheetNames[0]];
+    //waiting 1 s
+    await delay(1000);
+    //add ten with name and date
+    const currentDate = new Date();
+    const formattedDate = `${currentDate.getDate()}-${currentDate.getMonth() + 1}-${currentDate.getFullYear()}`;
+
+    await chrome.tabs.sendMessage(tab!.id!, { message: "EXPORTEXCEL", ten: `${res[0].customerName}_${formattedDate}` });
+  });
+}
+
+async function handleAddPNS(dayLast: any) {
+  updateToPhone("message", "Đã nhận lệnh lấy dữ liệu từ PNS");
+  let khachHangsTemp = await handleGetDataFromPNS(dayLast);
+  if (khachHangsTemp.length > 0) {
+    console.log(khachHangsTemp)
+
+    //get khachHangs from firebase
+    const responsef: any = await db.ref("PNS/KhachHangs").get();
+    var khachHangsFirebase: KhachHangProps[] = responsef.val();
+    //insert khachHangsFirebase to khachHangsTemp
+    khachHangsTemp.forEach((m) => {
+      const index = khachHangsFirebase.findIndex((n: any) => n.MaKH === m.MaKH);
+      if (index === -1) {
+        khachHangsFirebase.push(m);
+      } else {
+        khachHangsFirebase[index].BuuGuis = khachHangsFirebase[index].BuuGuis.concat(m.BuuGuis);
+      }
+    });
+    khachHangsFirebase.forEach((m) => {
+      m.countState.countChapNhan = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Đã chấp nhận"
+      ).length;
+      m.countState.countDangGom = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Đang đi thu gom"
+      ).length;
+      m.countState.countNhanHang = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Nhận hàng thành công"
+      ).length;
+      m.countState.countPhanHuong = m.BuuGuis.filter(
+        (m) => (m.TrangThai === "Đã phân hướng")
+      ).length;
+    });
+    await db.ref("PNS/KhachHangs").set(khachHangsFirebase);
+    await db.ref("PNS/TimeUpdate").set(new Date().toLocaleTimeString());
+  } else {
+    updateToPhone("message", "Chưa đăng nhập PNS");
+    await khoitaoPNS();
+  }
+}
+

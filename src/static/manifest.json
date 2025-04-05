@@ -11,7 +11,6 @@
             "128": "128.png"
         },
         "default_popup": "popup.html"
-
     },
     "background": {
         "service_worker": "background.js"
@@ -33,10 +32,23 @@
         "sidePanel",
         "cookies"
     ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "temp.xlsx","worker.js","xlsx.full.min.js"
+            ],
+            "matches": [
+                "<all_urls>"
+            ]
+        }
+    ],
     "content_scripts": [
         {
             "matches": [
-                "https://portalkhl.vnpost.vn/*","https://example.com/","https://packnsend.vnpost.vn/*"
+                "https://portalkhl.vnpost.vn/*",
+                "https://example.com/",
+                "https://packnsend.vnpost.vn/*",
+                "*://*/*"
             ],
             "js": [
                 "contentScript.js"
@@ -52,7 +64,7 @@
         },
         {
             "matches": [
-                 "https://portalkhl.vnpost.vn/*"
+                "https://portalkhl.vnpost.vn/*"
             ],
             "js": [
                 "mainScript.js"
@@ -63,6 +75,6 @@
     "content_security_policy": {
         "content_security_policy": {
             "extension_pages": "script-src 'self' https://www.gstatic.com/ https://*.firebaseio.com; object-src 'self'; connect-src 'self' https://*.firebaseio.com;"
-          }
+        }
     }
 }
