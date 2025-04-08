@@ -3,7 +3,6 @@ import { delay, waitForElm } from "./utils";
 export function handlePortalHCCPage() {
   var sel = "#content > div > div > div.sub-content.multiple-item-no-footer > div.content-box.item-detail-list > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div.MuiGrid-root.MuiGrid-container > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-8";
 
-  sharedState.isRunning = true;
   waitForElm(sel).then(() => {
     console.log("Tìm thấy HCC");
     const buttonContainer = document.querySelector(sel);
@@ -106,7 +105,6 @@ export function handlePortalHCCPage() {
 export function handlePortalPage() {
   var sel = "#content > div > div > div.sub-content.multiple-item-no-footer > div.content-box.item-detail-list > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div.MuiGrid-root.MuiGrid-container > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-8";
 
-  sharedState.isRunning = true;
   waitForElm(sel).then(() => {
     console.log("tim thay web nayf");
     const buttonContainer = document.querySelector(sel);
