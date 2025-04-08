@@ -317,8 +317,27 @@ function triggerProcessingCheck(): void {
     isFinalProcessingTriggered = false;
   }
 }
+async function hardRefreshSpecificTab(tabId: number): Promise<chrome.tabs.Tab | undefined> {
+  if (!tabId) {
+    console.error("hardRefreshSpecificTab: Invalid tabId provided.");
+    return undefined;
+  }
+  console.log(`Initiating hard refresh for tab: ${tabId}`);
+  try {
+    await chrome.tabs.reload(tabId, { bypassCache: true });
+    console.log(`Waiting for tab ${tabId} to finish reloading...`);
+    const updatedTab = await waitForTabToLoad(tabId); // Sử dụng hàm waitForTabToLoad hiện có của bạn
+    console.log(`Tab ${tabId} finished reloading.`);
+    return updatedTab;
+  } catch (error) {
+    console.error(`Error during hard refresh for tab ${tabId}:`, error);
+    // Có thể tab đã bị đóng trong quá trình refresh
+    return undefined;
+  }
+}
 
-
+let successfulProcessCount = 0;
+const REFRESH_THRESHOLD = 5;
 // --- HÀM MỚI: Xử lý item tiếp theo trong hàng đợi ---
 async function processNextItemInBackground(): Promise<void> {
   // --- KIỂM TRA CỜ DỪNG LỖI ---
@@ -411,7 +430,7 @@ async function processNextItemInBackground(): Promise<void> {
       makh: maKH,
       keyMessage: keyMessage,
       options: options
-    }, (response) => {
+    }, async (response) => {
       const processedMaBG = currentItemBeingProcessed; // Lưu lại mã vừa xử lý
       currentItemBeingProcessed = null; // Đặt lại ngay
 
@@ -436,8 +455,36 @@ async function processNextItemInBackground(): Promise<void> {
       // Xử lý kết quả
       if (response && response.status === 'success') {
         console.log("Processed successfully:", processedMaBG);
-        processedItems.add(processedMaBG!); // Thêm MaBuuGui (string) vào set
+        processedItems.add(processedMaBG!);
         updateToPhone("message", `${processedMaBG} đã được xử lý`);
+
+        successfulProcessCount++;
+        console.log(`Successful items since last refresh: ${successfulProcessCount}`);
+
+        if (successfulProcessCount >= REFRESH_THRESHOLD) {
+          console.log(`Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${tabId}...`);
+          updateToPhone("message", `Đã xử lý ${successfulProcessCount} mã. Đang làm mới trang...`);
+          await delay(1000);
+
+          const refreshedTab = await hardRefreshSpecificTab(tabId);
+
+          if (!refreshedTab) {
+            console.error(`Tab ${tabId} could not be refreshed or was closed. Stopping process.`);
+            updateToPhone("message", `Lỗi: Không thể làm mới tab ${tabId}. Dừng xử lý.`);
+            isStoppedOnError = true;
+            processingQueue = [];
+            successfulProcessCount = 0;
+            chrome.action.setBadgeText({ text: 'REF_ERR' });
+            chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+            return; // Thoát khỏi IIFE
+          }
+
+          console.log(`Tab ${tabId} refreshed successfully. Resetting counter.`);
+          updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
+          successfulProcessCount = 0;
+
+          await delay(2500); // Chờ ổn định
+        }
       } else {
         // --- Dừng lại khi có lỗi từ content script ---
         const errorMsg = response?.error || 'Lỗi không xác định từ Portal';
@@ -445,10 +492,10 @@ async function processNextItemInBackground(): Promise<void> {
         updateToPhone("message", `Lỗi xử lý ${processedMaBG}: ${errorMsg}. Đã dừng!`);
         isStoppedOnError = true;
         processingQueue = [];
+        successfulProcessCount = 0;
         chrome.action.setBadgeText({ text: 'Lỗi!' });
         chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
-        return;
-        // --- KẾT THÚC XỬ LÝ DỪNG ---
+        return; // Thoát khỏi IIFE
       }
       triggerProcessingCheck(); // Gọi kiểm tra tiếp theo
     });
@@ -1037,16 +1084,7 @@ async function dieuTin(maHieus: any) {
     }, args: [text]
   })
 }
-async function hardRefreshSpecificTab(tabId: number) {
-  try {
-    console.log(`Thực hiện hard refresh cho tab ID cụ thể: ${tabId}`);
-    await chrome.tabs.reload(tabId, { bypassCache: true });
-    console.log(`Đã yêu cầu hard refresh cho tab ID: ${tabId}`);
-  } catch (error) {
-    console.error(`Lỗi khi thực hiện hard refresh cho tab ${tabId}:`, error);
-    // Có thể tab không còn tồn tại
-  }
-}
+
 
 async function hoanTatTin(maHieus: any) {
   // printMaHieus(JSON.parse(data.DoiTuong) as string[], token);
@@ -1950,7 +1988,7 @@ async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
     "body": `[\"${id}\"]`,
     "method": "POST"
   });
-  
+
 
   res.status === 200 ? updateToPhone("message", "Xóa thành công") : updateToPhone("message", "Xóa thất bại")
   console.log("Đã xóa thành công", await res.json())
