@@ -122,13 +122,15 @@ function setUpAlarm(): void {
   });
 }
 
+
+
 async function initFirebase(): Promise<void> {
+
   token = await chromeStorageGet('token')
   accountPortal = await chromeStorageGet('accountPortal')
   passwordPortal = await chromeStorageGet('passwordPortal')
   keyMessage = await chromeStorageGet('keyMessage')
   buuCuc = await chromeStorageGet('buuCuc')
-
   if (!keyMessage) {
     console.error("Chưa cấu hình keyMessage!");
     // Có thể thông báo lỗi hoặc dừng lại
@@ -162,6 +164,7 @@ async function initFirebase(): Promise<void> {
 
 
 let TimeStampPing = ""
+let TimeStampScannedItems = "" // Lưu timestamp của scannedItems
 async function handlePingChange(snapshot: firebase.database.DataSnapshot): Promise<void> {
   const data: Snapshot | null = snapshot.val();
   if (!data || TimeStampPing.length === 0 || TimeStampPing === data.TimeStamp) {
@@ -177,20 +180,20 @@ async function handlePingChange(snapshot: firebase.database.DataSnapshot): Promi
   }
 }
 
-var isFirstDataAuto = true; // Cờ để kiểm tra lần đầu tiên nhận dữ liệu quét tự động
 // --- HÀM MỚI: Xử lý cập nhật danh sách mã quét ---
 async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot): Promise<void> {
-  if (isFirstDataAuto) {
-    isFirstDataAuto = false;
-    console.log("Đã nhận dữ liệu quét tự động lần đầu tiên.");
+
+  const data: Snapshot | null = snapshot.val();
+  if (!data)
     return;
-  }
-  const data: any = snapshot.val(); // Firebase trả về array hoặc null/object nếu rỗng
-  if (!data) {
-    console.log("No scanned items data found.");
+
+  if (!data || TimeStampScannedItems.length === 0 || TimeStampScannedItems === data.TimeStamp) {
+    TimeStampScannedItems = data!.TimeStamp!;
     return;
+  } else {
+    TimeStampScannedItems = data.TimeStamp!;
   }
-  var arrayData = JSON.parse(data);
+  var arrayData = JSON.parse(data.DoiTuong);
   const newScannedItems: BuuGuiProps[] = Array.isArray(arrayData)
     ? arrayData.filter(item => item && typeof item.MaBuuGui === 'string') // Lọc bỏ phần tử không hợp lệ
     : [];
@@ -337,7 +340,7 @@ async function hardRefreshSpecificTab(tabId: number): Promise<chrome.tabs.Tab | 
 }
 
 let successfulProcessCount = 0;
-const REFRESH_THRESHOLD = 5;
+const REFRESH_THRESHOLD = 40;
 // --- HÀM MỚI: Xử lý item tiếp theo trong hàng đợi ---
 async function processNextItemInBackground(): Promise<void> {
   // --- KIỂM TRA CỜ DỪNG LỖI ---
@@ -369,26 +372,26 @@ async function processNextItemInBackground(): Promise<void> {
   }
 
   // --- KIỂM TRA TOKEN ---
-  const isTokenOk: boolean = await checkToken();
-  if (!isTokenOk) {
-    const tokenTemp = await loginDirect(accountPortal, passwordPortal);
-    if (!tokenTemp) {
-      console.error("Login failed. Stopping processing.");
-      updateToPhone("message", "Lỗi đăng nhập Portal. Dừng xử lý.");
-      isStoppedOnError = true; // Dừng lại
-      currentItemBeingProcessed = null;
-      processingQueue = []; // Xóa hàng đợi
-      return;
-    }
-    saveToken(tokenTemp);
-    token = tokenTemp;
-  }
+  // const isTokenOk: boolean = await checkToken();
+  // if (!isTokenOk) {
+  //   const tokenTemp = await loginDirect(accountPortal, passwordPortal);
+  //   if (!tokenTemp) {
+  //     console.error("Login failed. Stopping processing.");
+  //     updateToPhone("message", "Lỗi đăng nhập Portal. Dừng xử lý.");
+  //     isStoppedOnError = true; // Dừng lại
+  //     currentItemBeingProcessed = null;
+  //     processingQueue = []; // Xóa hàng đợi
+  //     return;
+  //   }
+  //   saveToken(tokenTemp);
+  //   token = tokenTemp;
+  // }
   // --- KẾT THÚC KIỂM TRA TOKEN ---
 
   currentItemBeingProcessed = maBGToProcess; // Đánh dấu item đang xử lý (string)
   // Tìm index để hiển thị badge chính xác
   const currentIndexInList = allScannedItems.findIndex(item => item.MaBuuGui === maBGToProcess);
-  console.log(`Processing item: ${currentItemBeingProcessed} (Index: ${currentIndexInList}, Queue: ${processingQueue.length})`);
+  console.log(`Đang xử lý BG: ${currentItemBeingProcessed} (Index: ${currentIndexInList}, Queue: ${processingQueue.length})`);
   updateToPhone("message", `Đang xử lý ${currentItemBeingProcessed}`);
   chrome.action.setBadgeText({ text: `${currentIndexInList + 1}` }); // Hiển thị index (1-based)
 
@@ -396,14 +399,6 @@ async function processNextItemInBackground(): Promise<void> {
     // --- Lấy thông tin BuuGuiProps ĐẦY ĐỦ ---
     // Ưu tiên lấy từ allScannedItems đã có sẵn để đảm bảo dùng đúng dữ liệu đã trigger việc xử lý
     let currentBuuGui = allScannedItems.find(item => item.MaBuuGui === maBGToProcess);
-
-    // Dự phòng: Nếu không tìm thấy trong list (trường hợp hiếm), thử lấy lại từ DB BuuGuis
-    if (!currentBuuGui) {
-      console.warn(`Item ${maBGToProcess} not found in current allScannedItems cache, fetching from BuuGuis DB...`);
-      const bgsFirebase = await db.ref("PORTAL/BuuGuis/").get();
-      const bgs: BuuGuiProps[] = JSON.parse(bgsFirebase.val() || '[]');
-      currentBuuGui = bgs.find(bg => bg.MaBuuGui === maBGToProcess);
-    }
 
     if (!currentBuuGui) {
       throw new Error(`Không tìm thấy thông tin Bưu gửi đầy đủ cho: ${maBGToProcess}`);
@@ -513,7 +508,7 @@ async function processNextItemInBackground(): Promise<void> {
 
 
 // --- HÀM MỚI: Tìm Tab Portal ---
-async function findPortalTabId(): Promise<number | undefined> {
+async function findPortalTabId(maKH:string = ""): Promise<number | undefined> {
   await delay(500); // Đợi một chút để đảm bảo tab đã load xong
   console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...");
   let foundReadyTabId: number | null = null;
@@ -572,8 +567,14 @@ async function findPortalTabId(): Promise<number | undefined> {
       // *** ĐÁNH DẤU: Nếu không tìm thấy tab nào sẵn sàng ***
       console.log("handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...");
       updateToPhone("message", "Đang khởi tạo Portal...", keyMessage);
+      var currentMaKH = "";
+      if(maKH!= ""){
+        currentMaKH = maKH
+      }else{
+        currentMaKH = await chromeStorageGet("currentMaKH")
+      }
 
-      const snapshot = await db.ref("PORTAL/HopDongs/" + await chromeStorageGet("currentMaKH")).get();
+      const snapshot = await db.ref("PORTAL/HopDongs/" + currentMaKH).get();
       const hopDong = snapshot.val();
       // Gọi hàm khởi tạo (đã được sửa để trả về boolean)
       const isKhoiTaoOK: boolean = await khoiTaoPortal(hopDong); // Giả sử handleKhoiTao trả về boolean
@@ -661,6 +662,7 @@ function objectArraysAreEqual(a: BuuGuiProps[], b: BuuGuiProps[]): boolean {
 // - Các hàm liên quan đến PNS nếu không thuộc luồng chính này
 
 async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promise<void> {
+
   const data: Snapshot | null = snapshot.val();
   if (!data)
     return;
@@ -670,6 +672,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
+  console.log("Data changed:",JSON.stringify( data));
 
   const isOk: boolean = await checkToken();
   if (!isOk) {
@@ -702,6 +705,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
     "dieuTin": async (data: any) => await dieuTin(JSON.parse(data.DoiTuong)),
     "sendtoportal": async (data: any) => { handleSendToPortal(data.DoiTuong) },
+    // "test": async (data: any) => { await hoanTatTinPNSFetch(["CK990242988VN", "CK990403835VN"], 10) },
     "sendautotoportal": async (data: any) => handleSendAutoToPortal(data),
     "sendtoendandprint": async (data: any) => handleChayDenCuoiVaIn(),
     "savekhoptions": async (data: any) => handleSaveKHOption(data),
@@ -744,6 +748,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       }
     },
     "loginpns": async (data: any) => {
+    
       const listTab = await chrome.tabs.query({});
       if (listTab.length === 0) return;
       for (let i = 0; i < listTab.length; i++) {
@@ -753,6 +758,31 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
             {
               message: "SENDCAPCHAR",
               content: data.DoiTuong,
+              gd:false
+            },
+            (res) => {
+              if (!chrome.runtime.lastError) {
+                console.log("Đã nhận tin nhắn từ content PNS", res);
+              } else {
+                console.log("Lỗi khi nhận tin nhắn từ content PNS", res);
+              }
+            }
+          );
+          break;
+        }
+      }
+    },
+    "loginpnsgd": async (data: any) => {
+      const listTab = await chrome.tabs.query({});
+      if (listTab.length === 0) return;
+      for (let i = 0; i < listTab.length; i++) {
+        if (listTab[i].url?.indexOf("packnsend.vnpost.vn") !== -1) {
+          chrome.tabs.sendMessage(
+            listTab[i].id!,
+            {
+              message: "SENDCAPCHAR",
+              content: data.DoiTuong,
+              gd:true
             },
             (res) => {
               if (!chrome.runtime.lastError) {
@@ -877,89 +907,224 @@ const preParePrintMaHieus = async (maHieus: string[]) => {
   await prepareBlobs(maHieus);
 }
 
-const handleSendAutoToPortal = async (doiTuong: any) => {
-  console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...", doiTuong);
-  let foundReadyTabId: number | null = null;
-  let readyTabInfo: chrome.tabs.Tab | null = null; // Lưu thông tin tab tìm thấy
+async function handleSendAutoToPortal(commandData: any): Promise<void> {
+  const logPrefix = "BG: handleSendAutoToPortal(Loop) -"; // Tiền tố log
+  console.log(`${logPrefix} Received command. Data:`, commandData);
+
+  let targetTabId: number | undefined = undefined;
+  let processCountSinceRefresh = 0; // Biến đếm *cục bộ* cho lần chạy này
+  let shouldStopLoop = false; // Cờ để dừng vòng lặp nếu có lỗi
 
   try {
-    // 1. Tìm các tab Portal có URL khớp
-    const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/accept-api*" });
-    console.log(`handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`);
+    // 1. Phân tích dữ liệu lệnh (DoiTuong)
+    let parsedDoiTuong: any;
+    let startMaBG: string | undefined = undefined; // Mã BG để bắt đầu (tùy chọn)
+    let maKH: string;
+    let options: any;
+    try {
+      parsedDoiTuong = JSON.parse(commandData.DoiTuong);
+      maKH = parsedDoiTuong.maKH;
+      options = parsedDoiTuong.options;
+      startMaBG = parsedDoiTuong.maBG; // Lấy maBG nếu có
+      if (parsedDoiTuong.account && parsedDoiTuong.password) {
+        accountPortal = parsedDoiTuong.account;
+        passwordPortal = parsedDoiTuong.password;
+      }
 
-    // 2. Duyệt qua các tab và kiểm tra element
-    for (const tab of portalTabs) {
-      if (!tab.id) continue; // Bỏ qua nếu tab không có ID
-      console.log(`handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`);
+
+      if (!maKH) {
+        throw new Error("Dữ liệu lệnh thiếu maKH.");
+      }
+    } catch (parseError: any) {
+      console.error(`${logPrefix} Failed to parse DoiTuong JSON:`, commandData.DoiTuong, parseError);
+      updateToPhone("error", `Lỗi dữ liệu lệnh sendautotoportal: ${parseError.message}`);
+      return;
+    }
+    console.log(`${logPrefix} Parsed command - maKH: ${maKH}, startMaBG: ${startMaBG}, options:`, options);
+    // --- Bước 2: Tìm hoặc Khởi tạo Tab Portal (CHỈ MỘT LẦN) ---
+    console.log(`${logPrefix} Finding or Initializing Portal tab ONCE...`);
+    targetTabId = await findPortalTabId(maKH); // Gọi hàm tìm/khởi tạo
+    if (!targetTabId) {
+      // findPortalTabId đã log lỗi và gửi message nếu cần
+      console.error(`${logPrefix} Initial Portal tab setup failed. Aborting.`);
+      return; // Dừng ngay nếu không có tab ban đầu
+    }
+    console.log(`${logPrefix} Initial Portal tab ID: ${targetTabId}.`);
+
+    // 2. Lấy danh sách BuuGuis từ Firebase
+    console.log(`${logPrefix} Fetching BuuGuis from Firebase: PORTAL/BuuGuis/`);
+    let bgs: BuuGuiProps[];
+    try {
+      const bgsFirebase = await db.ref("PORTAL/BuuGuis/").get();
+      const rawVal = bgsFirebase.val();
+      if (!rawVal) {
+        console.error(`${logPrefix} No data found at PORTAL/BuuGuis/`);
+        updateToPhone("error", "Lỗi: Không có dữ liệu bưu gửi trên Firebase.");
+        return;
+      }
+      bgs = JSON.parse(rawVal);
+      if (!Array.isArray(bgs)) {
+        throw new Error("Dữ liệu BuuGuis từ Firebase không phải là một mảng.");
+      }
+      console.log(`${logPrefix} Fetched ${bgs.length} items from Firebase.`);
+      if (bgs.length === 0) {
+        updateToPhone("info", "Không có bưu gửi nào trong danh sách trên Firebase.");
+        return;
+      }
+    } catch (fetchError: any) {
+      console.error(`${logPrefix} Error fetching or parsing BuuGuis from Firebase:`, fetchError);
+      updateToPhone("error", `Lỗi lấy dữ liệu Firebase: ${fetchError.message}`);
+      return;
+    }
+
+    // 3. Xác định chỉ số bắt đầu (startIndex)
+    let startIndex = 0;
+    if (startMaBG) {
+      startIndex = bgs.findIndex(item => item.MaBuuGui === startMaBG);
+      if (startIndex === -1) {
+        console.warn(`${logPrefix} startMaBG "${startMaBG}" not found in the fetched list. Starting from index 0.`);
+        updateToPhone("warning", `Không tìm thấy mã bắt đầu ${startMaBG}, xử lý từ đầu.`);
+        startIndex = 0; // Nếu không tìm thấy, bắt đầu từ đầu
+      } else {
+        console.log(`${logPrefix} Found startMaBG at index ${startIndex}.`);
+      }
+    } else {
+      console.log(`${logPrefix} No startMaBG provided. Starting from index 0.`);
+    }
+
+    // 4. Vòng lặp xử lý tuần tự
+    updateToPhone("message", `Bắt đầu xử lý danh sách ${bgs.length - startIndex} bưu gửi...`);
+    for (let i = startIndex; i < bgs.length; i++) {
+      if (shouldStopLoop) break; // Kiểm tra cờ dừng lỗi
+
+      const currentItem = bgs[i];
+      console.log(`${logPrefix} Processing item ${i + 1}/${bgs.length} (Index in list: ${i}): ${currentItem.MaBuuGui}`);
+      chrome.action.setBadgeText({ text: `${i + 1 - startIndex}` }); // Hiển thị số thứ tự xử lý
+      updateToPhone("message", `Đang xử lý ${i + 1 - startIndex}/${bgs.length - startIndex}: ${currentItem.MaBuuGui}`);
+
       try {
-        // *** ĐÁNH DẤU: Tiêm script để kiểm tra sự tồn tại của #ttNumberSearch ***
-        const injectionResults = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => !!document.querySelector("#ttNumberSearch") // Hàm kiểm tra trực tiếp
+        // 5.1. Kiểm tra Tab còn tồn tại không (an toàn hơn)
+        // Mặc dù không tìm lại, việc kiểm tra trước khi gửi là cần thiết phòng user đóng tab
+        try {
+          console.log(`${logPrefix} Verifying tab ${targetTabId} exists...`); // Log kiểm tra
+          await chrome.tabs.get(targetTabId!); // Thêm ! vì đã kiểm tra lúc đầu
+        } catch (e) {
+          // Nếu tab không còn tồn tại -> Lỗi nghiêm trọng, dừng lại
+          console.error(`${logPrefix} Target tab ${targetTabId} not found before sending message. Stopping.`);
+          updateToPhone("error", `Tab Portal (ID: ${targetTabId}) đã bị đóng. Dừng xử lý.`);
+          chrome.action.setBadgeText({ text: "TAB_GONE" });
+          chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+          shouldStopLoop = true;
+          continue; // Dừng lần lặp này và thoát vòng lặp ở lần kiểm tra tiếp theo
+        }
+
+
+        // 4.2. Gửi message PROCESS_SINGLE_ITEM và chờ response
+        console.log(`${logPrefix} Sending PROCESS_SINGLE_ITEM for ${currentItem.MaBuuGui} to tab ${targetTabId}...`);
+        // Dùng Promise để await response từ sendMessage
+        const response = await new Promise<any>((resolve, reject) => {
+          chrome.tabs.sendMessage(targetTabId!, { // Thêm ! vì đã kiểm tra targetTabId
+            message: "PROCESS_SINGLE_ITEM",
+            current: currentItem,
+            makh: maKH, // maKH dùng chung từ lệnh
+            keyMessage: keyMessage,
+            options: options // options dùng chung từ lệnh
+          }, (res) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message || "Lỗi gửi/nhận message"));
+            } else {
+              resolve(res); // Resolve với phản hồi từ content script
+            }
+          });
         });
 
-        // executeScript trả về một mảng kết quả, kiểm tra phần tử đầu tiên
-        if (injectionResults && injectionResults[0] && injectionResults[0].result === true) {
-          console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
-          foundReadyTabId = tab.id;
-          readyTabInfo = tab; // Lưu lại thông tin tab
-          break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
+        // 4.3. Xử lý response
+        if (response && response.status === 'success') {
+          console.log(`${logPrefix} Successfully processed item: ${currentItem.MaBuuGui}`);
+          // Không cần add vào processedItems của luồng tự động
+
+          processCountSinceRefresh++; // Tăng biến đếm *cục bộ*
+          console.log(`${logPrefix} Success count since refresh: ${processCountSinceRefresh}`);
+
+          // 4.4. Kiểm tra và thực hiện refresh nếu cần
+          if (processCountSinceRefresh >= REFRESH_THRESHOLD) {
+            console.log(`${logPrefix} Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${targetTabId}...`);
+            updateToPhone("message", `Đã xử lý ${processCountSinceRefresh} mã. Đang làm mới trang...`);
+            await delay(1000); // Delay trước refresh
+
+            const refreshedTab = await hardRefreshSpecificTab(targetTabId!); // Gọi refresh
+            if (!refreshedTab) {
+              console.error(`${logPrefix} Tab ${targetTabId} refresh failed/closed. Stopping loop.`);
+              updateToPhone("message", `Lỗi: Không thể làm mới tab ${targetTabId}. Dừng xử lý.`);
+              chrome.action.setBadgeText({ text: "REF_ERR" });
+              chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+              shouldStopLoop = true; // Đặt cờ dừng
+              continue; // Bỏ qua phần còn lại của lần lặp
+            }
+
+            console.log(`${logPrefix} Tab ${targetTabId} refreshed successfully. Resetting counter.`);
+            updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
+            processCountSinceRefresh = 0; // Reset biến đếm cục bộ
+            targetTabId = refreshedTab.id; // Cập nhật lại tabId phòng trường hợp ID thay đổi (hiếm)
+
+            await delay(1500); // Delay sau refresh
+          }
         } else {
-          console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
+          // Lỗi từ content script
+          const errorMsg = response?.error || (response ? 'Trạng thái không thành công' : 'Không có phản hồi');
+          console.error(`${logPrefix} Failed to process item ${currentItem.MaBuuGui} via content script: ${errorMsg}`, response);
+          updateToPhone("message", `Lỗi xử lý mã ${currentItem.MaBuuGui}: ${errorMsg}. Dừng lại.`);
+          chrome.action.setBadgeText({ text: "CS_ERR" });
+          chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+          shouldStopLoop = true; // Đặt cờ dừng
+          continue; // Bỏ qua phần còn lại của lần lặp
         }
-      } catch (injectionError: any) {
-        // Có thể tab đã đóng hoặc không có quyền tiêm script
-        console.warn(`handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`);
-        // Bỏ qua và tiếp tục với tab tiếp theo (nếu có)
+
+        await delay(500); // Delay nhỏ giữa các lần xử lý thành công
+
+      } catch (loopError: any) {
+        // Bắt lỗi trong lần lặp hiện tại (tìm tab, gửi message, refresh...)
+        console.error(`${logPrefix} Error during loop iteration ${i} for item ${currentItem.MaBuuGui}:`, loopError);
+        updateToPhone("message", `Lỗi nghiêm trọng khi xử lý ${currentItem.MaBuuGui}: ${loopError.message}. Dừng lại.`);
+        chrome.action.setBadgeText({ text: "LOOP_ERR" });
+        chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+        shouldStopLoop = true; // Đặt cờ dừng
+        continue; // Bỏ qua phần còn lại của lần lặp
       }
-    }
+    } // Kết thúc vòng lặp for
 
-    // 3. Xử lý dựa trên kết quả kiểm tra
-    if (foundReadyTabId && readyTabInfo) {
-      // *** ĐÁNH DẤU: Nếu tìm thấy tab sẵn sàng ***
-      console.log(`handleSendAutoToPortal: Đã tìm thấy tab Portal (ID: ${foundReadyTabId}). Kích hoạt và gửi trực tiếp...`);
-      updateToPhone("message", `Đã tìm thấy tab Portal sẵn sàng. Đang gửi...`, keyMessage);
-
-      // *** Kích hoạt (đưa lên focus) tab đã tìm thấy ***
-      await chrome.tabs.update(foundReadyTabId, { active: true });
-      // Có thể cần chờ một chút để đảm bảo tab đã active hoàn toàn, mặc dù thường không cần
-      await delay(300);
-
-      // *** Gọi trực tiếp handleSendToPortal ***
-      // Hàm này sẽ tự động lấy tab đang active (chính là tab vừa được kích hoạt)
-      // Thêm await nếu handleSendToPortal là async và bạn cần đợi nó xong
-      var isSendXong = await handleSendToPortal(doiTuong.DoiTuong, true);
-      if (isSendXong) {
-        console.log("handleSendAutoToPortal: Gửi dữ liệu thành công.");
-        updateToPhone("message", "Đã gửi dữ liệu thành công.", keyMessage);
-      }
-
+    // 5. Hoàn tất (nếu không bị dừng bởi lỗi)
+    if (!shouldStopLoop) {
+      console.log(`${logPrefix} Finished processing list successfully.`);
+      updateToPhone("message", `Đang chuẩn bị in. Chờ xíu`, keyMessage);
+      //chuyển MaBuuGui thành mảng từ bgs
+      var maHieus = bgs.map(m => m.MaBuuGui)
+      printMaHieus(maHieus)
+      updateToPhone("message", `In xong`, keyMessage);
+      chrome.action.setBadgeText({ text: "OK" });
+      chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
+      await delay(2000);
+      chrome.action.setBadgeText({ text: '' });
     } else {
-      // *** ĐÁNH DẤU: Nếu không tìm thấy tab nào sẵn sàng ***
-      console.log("handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...");
-      updateToPhone("message", "Đang khởi tạo Portal...", keyMessage);
-
-      // Gọi hàm khởi tạo (đã được sửa để trả về boolean)
-      const isKhoiTaoOK: boolean = await handleKhoiTao(doiTuong); // Giả sử handleKhoiTao trả về boolean
-
-      if (isKhoiTaoOK) {
-        console.log("handleSendAutoToPortal: Khởi tạo thành công. Đang gửi dữ liệu...");
-        // Sau khi khởi tạo thành công, tab đích đã sẵn sàng và active, gọi gửi dữ liệu
-        // Thêm await nếu handleSendToPortal là async
-        await handleSendToPortal(doiTuong.DoiTuong, true);
-      } else {
-        console.error("handleSendAutoToPortal: Khởi tạo Portal thất bại.");
-        // handleKhoiTao đã gửi thông báo lỗi rồi, không cần gửi lại ở đây
-        // updateToPhone("message", "Khởi tạo Portal thất bại, vui lòng thử lại sau.", keyMessage);
-      }
+      console.log(`${logPrefix} Processing loop stopped due to an error.`);
+      // Badge lỗi đã được set ở nơi xảy ra lỗi
     }
 
-  } catch (error: any) {
-    // 4. Xử lý lỗi chung (ví dụ: lỗi khi query tabs)
-    console.error("Lỗi trong handleSendAutoToPortal:", error);
-    updateToPhone("message", `Lỗi khi tự động gửi Portal: ${error.message}`, keyMessage);
+  } catch (initialError: any) {
+    // Bắt lỗi xảy ra *trước* vòng lặp (parse JSON, fetch Firebase)
+    console.error(`${logPrefix} Initial error before starting loop:`, initialError);
+    updateToPhone("message", `Lỗi khởi tạo xử lý theo lệnh: ${initialError.message}`);
+    chrome.action.setBadgeText({ text: "INIT_ERR" });
+    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+  } finally {
+    // Đảm bảo badge được xóa nếu không phải OK và không có lỗi nào set badge
+    const currentBadge = await chrome.action.getBadgeText({});
+    if (currentBadge !== "OK" && !currentBadge.includes("ERR")) {
+      chrome.action.setBadgeText({ text: '' });
+    }
   }
-};
+}
+
 const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boolean> => {
   console.log("handleSendToPortal: Bắt đầu gửi...", doiTuong);
   let bgsFirebase: firebase.database.DataSnapshot;
@@ -1088,7 +1253,7 @@ async function dieuTin(maHieus: any) {
 
 async function hoanTatTin(maHieus: any) {
   // printMaHieus(JSON.parse(data.DoiTuong) as string[], token);
-  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/hoan-tat-tin.html", "hoan-tat-tin")
+  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/hoan-tat-tin.html", "hoan-tat-tin",true)
   var text = "";
   for (let i = 0; i < maHieus.length; i++) {
     const element = maHieus[i];
@@ -1099,8 +1264,62 @@ async function hoanTatTin(maHieus: any) {
     await delay(2000)
   await chrome.scripting.executeScript({
     target: { tabId: activeTab!.id! }, func: (text) => {
+      //Điền danh sách mã hiệu chỗ tìm kiếm
       var textTr = document.querySelector("#txtLadingCode") as HTMLInputElement;
       textTr.value = text
+      // Tạo và dispatch sự kiện change
+      function pad(n: number) {
+        return n < 10 ? '0' + n : n;
+      }
+
+      const now = new Date();
+      const past = new Date();
+      past.setDate(now.getDate() - 20); // trừ 20 ngày
+
+      const todayStr = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()}`;
+      const pastStr = `${pad(past.getDate())}/${pad(past.getMonth() + 1)}/${past.getFullYear()}`;
+
+      // Gán giá trị vào input
+      const input = document.getElementById('txtDateRange');
+      (input as HTMLInputElement).value = `${pastStr} - ${todayStr}`;
+
+      // Trigger sự kiện nếu cần (nếu có event listener trên ô này)
+      const event = new Event('change', { bubbles: true });
+      if (input) {
+        input.dispatchEvent(event);
+      } else {
+        console.error("Input element is null");
+      }
+
+
+      //thực hiện nhấn nút từ id btnSearch và chờ 2s
+      const btnSearch = document.querySelector("#btnSearch") as HTMLButtonElement;
+      if (btnSearch) {
+        btnSearch.click();
+      }
+      //wait 2s
+      setTimeout(() => {
+        const event = document.createEvent('HTMLEvents');
+        event.initEvent('change', true, false);
+        //dispatch event change cho textTr
+        textTr.dispatchEvent(event);
+
+        //Chọn tất cả
+        const selectElement = document.querySelector('select[name="tbl_order_ORD002_length"]');
+        if (selectElement) {
+          (selectElement as HTMLSelectElement).value = "-1";
+          selectElement?.dispatchEvent(event);
+        } else {
+          console.error("selectElement is null");
+        }
+
+        //Đánh dấu chọn tất cả
+        const checkall = document.querySelector('#chkAll') as HTMLInputElement;
+        checkall.checked = true;
+
+        checkall.dispatchEvent(event);
+      }, 2000);
+
 
     }, args: [text]
   })
@@ -1453,6 +1672,7 @@ const getCookieFromWeb = async (url: string) => {
 
 const khoiTaoPortal = async (data: any): Promise<boolean> => {
   try {
+    console.log("Bắt đầu khởi tạo Portal...",data);
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
     let originalUrl: string | undefined;
@@ -1569,6 +1789,13 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
   updateToPhone("message", "Đã nhận lệnh khởi tạo");
 
   const temp = JSON.parse(data.DoiTuong);
+
+
+  if (temp.account && temp.password) {
+    accountPortal = temp.account;
+    passwordPortal = temp.password;
+  }
+
   const snapshot = await db.ref("PORTAL/HopDongs/" + temp.maKH).get();
   const hopDong = snapshot.val();
   return await khoiTaoPortal(hopDong);
@@ -1840,6 +2067,16 @@ function sendPong() {
   db.ref(`PORTAL/STATUS/${keyMessage}`).set({ timestamp: Date.now(), online: true });
 }
 
+function handleSaveAccount(accountPortal: string, passwordPortal: string): void {
+  if (!accountPortal || !passwordPortal || !buuCuc) {
+    alert("Tài khoản hoặc mật khẩu và bưu cục không được để trống");
+    return;
+  }
+  chrome.storage.local.set({ accountPortal: accountPortal, passwordPortal: passwordPortal }, () => {
+    console.log("Saved account and password");
+  });
+}
+
 
 
 async function openAndExportExcel(res: any, request: any = null, ishcc: boolean = false) {
@@ -2000,4 +2237,8 @@ function handleSaveKHOption(data: any): void | PromiseLike<void> {
   //save chrome local b
   chrome.storage.local.set({ currentMaKH: temp1.maKH, currentOptions: temp1.options }, function () {
   })
+  if (temp1.account && temp1.password) {
+    accountPortal = temp1.account;
+    passwordPortal = temp1.password;
+  }
 }

@@ -75,6 +75,7 @@ window.addEventListener("message", (event) => {
         const formLoginR: any = FindReact(formLogin);
         console.log("ADDLOGIN")
         if (formLoginR) {
+          console.log("Có formLoginR")
           var eventInput = new Event('input', { bubbles: true });
           debugger;
           const user: HTMLInputElement | null = document.querySelector("#username")
@@ -96,6 +97,8 @@ window.addEventListener("message", (event) => {
             "#formLogin > div.MuiGrid-root.MuiGrid-container > button"
           ) as HTMLButtonElement;
           loginBtn?.click();
+        }else {
+          console.log("Không có formLoginR")
         }
         break;
       case "ADDTIMKIEMTEXT":

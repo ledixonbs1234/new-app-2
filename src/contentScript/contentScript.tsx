@@ -62,9 +62,9 @@ window.onload = () => {
 
 chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
   (async () => {
-    console.log("ON MESSAGE CONTENT SCRIPT");
     try {
       if (msg) {
+        console.log("LISTENER CONTENT SCRIPT", msg);
         if (msg.message === "PROCESS_SINGLE_ITEM") {
           console.log("Processing single item:", msg.current.MaBuuGui);
           try {
@@ -327,8 +327,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               document.querySelector("#CaptchaText");
             if (capchar) {
               capchar.value = msg.content;
+              var isGD = msg.gd;
+              console.log("isGD", isGD);
               (document.getElementById("userid") as HTMLInputElement).value =
-                "593280_phuhv";
+                !isGD?"593280_phuhv":"59A652";
               (document.getElementById("password") as HTMLInputElement).value =
                 "Abc@123456";
 
@@ -559,45 +561,44 @@ async function processSinglePortalItem(
       if (textShow.includes("thành công")) {
         console.log("Lưu thành công:", buuGui.MaBuuGui);
         // Gửi xác nhận thành công (nếu cần)
-        const moneyThuHo = document.querySelector<HTMLInputElement>(
-          "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
-        );
 
-        // Gửi dữ liệu lên popup hoặc Firebase
-        await chrome.runtime.sendMessage({
-          event: "CONTENT",
-          message: "SEND_MH",
-          content: buuGui.MaBuuGui,
-          content1: moneyThuHo?.value ?? "ko biết",
-          keyMessage,
-        });
-      } else {
+      } else if (textShow.includes("Nhập thông tin vào trường bắt buộc")) {
+        var button = document.querySelector<HTMLElement>("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div.MuiGrid-root.MuiGrid-container.MuiGrid-item.MuiGrid-grid-xs-8 > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(3)")
+        if (button) {
+          button.click()
+          await delay(500);
+          (findAndSearchBtn as HTMLElement).click();
+        }
+      }
+      else {
         // Nếu có alert không phải thành công -> Lỗi
         console.error("Lỗi sau khi bấm lưu:", buuGui.MaBuuGui, textShow);
         throw new Error(`Lỗi Portal sau khi lưu: ${textShow}`);
       }
-    } else {
-      // Nếu không có alert, kiểm tra xem ô tìm kiếm đã xuất hiện lại chưa
-      if (!await waitForElm("#ttNumberSearch", 10)) {
-        // Nếu ô tìm kiếm không xuất hiện -> Có thể lỗi hoặc xử lý lâu
-        throw new Error(`Không thể xác nhận lưu thành công cho ${buuGui.MaBuuGui}`);
-      }
-      // Nếu ô tìm kiếm xuất hiện -> Thành công
-      console.log("Lưu thành công (không có alert):", buuGui.MaBuuGui);
-      const moneyThuHo = document.querySelector<HTMLInputElement>(
-        "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
-      );
-
-      // Gửi dữ liệu lên popup hoặc Firebase
-      await chrome.runtime.sendMessage({
-        event: "CONTENT",
-        message: "SEND_MH",
-        content: buuGui.MaBuuGui,
-        content1: moneyThuHo?.value ?? "ko biết",
-        keyMessage,
-      });
-
     }
+    // Nếu không có alert, kiểm tra xem ô tìm kiếm đã xuất hiện lại chưa
+
+    // Nếu ô tìm kiếm xuất hiện -> Thành công
+
+    if (!await waitForElm("#ttNumberSearch", 10)) {
+      // Nếu ô tìm kiếm không xuất hiện -> Có thể lỗi hoặc xử lý lâu
+      throw new Error(`Không thể xác nhận lưu thành công cho ${buuGui.MaBuuGui}`);
+    }
+
+    console.log("Lưu thành công (không có alert):", buuGui.MaBuuGui);
+    const moneyThuHo = document.querySelector<HTMLInputElement>(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
+    );
+
+    // Gửi dữ liệu lên popup hoặc Firebase
+    await chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "SEND_MH",
+      content: buuGui.MaBuuGui,
+      content1: moneyThuHo?.value ?? "ko biết",
+      keyMessage,
+    })
+
     // Hàm kết thúc thành công
     console.log(`Successfully processed ${buuGui.MaBuuGui}`);
 
@@ -820,7 +821,7 @@ const startSendCurrentCode = async (
     }
 
     // Kiểm tra lại phần nhập mã số
-    if (!await waitForElm("#ttNumberSearch", 10)) return (sharedState.isRunning = false);
+
     if (!sharedState.isRunning) return;
 
     const moneyThuHo = document.querySelector<HTMLInputElement>(
@@ -835,7 +836,7 @@ const startSendCurrentCode = async (
       content1: moneyThuHo?.value ?? "ko biết",
       keyMessage,
     });
-
+    if (!await waitForElm("#ttNumberSearch", 10)) return (sharedState.isRunning = false);
   } catch (error) {
     console.error("Error in startSendCurrentCode:", error);
     sharedState.isRunning = false;
