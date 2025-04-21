@@ -5,6 +5,11 @@ import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
 import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
 import { delay, createOrActiveTab, waitForTabToLoad } from './util';
 // import firebase from 'firebase/compat/app';
+
+// Khai báo biến toàn cục từ importScripts để TypeScript nhận diện
+declare var XLSX: any;
+declare var firebase: any; // Khai báo firebase
+
 type FirebaseConfig = {
   apiKey: string;
   authDomain: string;
@@ -39,21 +44,7 @@ let passwordPortal: string = ""
 let buuCuc = ""
 console.log('Background script is running');
 
-// --- ĐỊNH NGHĨA TYPE (Đảm bảo khớp với dữ liệu thực tế) ---
-type BuuGuiProps = {
-  KhoiLuong: number | string; // Có thể là số hoặc chuỗi
-  MaBuuGui: string;
-  Id: string | null;
-  IsBlackList: boolean;
-  TimeTrangThai: string | null;
-  TrangThai: string;
-  index: number;
-  Money: number | string | null;
-  ListDo: string[] | null;
-  TrangThaiRequest: string | null;
-  // Thêm các thuộc tính khác nếu có
-};
-// --- TRẠNG THÁI CỤC BỘ (Cập nhật type) ---
+// --- TRẠNG THÁI CỤC BỘ (Sử dụng type BuuGuiProps đã import) ---
 /**
  * @description Danh sách đầy đủ các đối tượng BuuGuiProps được quét gần nhất từ Firebase.
  * Đây là "nguồn chân lý" (source of truth) về những gì người dùng muốn xử lý.
@@ -508,7 +499,7 @@ async function processNextItemInBackground(): Promise<void> {
 
 
 // --- HÀM MỚI: Tìm Tab Portal ---
-async function findPortalTabId(maKH:string = ""): Promise<number | undefined> {
+async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
   await delay(500); // Đợi một chút để đảm bảo tab đã load xong
   console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...");
   let foundReadyTabId: number | null = null;
@@ -535,6 +526,16 @@ async function findPortalTabId(maKH:string = ""): Promise<number | undefined> {
           console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
           foundReadyTabId = tab.id;
           readyTabInfo = tab; // Lưu lại thông tin tab
+          var currentMaKH = "";
+          if (maKH != "") {
+            currentMaKH = maKH
+          } else {
+            currentMaKH = await chromeStorageGet("currentMaKH")
+          }
+          window.postMessage({
+            type: "CONTENT",
+            message: "GETIDKH",
+          });
           break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
         } else {
           console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
@@ -568,9 +569,10 @@ async function findPortalTabId(maKH:string = ""): Promise<number | undefined> {
       console.log("handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...");
       updateToPhone("message", "Đang khởi tạo Portal...", keyMessage);
       var currentMaKH = "";
-      if(maKH!= ""){
+      if (maKH != "") {
         currentMaKH = maKH
-      }else{
+        console.log("handleSendAutoToPortal: currentMaKH:", currentMaKH);
+      } else {
         currentMaKH = await chromeStorageGet("currentMaKH")
       }
 
@@ -672,7 +674,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
-  console.log("Data changed:",JSON.stringify( data));
+  console.log("Data changed:", JSON.stringify(data));
 
   const isOk: boolean = await checkToken();
   if (!isOk) {
@@ -710,6 +712,8 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     "sendtoendandprint": async (data: any) => handleChayDenCuoiVaIn(),
     "savekhoptions": async (data: any) => handleSaveKHOption(data),
     "edithanghoa": async (data: any) => handleEditHangHoa(data),
+    "updatekl": async (data: any) => await handleEditKL(data),
+
     "getpns": async (data: any) => {
       let dayLast;
       try {
@@ -748,7 +752,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       }
     },
     "loginpns": async (data: any) => {
-    
+
       const listTab = await chrome.tabs.query({});
       if (listTab.length === 0) return;
       for (let i = 0; i < listTab.length; i++) {
@@ -758,7 +762,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
             {
               message: "SENDCAPCHAR",
               content: data.DoiTuong,
-              gd:false
+              gd: false
             },
             (res) => {
               if (!chrome.runtime.lastError) {
@@ -782,7 +786,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
             {
               message: "SENDCAPCHAR",
               content: data.DoiTuong,
-              gd:true
+              gd: true
             },
             (res) => {
               if (!chrome.runtime.lastError) {
@@ -1253,7 +1257,7 @@ async function dieuTin(maHieus: any) {
 
 async function hoanTatTin(maHieus: any) {
   // printMaHieus(JSON.parse(data.DoiTuong) as string[], token);
-  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/hoan-tat-tin.html", "hoan-tat-tin",true)
+  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/hoan-tat-tin.html", "hoan-tat-tin", true)
   var text = "";
   for (let i = 0; i < maHieus.length; i++) {
     const element = maHieus[i];
@@ -1670,9 +1674,78 @@ const getCookieFromWeb = async (url: string) => {
   return cookiesText;
 };
 
+// --- HÀM MỚI: Đảm bảo đăng nhập Portal ---
+/**
+ * Kiểm tra xem tab có cần đăng nhập Portal không và thực hiện đăng nhập nếu cần.
+ * @param tabId ID của tab cần kiểm tra và đăng nhập.
+ * @returns Promise chứa đối tượng { success: boolean, loadedTab?: chrome.tabs.Tab }
+ */
+async function ensurePortalLogin(tabId: number): Promise<{ success: boolean; loadedTab?: chrome.tabs.Tab }> {
+  let loadedTab: chrome.tabs.Tab | undefined;
+  let originalUrl: string | undefined;
+  let loginSuccess = false;
+
+  try {
+    // Lấy thông tin tab hiện tại và chờ tải xong
+    loadedTab = await waitForTabToLoad(tabId);
+    console.log(`ensurePortalLogin: Tab ${tabId} tải xong tại URL: ${loadedTab.url}`);
+
+    if (loadedTab.url && loadedTab.url.includes('login')) {
+      await delay(1000);
+      console.log(`ensurePortalLogin: Tab ${tabId} đang ở trang login. Thực hiện đăng nhập...`);
+      updateToPhone("message", "Đang đăng nhập vào Portal...");
+      originalUrl = loadedTab.url; // Lưu URL trang login
+
+      // Gửi lệnh đăng nhập tới content script
+      await chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: (mAccount, mPassword) => {
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDLOGIN",
+            account: mAccount,
+            password: mPassword,
+          });
+        },
+        args: [accountPortal, passwordPortal]
+      });
+      console.log(`ensurePortalLogin: Đã tiêm script đăng nhập vào tab ${tabId}`);
+
+      // Chờ tab tải xong sau khi đăng nhập
+      console.log(`ensurePortalLogin: Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`);
+      loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 6000); // Chờ tối đa 6s
+      console.log(`ensurePortalLogin: Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`);
+
+      // Kiểm tra lại xem đăng nhập thành công không
+      if (loadedTab?.url?.includes('login')) {
+        console.error(`ensurePortalLogin: Đăng nhập thất bại, vẫn ở trang login (${tabId}).`);
+        updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
+        loginSuccess = false;
+      } else if (!loadedTab?.url) {
+        console.error(`ensurePortalLogin: Không lấy được URL cuối cùng của tab ${tabId} sau khi chờ.`);
+        updateToPhone("message", "Lỗi: Không xác định được trạng thái sau đăng nhập.");
+        loginSuccess = false;
+      } else {
+        console.log(`ensurePortalLogin: Đăng nhập thành công (đã rời trang login) cho tab ${tabId}.`);
+        loginSuccess = true;
+      }
+    } else {
+      console.log(`ensurePortalLogin: Tab ${tabId} không ở trang login, giả sử đã đăng nhập.`);
+      loginSuccess = true; // Giả sử đã đăng nhập nếu không thấy trang login
+    }
+  } catch (error: any) {
+    console.error(`ensurePortalLogin: Lỗi trong quá trình kiểm tra/đăng nhập cho tab ${tabId}:`, error);
+    updateToPhone("message", `Lỗi đăng nhập Portal: ${error.message}`);
+    loginSuccess = false;
+  }
+
+  return { success: loginSuccess, loadedTab: loadedTab };
+}
+// --- KẾT THÚC HÀM MỚI ---
+
 const khoiTaoPortal = async (data: any): Promise<boolean> => {
   try {
-    console.log("Bắt đầu khởi tạo Portal...",data);
+    console.log("Bắt đầu khởi tạo Portal...", data);
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
     let originalUrl: string | undefined;
@@ -1690,66 +1763,16 @@ const khoiTaoPortal = async (data: any): Promise<boolean> => {
     const tabId = initialTab.id;
 
     console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
-    // Chờ cho tab tải xong
-    loadedTab = await waitForTabToLoad(tabId);
-    console.log(`Tab ${tabId} tải xong lần đầu tại URL: ${loadedTab.url}`);
 
-
-
-    //check loadedTab url
-    if (loadedTab.url && loadedTab.url.includes('login')) {
-      await delay(1000);
-      console.log("Tab đang ở trang login. Thực hiện đăng nhập...");
-      updateToPhone("message", "Đang đăng nhập vào Portal...");
-      originalUrl = loadedTab.url; // *** LƯU LẠI URL TRANG LOGIN ***
-
-      // Gửi lệnh đăng nhập tới content script
-      await chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        func: (mAccount, mPassword) => {
-          // Gửi tin nhắn đến mainscript.js
-          window.postMessage({
-            type: "CONTENT",
-            message: "ADDLOGIN",
-            account: mAccount,
-            password: mPassword,
-          })
-        },
-        args: [accountPortal, passwordPortal]
-      });
-      console.log("Đã tiêm script đăng nhập vào tab", tabId);
-
-
-      // *** CHỜ CHO ĐẾN KHI TAB TẢI XONG SAU KHI ĐĂNG NHẬP ***
-      console.log(`Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`);
-      loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 6000); // Chờ tối đa 45s, kiểm tra URL đã khác trang login chưa
-      console.log(`Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`);
-      // *** KẾT THÚC PHẦN CẬP NHẬT QUAN TRỌNG ***
-
-      // Kiểm tra lại xem đăng nhập thành công không (không còn ở trang login)
-      if (loadedTab?.url?.includes('login')) {
-        console.error("Đăng nhập thất bại, vẫn ở trang login.");
-        updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
-        loginSuccess = false;
-      } else if (!loadedTab?.url) {
-        console.error("Không lấy được URL cuối cùng của tab sau khi chờ.");
-        updateToPhone("message", "Lỗi: Không xác định được trạng thái sau đăng nhập.");
-        loginSuccess = false;
-      }
-      else {
-        console.log("Đăng nhập thành công (đã rời trang login).");
-        loginSuccess = true;
-      }
-    }
-    else {
-      console.log("Tab không ở trang login, giả sử đã đăng nhập.");
-      loginSuccess = true; // Giả sử đã đăng nhập nếu không thấy trang login
-    }
-
+    // --- Sử dụng hàm ensurePortalLogin ---
+    const loginResult = await ensurePortalLogin(tabId);
+    loginSuccess = loginResult.success;
+    loadedTab = loginResult.loadedTab; // Cập nhật loadedTab từ kết quả
+    // --- Kết thúc sử dụng hàm ensurePortalLogin ---
 
     // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
     if (loginSuccess && loadedTab?.id) {
-      console.log(`Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`);
+      console.log(`khoiTaoPortal: Đăng nhập OK. Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`);
       updateToPhone("message", "Đang khởi tạo hợp đồng...");
       await delay(1000)
 
@@ -1827,12 +1850,19 @@ const changePNSObjectToSnapshots = (list: any): DataSnapshotProps[] => {
 const changeSnapshotToKHs = (snapshots: DataSnapshotProps[]): KhachHangProps[] => {
   const khachHangs: KhachHangProps[] = [];
   snapshots.forEach((element) => {
+    // Sửa lỗi type: Bổ sung các thuộc tính còn thiếu và đảm bảo KhoiLuong là string nếu cần
     const buuGui: BuuGuiProps = {
       index: 1,
-      KhoiLuong: element.KhoiLuong,
+      KhoiLuong: element.KhoiLuong, // Sử dụng giá trị gốc, type import sẽ xử lý
       MaBuuGui: element.MaBuuGui,
       TimeTrangThai: element.TimeTrangThai,
       TrangThai: element.TrangThai,
+      // Bổ sung các thuộc tính còn thiếu từ type BuuGuiProps
+      Id: null, // Hoặc giá trị mặc định phù hợp khác
+      IsBlackList: false, // Hoặc giá trị mặc định phù hợp khác
+      Money: null, // Hoặc giá trị mặc định phù hợp khác
+      ListDo: null, // Hoặc giá trị mặc định phù hợp khác
+      TrangThaiRequest: null // Hoặc giá trị mặc định phù hợp khác,
     };
 
     const b = khachHangs.findIndex((m) => m.MaKH === element.MaKH);
@@ -2241,4 +2271,77 @@ function handleSaveKHOption(data: any): void | PromiseLike<void> {
     accountPortal = temp1.account;
     passwordPortal = temp1.password;
   }
+}
+const handleEditKL = async (data: any): Promise<void> => {
+  //https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1041187714&id=JEeKLN4s00nnt4kqNwWKWfvINfD
+  var temp1 = JSON.parse(data.DoiTuong);
+  let loginSuccess = false;
+  let originalUrl: string | undefined;
+  let loadedTab: chrome.tabs.Tab | undefined = undefined;
+  var initialTab = await createOrActiveTab(
+    "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
+    "portalkhl.vnpost.vn",
+    true
+  );
+
+  if (!initialTab || !initialTab.id) {
+    console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
+    updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
+    return;
+  }
+  const tabId = initialTab.id;
+
+  console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
+
+  // --- Sử dụng hàm ensurePortalLogin ---
+  const loginResult = await ensurePortalLogin(tabId);
+  loginSuccess = loginResult.success;
+  loadedTab = loginResult.loadedTab; // Cập nhật loadedTab từ kết quả
+
+  // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
+  if (loginSuccess && loadedTab && !loadedTab.url?.includes('accept-api-dtl')) {
+      console.log("handleEditKL: Đăng nhập thành công, mở lại đúng URL chỉnh sửa KL...");
+      await createOrActiveTab(
+          "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
+          "portalkhl.vnpost.vn",
+          true // Kích hoạt tab này
+      );
+      // Chờ tab mới tải xong (hoặc tab cũ điều hướng xong)
+      loadedTab = await waitForTabToLoad(loadedTab.id!); // Chờ trên cùng tabId
+      console.log(`handleEditKL: Tab ${loadedTab?.id} đã ở đúng URL chỉnh sửa KL: ${loadedTab?.url}`);
+      await delay(1500); // Chờ thêm chút cho ổn định
+  }
+  // --- Kết thúc sử dụng hàm ensurePortalLogin ---
+
+
+  // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
+  if (loginSuccess && loadedTab?.id) {
+    console.log(`handleEditKL: Đăng nhập OK. Gửi lệnh CHANGEKL cho tab ${loadedTab.id}...`);
+    chrome.tabs.sendMessage(loadedTab.id, { // Sử dụng loadedTab.id đã được cập nhật
+      message: "CHANGEKL", // Lệnh mới
+      kl: temp1.Weight,
+      keyMessage: keyMessage,
+    }, async (response) => {
+
+      // Kiểm tra lỗi runtime trước
+      if (chrome.runtime.lastError) {
+        console.error(`handleEditKL: Lỗi gửi/nhận CHANGEKL: ${chrome.runtime.lastError.message}`);
+        return;
+      }
+      console.log("handleEditKL: Phản hồi từ CHANGEKL:", response);
+      // Xử lý phản hồi nếu cần
+      if (response && response.status === 'success') {
+          updateToPhone("message", `Đã cập nhật KL cho ${temp1.IDCODE}`);
+          // Có thể đóng tab sau khi thành công nếu muốn
+          // await chrome.tabs.remove(loadedTab.id!);
+      } else {
+          updateToPhone("message", `Lỗi cập nhật KL cho ${temp1.IDCODE}: ${response?.error || 'Không rõ'}`);
+      }
+
+    });
+  } else if (!loginSuccess) {
+    console.log("handleEditKL: Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.");
+    // Tin nhắn lỗi đã được gửi trong ensurePortalLogin
+  }
+  // Hàm này không cần trả về boolean nữa vì nó xử lý hoàn toàn bên trong
 }

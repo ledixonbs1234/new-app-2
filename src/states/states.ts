@@ -17,6 +17,11 @@ export type BuuGuiProps = {
     MaBuuGui :string
     TrangThai:string
     TimeTrangThai: string,
+    Id:string|null,
+    IsBlackList :boolean,
+    Money: null, // Hoặc giá trị mặc định phù hợp khác
+    ListDo: null, // Hoặc giá trị mặc định phù hợp khác
+    TrangThaiRequest: null
 }
 export type KhachHangProps = {
     Index: number,

@@ -77,7 +77,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             // --- BÁO LỖI VỀ BACKGROUND ---
             callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
           }
-        } else
+        }
+        else if (msg.message === "CHANGEKL") {
+          changeKL(msg.kl);
+        }
+        else
           if (msg.message === "ADD") {
             chrome.runtime.sendMessage({
               event: "BADGE",
@@ -212,28 +216,34 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             // searchDetailBox?.focus();
             var customerCode: HTMLInputElement | null =
               document.querySelector("#customerCode");
+            if (customerCode) {
+              customerCode.value = msg.MaKH; // Đặt giá trị trước
+              customerCode.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+              customerCode.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+              customerCode?.dispatchEvent(new Event("blur"));
 
-            // gán giá trị cho ô tìm kiếm
-            customerCode?.focus();
-            chrome.runtime.sendMessage({
-              event: "CONTENT",
-              message: "SEND_MAKH",
-              content: msg.MaKH,
-              keyMessage: msg.keyMessage,
-            });
+              // click vào nút địa chỉ
 
-            window.postMessage({
-              type: "CONTENT",
-              message: "ADDTIMKIEMTEXT",
-              data: msg.MaKH,
-            });
-            await delay(200);
-            customerCode?.dispatchEvent(new Event("blur"));
-
-            // click vào nút địa chỉ
+            }
             var address: HTMLInputElement | null =
               document.querySelector("#customerAddress");
             address?.focus();
+
+            // gán giá trị cho ô tìm kiếm
+            // customerCode?.focus();
+            // chrome.runtime.sendMessage({
+            //   event: "CONTENT",
+            //   message: "SEND_MAKH",
+            //   content: msg.MaKH,
+            //   keyMessage: msg.keyMessage,
+            // });
+
+            // window.postMessage({
+            //   type: "CONTENT",
+            //   message: "ADDTIMKIEMTEXT",
+            //   data: msg.MaKH,
+            // });
+
             chrome.runtime.sendMessage({
               event: "CONTENT",
               message: "MESSAGE",
@@ -258,17 +268,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
                   ) as HTMLButtonElement
                 )?.click();
 
-                await delay(1000);
+                await delay(500);
               }
             }
 
             //ghi địa chỉ
             if (msg.Address !== "") {
-              window.postMessage({
-                type: "CONTENT",
-                message: "ADDADDRESSTEXT",
-                data: msg.Address,
-              });
+              // window.postMessage({
+              //   type: "CONTENT",
+              //   message: "ADDADDRESSTEXT",
+              //   data: msg.Address,
+              // });
+              if (address) {
+                address.value = msg.Address; // Đặt giá trị trước
+              }
+
+              address?.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+              address?.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+              address?.dispatchEvent(new Event("blur"));
               console.log("ghi địa chỉ");
             }
 
@@ -330,7 +347,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               var isGD = msg.gd;
               console.log("isGD", isGD);
               (document.getElementById("userid") as HTMLInputElement).value =
-                !isGD?"593280_phuhv":"59A652";
+                !isGD ? "593280_phuhv" : "59A652";
               (document.getElementById("password") as HTMLInputElement).value =
                 "Abc@123456";
 
@@ -405,12 +422,21 @@ async function processSinglePortalItem(
     if (!selector || !numberSearch) {
       throw new Error("Không tìm thấy ô tìm kiếm mã hoặc dialog Portal.");
     }
-
-    window.postMessage({
-      type: "CONTENT",
-      message: "ADDCODE",
-      data: buuGui.MaBuuGui,
-    });
+    numberSearch.value = buuGui.MaBuuGui; // Đặt giá trị trước
+    numberSearch.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+    numberSearch.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+    numberSearch.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+    const searchButton: HTMLElement | null = document.querySelector(
+      "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+    );
+    if (searchButton) {
+      searchButton?.click();
+    }
+    // window.postMessage({
+    //   type: "CONTENT",
+    //   message: "ADDCODE",
+    //   data: buuGui.MaBuuGui,
+    // });
 
     // Chờ một chút để mã được nhập và dialog (nếu có) xuất hiện
     await delay(700); // Tăng nhẹ delay
@@ -468,13 +494,19 @@ async function processSinglePortalItem(
     if (weightThucTe) {
       if (
         buuGui.KhoiLuong.toString() !== weightNotDot) {
-        window.postMessage({
-          type: "CONTENT",
-          message: "ADDWEIGHT",
-          data: buuGui.MaBuuGui,
-          kl: buuGui.KhoiLuong,
-        });
-        await delay(400);
+        var klTemp = buuGui.KhoiLuong.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
+        weightThucTe.value = klTemp; // Đặt giá trị trước
+        weightThucTe.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        weightThucTe.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        weightThucTe.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+
+        // window.postMessage({
+        //   type: "CONTENT",
+        //   message: "ADDWEIGHT",
+        //   data: buuGui.MaBuuGui,
+        //   kl: buuGui.KhoiLuong,
+        // });
+        // await delay(400);
       }
       else if (options) {
         if (options.selectedOption === "changeKLFromTo") {
@@ -846,3 +878,33 @@ const startSendCurrentCode = async (
 let currentMH: BuuGuiProps;
 let list: BuuGuiProps[] = [];
 let isCheckedKL = false;
+async function changeKL(kl: any) {
+  try {
+    console.log("Đang thay đổi khối lượng", kl);
+    await delay(1000);
+    const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
+    if (weightThucTe) {
+      window.postMessage({
+        type: "CONTENT",
+        message: "ADDWEIGHT",
+        kl: kl,
+      });
+      await delay(400);
+    }
+    // Xử lý nút tìm kiếm
+    const findAndSearchBtn = await waitForElm(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
+    );
+
+    (findAndSearchBtn as HTMLElement).click();
+    await delay(500);
+
+    // Kiểm tra lại phần nhập mã số
+
+  } catch (error) {
+    console.error("Error in startSendCurrentCode:", error);
+    sharedState.isRunning = false;
+  }
+
+}
+

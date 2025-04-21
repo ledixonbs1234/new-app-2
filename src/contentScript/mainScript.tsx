@@ -149,6 +149,17 @@ window.addEventListener("message", (event) => {
         });
 
         break;
+        case "GETMAKH":
+        var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
+        var c1 = FindReact(c)
+        var id = c1.props.itemHdr.customerCode
+        window.postMessage({
+          type: "MAIN",
+          message: "GETMAKH",
+          data: id
+        });
+
+        break;
       case "GETIDKHEXCEL":
         var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
         var c1 = FindReact(c)
@@ -166,11 +177,7 @@ window.addEventListener("message", (event) => {
           });
 
         }
-
-
         break;
-
-
       default:
         break;
     }
