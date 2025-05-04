@@ -33,9 +33,8 @@ const firebaseConfig: FirebaseConfig = {
 let ref: firebase.database.Reference | null = null;
 let refPing: firebase.database.Reference | null = null;
 let refScannedItems: firebase.database.Reference | null = null; // Listener mới
-let refCommand: firebase.database.Reference | null = null; // Listener cho command (nếu tách riêng)
 
-let db: any = null;
+let db: firebase.database.Database | null = null;
 let keyMessage: string = "maychu";
 let TimeStampTemp: string = "";
 let token: string = "";
@@ -98,7 +97,6 @@ let isStoppedOnError: boolean = false;
 let isFinalProcessingTriggered: boolean = false;
 const BUFFER_SIZE = 5;
 // --- KẾT THÚC TRẠNG THÁI CỤC BỘ MỚI ---
-var TimeStampItemsTemp = ""
 
 type Snapshot = {
   TimeStamp?: string;
@@ -132,6 +130,9 @@ async function initFirebase(): Promise<void> {
     firebase.initializeApp(firebaseConfig);
   }
   db = firebase.database();
+  if(db === null) {
+    return
+  }
 
 
   ref = db.ref(`PORTAL/CHILD/${keyMessage}/message/topc`);
@@ -146,8 +147,6 @@ async function initFirebase(): Promise<void> {
   // --- KẾT THÚC Listener MỚI ---
 
   // Khởi tạo các giá trị timestamp lần đầu
-  const initialItemsSnapshot = await refScannedItems.get();
-  TimeStampItemsTemp = initialItemsSnapshot.val()?.TimeStamp || "";
 
   console.log("Firebase initialized, listening for scanned items and commands on key:", keyMessage);
 
@@ -576,7 +575,7 @@ async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
         currentMaKH = await chromeStorageGet("currentMaKH")
       }
 
-      const snapshot = await db.ref("PORTAL/HopDongs/" + currentMaKH).get();
+      const snapshot = await db!.ref("PORTAL/HopDongs/" + currentMaKH).get();
       const hopDong = snapshot.val();
       // Gọi hàm khởi tạo (đã được sửa để trả về boolean)
       const isKhoiTaoOK: boolean = await khoiTaoPortal(hopDong); // Giả sử handleKhoiTao trả về boolean
@@ -709,7 +708,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     "sendtoportal": async (data: any) => { handleSendToPortal(data.DoiTuong) },
     // "test": async (data: any) => { await hoanTatTinPNSFetch(["CK990242988VN", "CK990403835VN"], 10) },
     "sendautotoportal": async (data: any) => handleSendAutoToPortal(data),
-    "sendtoendandprint": async (data: any) => handleChayDenCuoiVaIn(),
+    "sendtoendandprint": async () => handleChayDenCuoiVaIn(),
     "savekhoptions": async (data: any) => handleSaveKHOption(data),
     "edithanghoa": async (data: any) => handleEditHangHoa(data),
     "updatekl": async (data: any) => await handleEditKL(data),
@@ -817,7 +816,7 @@ initFirebase();
 setUpAlarm()
 
 // --- Listener TIN NHẮN từ content script ---
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.event === "CONTENT")
     if (request.message === "SEND_CAPCHAR") {
 
@@ -959,7 +958,7 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     console.log(`${logPrefix} Fetching BuuGuis from Firebase: PORTAL/BuuGuis/`);
     let bgs: BuuGuiProps[];
     try {
-      const bgsFirebase = await db.ref("PORTAL/BuuGuis/").get();
+      const bgsFirebase = await db!.ref("PORTAL/BuuGuis/").get();
       const rawVal = bgsFirebase.val();
       if (!rawVal) {
         console.error(`${logPrefix} No data found at PORTAL/BuuGuis/`);
@@ -1140,7 +1139,7 @@ const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boole
 
   try {
     // Lấy dữ liệu từ Firebase
-    bgsFirebase = await db.ref("PORTAL/BuuGuis/").get();
+    bgsFirebase = await db!.ref("PORTAL/BuuGuis/").get();
     const rawVal = bgsFirebase.val();
     if (!rawVal) {
       console.error("handleSendToPortal: Không lấy được dữ liệu BuuGuis từ Firebase.");
@@ -1430,10 +1429,10 @@ const handleGetDataFromPortal = async (time: string) => {
       NguoiNhap: m.username,
     }));
     // / Xóa dữ liệu tại "PORTAL/MAINPAGE / "
-    await db.ref("PORTAL/MAINPAGE/").remove();
+    await db!.ref("PORTAL/MAINPAGE/").remove();
 
     // Ghi dữ liệu mới vào "PORTAL/MAINPAGE/"
-    await db.ref("PORTAL/MAINPAGE/").set(newItems);
+    await db!.ref("PORTAL/MAINPAGE/").set(newItems);
 
   } catch (error) {
     console.error("Error fetching data from portal:", error);
@@ -1481,7 +1480,7 @@ const updateToPhone = async (
   key: string = keyMessage
 ) => {
 
-  await db.ref(`PORTAL/CHILD/${key}/message/tophone`).set({
+  await db!.ref(`PORTAL/CHILD/${key}/message/tophone`).set({
     Lenh: lenh,
     DoiTuong: doiTuong,
     TimeStamp: Date.now().toLocaleString(),
@@ -1492,10 +1491,9 @@ const updateToPhone = async (
 const updateToPC = async (
   lenh: String,
   doiTuong: String,
-  key: string = keyMessage
 ) => {
 
-  await db.ref(`${keyMessage}/message/topc`).set({
+  await db!.ref(`${keyMessage}/message/topc`).set({
     Lenh: lenh,
     DoiTuong: doiTuong,
     TimeStamp: Date.now().toLocaleString(),
@@ -1646,33 +1644,30 @@ const handleGetPNS = async (dayLast: any) => {
         (m) => m.TrangThai === "Đã phân hướng"
       ).length;
     });
-    await db.ref("PNS/KhachHangs").set(khachHangsTemp);
-    await db.ref("PNS/TimeUpdate").set(new Date().toLocaleTimeString());
+    await db!.ref("PNS/KhachHangs").set(khachHangsTemp);
+    await db!.ref("PNS/TimeUpdate").set(new Date().toLocaleTimeString());
   } else {
     updateToPhone("message", "Chưa đăng nhập PNS");
     await khoitaoPNS();
   }
 };
-const tichHopCookieToString = (cookies: chrome.cookies.Cookie[]): string => {
-  var text = "";
-  cookies.forEach((m) => {
-    text += m.name + "=" + m.value + "; ";
-  });
-  return text;
-};
+// const tichHopCookieToString = (cookies: chrome.cookies.Cookie[]): string => {
+//   var text = "";
+//   cookies.forEach((m) => {
+//     text += m.name + "=" + m.value + "; ";
+//   });
+//   return text;
+// };
 
-const getAllCookies = (url: string) => {
-  return new Promise<string>((resolve, _reject) => {
-    chrome.cookies.getAll({ domain: url }, (cookies) => {
-      const texts: string = tichHopCookieToString(cookies);
-      resolve(texts);
-    });
-  });
-};
-const getCookieFromWeb = async (url: string) => {
-  const cookiesText = await getAllCookies(url);
-  return cookiesText;
-};
+// const getAllCookies = (url: string) => {
+//   return new Promise<string>((resolve, _reject) => {
+//     chrome.cookies.getAll({ domain: url }, (cookies) => {
+//       const texts: string = tichHopCookieToString(cookies);
+//       resolve(texts);
+//     });
+//   });
+// };
+
 
 // --- HÀM MỚI: Đảm bảo đăng nhập Portal ---
 /**
@@ -1748,7 +1743,6 @@ const khoiTaoPortal = async (data: any): Promise<boolean> => {
     console.log("Bắt đầu khởi tạo Portal...", data);
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
-    let originalUrl: string | undefined;
     var initialTab = await createOrActiveTab(
       "https://portalkhl.vnpost.vn/accept-api",
       "portalkhl.vnpost.vn",
@@ -1819,7 +1813,7 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
     passwordPortal = temp.password;
   }
 
-  const snapshot = await db.ref("PORTAL/HopDongs/" + temp.maKH).get();
+  const snapshot = await db!.ref("PORTAL/HopDongs/" + temp.maKH).get();
   const hopDong = snapshot.val();
   return await khoiTaoPortal(hopDong);
 };
@@ -1892,7 +1886,7 @@ const changeSnapshotToKHs = (snapshots: DataSnapshotProps[]): KhachHangProps[] =
 const getBuuGuisFromFirebase = async () => {
   //change to compat
 
-  const bgsFirebase = await ref.child("PORTAL/BuuGuis/").get();
+  const bgsFirebase = await ref!.child("PORTAL/BuuGuis/").get();
   return JSON.parse(bgsFirebase.val());
 };
 
@@ -2093,19 +2087,19 @@ const loginDirect = async (account: string, password: string): Promise<string | 
   return data.tokenFe || null;
 };
 
-function sendPong() {
-  db.ref(`PORTAL/STATUS/${keyMessage}`).set({ timestamp: Date.now(), online: true });
-}
+// function sendPong() {
+//   db.ref(`PORTAL/STATUS/${keyMessage}`).set({ timestamp: Date.now(), online: true });
+// }
 
-function handleSaveAccount(accountPortal: string, passwordPortal: string): void {
-  if (!accountPortal || !passwordPortal || !buuCuc) {
-    alert("Tài khoản hoặc mật khẩu và bưu cục không được để trống");
-    return;
-  }
-  chrome.storage.local.set({ accountPortal: accountPortal, passwordPortal: passwordPortal }, () => {
-    console.log("Saved account and password");
-  });
-}
+// function handleSaveAccount(accountPortal: string, passwordPortal: string): void {
+//   if (!accountPortal || !passwordPortal || !buuCuc) {
+//     alert("Tài khoản hoặc mật khẩu và bưu cục không được để trống");
+//     return;
+//   }
+//   chrome.storage.local.set({ accountPortal: accountPortal, passwordPortal: passwordPortal }, () => {
+//     console.log("Saved account and password");
+//   });
+// }
 
 
 
@@ -2201,7 +2195,7 @@ async function handleAddPNS(dayLast: any) {
     console.log(khachHangsTemp)
 
     //get khachHangs from firebase
-    const responsef: any = await db.ref("PNS/KhachHangs").get();
+    const responsef: any = await db!.ref("PNS/KhachHangs").get();
     var khachHangsFirebase: KhachHangProps[] = responsef.val();
     //insert khachHangsFirebase to khachHangsTemp
     khachHangsTemp.forEach((m) => {
@@ -2226,8 +2220,8 @@ async function handleAddPNS(dayLast: any) {
         (m) => (m.TrangThai === "Đã phân hướng")
       ).length;
     });
-    await db.ref("PNS/KhachHangs").set(khachHangsFirebase);
-    await db.ref("PNS/TimeUpdate").set(new Date().toLocaleTimeString());
+    await db!.ref("PNS/KhachHangs").set(khachHangsFirebase);
+    await db!.ref("PNS/TimeUpdate").set(new Date().toLocaleTimeString());
   } else {
     updateToPhone("message", "Chưa đăng nhập PNS");
     await khoitaoPNS();
@@ -2276,7 +2270,6 @@ const handleEditKL = async (data: any): Promise<void> => {
   //https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1041187714&id=JEeKLN4s00nnt4kqNwWKWfvINfD
   var temp1 = JSON.parse(data.DoiTuong);
   let loginSuccess = false;
-  let originalUrl: string | undefined;
   let loadedTab: chrome.tabs.Tab | undefined = undefined;
   var initialTab = await createOrActiveTab(
     "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,

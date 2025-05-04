@@ -196,9 +196,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             } catch (error) { }
 
           }
-          else if (msg.message === "CHECKKL") {
-            isCheckedKL = msg.isChecked;
-          } else if (msg.message === "KHOITAOPORTAL") {
+           else if (msg.message === "KHOITAOPORTAL") {
             console.log("Content Đang chạy KHOITAOPORTAL ", msg);
 
             //kiêmr tra xem có form không
@@ -877,7 +875,6 @@ const startSendCurrentCode = async (
 
 let currentMH: BuuGuiProps;
 let list: BuuGuiProps[] = [];
-let isCheckedKL = false;
 async function changeKL(kl: any) {
   try {
     console.log("Đang thay đổi khối lượng", kl);

@@ -51,7 +51,6 @@ export const popupSlice = createSlice({
           (m) => m.TrangThai === "Đã phân hướng"
         ).length;
       });
-      var kh = action.payload.find(m=>m.MaKH === "C002562539")
       state.khachHangList = action.payload;
       state.selectedKH = null
       state.selectedBG = null

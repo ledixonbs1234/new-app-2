@@ -1,4 +1,3 @@
-import { update } from 'firebase/database';
 
 // import { PDFDocument } from 'pdf-lib';
 importScripts('pdf-lib.js');
@@ -135,7 +134,7 @@ export function waitForTabLoadAfterAction(tabId: number, originalUrl?: string, t
   console.log(`Đang chờ tab ${tabId} tải xong (Timeout: ${timeoutMs}ms)`);
   return new Promise((resolve, reject) => {
     let timeoutHandle: NodeJS.Timeout | null = null
-    const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+    const listener = (_updatedTabId: number, _changeInfo: chrome.tabs.TabChangeInfo, _tab: chrome.tabs.Tab) => {
       chrome.tabs.get(tabId, (currentTab) => {
         if (chrome.runtime.lastError) {
           //Tab co thể đã bị đóng

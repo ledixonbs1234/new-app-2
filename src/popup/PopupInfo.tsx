@@ -3,12 +3,6 @@ import "./popup.css";
 
 import React from "react";
 
-type HopDongProps = {
-  Address: string;
-  IsChooseHopDong: boolean;
-  MaKH: string;
-  STTHopDong: number;
-};
 
 // type PopupProps = {
 // handleClick :React.MouseEventHandler<HTMLButtonElement>

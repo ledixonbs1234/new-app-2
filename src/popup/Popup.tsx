@@ -1,6 +1,6 @@
 
 
-import { Button, Card, Input, List, Space, Typography } from "antd";
+import { Button, Card, Input,  Space } from "antd";
 import { useEffect, useState } from "react";
 
 export default function Popup() {
