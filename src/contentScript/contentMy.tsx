@@ -648,10 +648,13 @@ function findSuggestions(inputText: string): void {
 
         if (shouldShowSuggestion) {
             let suggestionSuffix = appendedParts.join(' ');
+
             let separator = ', ';
             if (inputText.endsWith(',') || inputText.endsWith(', ') || remainingInput.trim().startsWith(',')) {
                 separator = ' ';
-            } else if (inputText.endsWith(' ') || remainingInput.trim() === '') {
+            } else if (inputText.endsWith(' ')) {
+                separator = '';
+            } else if (remainingInput.trim() === '' && !inputText.endsWith(' ')) {
                 separator = ' ';
             } else if (remainingInput.trim() !== '' && !remainingInput.startsWith(' ') && !remainingInput.startsWith(',')) {
                 separator = ' ';
