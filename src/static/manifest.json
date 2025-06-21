@@ -28,6 +28,7 @@
         "notifications",
         "storage",
         "alarms",
+        "contextMenus",
         "scripting",
         "sidePanel",
         "cookies"
@@ -35,7 +36,11 @@
     "web_accessible_resources": [
         {
             "resources": [
-                "temp.xlsx","worker.js","xlsx.full.min.js"
+                "temp.xlsx",
+                "worker.js",
+                "xlsx.full.min.js",
+                "tinhthanh.json",
+                "data.json"
             ],
             "matches": [
                 "<all_urls>"
@@ -46,9 +51,9 @@
         {
             "matches": [
                 "https://portalkhl.vnpost.vn/*",
+                "https://my.vnpost.vn/*",
                 "https://example.com/",
-                "https://packnsend.vnpost.vn/*",
-                "*://*/*"
+                "https://packnsend.vnpost.vn/*"
             ],
             "js": [
                 "contentScript.js"
@@ -60,6 +65,14 @@
             ],
             "js": [
                 "contentLoginPortal.js"
+            ]
+        },
+        {
+            "matches": [
+                "https://my.vnpost.vn/*"
+            ],
+            "js": [
+                "contentMy.js"
             ]
         },
         {

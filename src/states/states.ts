@@ -13,13 +13,13 @@ export type DataSnapshotProps = {
 
 export type BuuGuiProps = {
     index : number,
-    KhoiLuong : string
+    KhoiLuong : string,
     MaBuuGui :string
     TrangThai:string
     TimeTrangThai: string,
     Id:string|null,
     IsBlackList :boolean,
-    Money: null, // Hoặc giá trị mặc định phù hợp khác
+    Money: number, // Hoặc giá trị mặc định phù hợp khác
     ListDo: null, // Hoặc giá trị mặc định phù hợp khác
     TrangThaiRequest: null
 }

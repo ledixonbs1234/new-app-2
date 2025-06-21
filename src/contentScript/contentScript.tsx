@@ -65,6 +65,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
     try {
       if (msg) {
         console.log("LISTENER CONTENT SCRIPT", msg);
+
+        if (msg.message === "GET_MYPOST_TOKEN") {
+          const token = localStorage.getItem('accessToken');
+          callback({ token: token || null });
+          return true; // Giữ kênh mở cho phản hồi bất đồng bộ
+        }
+        // END: Thêm listener mới cho MyPost
+
         if (msg.message === "PROCESS_SINGLE_ITEM") {
           console.log("Processing single item:", msg.current.MaBuuGui);
           try {
@@ -491,7 +499,7 @@ async function processSinglePortalItem(
     const weightNotDot = weightThucTe?.value.replace(".", "")
     if (weightThucTe) {
       if (
-        buuGui.KhoiLuong.toString() !== weightNotDot) {
+        buuGui.KhoiLuong.toString() !== weightNotDot && buuGui.KhoiLuong.toString() !== "0") {
         var klTemp = buuGui.KhoiLuong.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
         weightThucTe.value = klTemp; // Đặt giá trị trước
         weightThucTe.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));

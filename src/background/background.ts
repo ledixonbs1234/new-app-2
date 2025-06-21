@@ -111,7 +111,23 @@ function setUpAlarm(): void {
   });
 }
 
+// 1. Tạo Context Menu khi cài đặt extension
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.contextMenus.create({
+    id: "makePhoneCall",
+    title: "Gọi với App của tôi",
+    contexts: ["selection"] // Chỉ hiện khi có bôi đen văn bản
+  });
+});
 
+// 2. Lắng nghe sự kiện click vào menu
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === "makePhoneCall" && info.selectionText) {
+    const phoneNumber = info.selectionText.trim();
+
+    await updateToPhone("phonecall", phoneNumber);
+  }
+});
 
 async function initFirebase(): Promise<void> {
 
@@ -130,7 +146,7 @@ async function initFirebase(): Promise<void> {
     firebase.initializeApp(firebaseConfig);
   }
   db = firebase.database();
-  if(db === null) {
+  if (db === null) {
     return
   }
 
@@ -218,6 +234,7 @@ async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot
     updateToPhone("warning", "Đã dừng xử lý do lỗi trước đó. Cần khởi động lại hoặc xóa lỗi.");
     // Cập nhật allScannedItems nhưng không trigger xử lý
     allScannedItems = newScannedItems;
+    updateToPhone("messageContinue", `Lỗi hệ thống khi xử lý .`);
     return;
   }
   // --- KẾT THÚC KIỂM TRA ---
@@ -338,6 +355,7 @@ async function processNextItemInBackground(): Promise<void> {
     console.warn("Processing stopped due to error. Clearing queue.");
     processingQueue = [];
     currentItemBeingProcessed = null;
+    updateToPhone("messageContinue", `Lỗi hệ thống khi xử lý .`);
     return;
   }
   // --- KẾT THÚC KIỂM TRA ---
@@ -360,23 +378,6 @@ async function processNextItemInBackground(): Promise<void> {
     triggerProcessingCheck();
     return;
   }
-
-  // --- KIỂM TRA TOKEN ---
-  // const isTokenOk: boolean = await checkToken();
-  // if (!isTokenOk) {
-  //   const tokenTemp = await loginDirect(accountPortal, passwordPortal);
-  //   if (!tokenTemp) {
-  //     console.error("Login failed. Stopping processing.");
-  //     updateToPhone("message", "Lỗi đăng nhập Portal. Dừng xử lý.");
-  //     isStoppedOnError = true; // Dừng lại
-  //     currentItemBeingProcessed = null;
-  //     processingQueue = []; // Xóa hàng đợi
-  //     return;
-  //   }
-  //   saveToken(tokenTemp);
-  //   token = tokenTemp;
-  // }
-  // --- KẾT THÚC KIỂM TRA TOKEN ---
 
   currentItemBeingProcessed = maBGToProcess; // Đánh dấu item đang xử lý (string)
   // Tìm index để hiển thị badge chính xác
@@ -422,7 +423,7 @@ async function processNextItemInBackground(): Promise<void> {
       // Kiểm tra lỗi runtime trước
       if (chrome.runtime.lastError) {
         console.error(`Lỗi gửi/nhận từ content script cho ${processedMaBG}:`, chrome.runtime.lastError.message);
-        updateToPhone("message", `Lỗi hệ thống khi xử lý ${processedMaBG}.`);
+        updateToPhone("messageContinue", `Lỗi hệ thống khi xử lý ${processedMaBG}.`);
         isStoppedOnError = true; // Dừng lại do lỗi hệ thống
         processingQueue = [];
         triggerProcessingCheck(); // Không cần thiết nhưng để đảm bảo
@@ -474,7 +475,7 @@ async function processNextItemInBackground(): Promise<void> {
         // --- Dừng lại khi có lỗi từ content script ---
         const errorMsg = response?.error || 'Lỗi không xác định từ Portal';
         console.error("Lỗi xử lý từ content script:", processedMaBG, response);
-        updateToPhone("message", `Lỗi xử lý ${processedMaBG}: ${errorMsg}. Đã dừng!`);
+        updateToPhone("messageContinue", `Lỗi xử lý ${processedMaBG}: ${errorMsg}. Đã dừng!`);
         isStoppedOnError = true;
         processingQueue = [];
         successfulProcessCount = 0;
@@ -674,20 +675,26 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     TimeStampTemp = data.TimeStamp ?? "";
   }
   console.log("Data changed:", JSON.stringify(data));
-
-  const isOk: boolean = await checkToken();
-  if (!isOk) {
-    const tokenTemp = await loginDirect(accountPortal, passwordPortal);
-    if (!tokenTemp) {
-      console.log("Token null");
-      return;
+  if (data.Lenh != "getmypostdata") {
+    const isOk: boolean = await checkToken();
+    if (!isOk) {
+      const tokenTemp = await loginDirect(accountPortal, passwordPortal);
+      if (!tokenTemp) {
+        console.log("Token null");
+        return;
+      }
+      saveToken(tokenTemp);
+      token = tokenTemp;
     }
-    saveToken(tokenTemp);
-    token = tokenTemp;
   }
+
   const commandHandlers: { [key: string]: (data: any) => Promise<void> } = {
     "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
     "xoabg": async (data: any) => await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
+    "xoanhieubg": async (data: any) => {
+      await handleXoaNhieuBuuGui(data.DoiTuong);
+
+    },
     "laylan": async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
       const codes: string[] = maHieus!.map(element => element.Code);
@@ -702,6 +709,36 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       console.log('Result:', result);
       updateToPC("checkdingoais", JSON.stringify(result));
     },
+    "getmypostdata": async (data: any) => await handleGetMyPostData(data),
+    "continueAuto": async (_data: any) => { // Không cần data.DoiTuong cho lệnh này
+      console.log("Received 'continueAuto' command from Firebase.");
+      if (!isStoppedOnError) {
+        updateToPhone("info", "Không có lỗi nào đang được ghi nhận để tiếp tục.");
+        console.log("'continueAuto' received but system is not in an error state.");
+        return;
+      }
+      // 1. Reset cờ lỗi
+      isStoppedOnError = false;
+      successfulProcessCount = 0; // Reset bộ đếm thành công sau lỗi
+
+      // 2. Thông báo cho người dùng
+      updateToPhone("message", "Đã nhận lệnh tiếp tục. Thử xử lý lại...");
+
+      // 3. Xóa badge lỗi (nếu có)
+      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setBadgeBackgroundColor({ color: '#007bff' }); // Reset màu badge (tùy chọn)
+
+
+      // 4. Kích hoạt lại việc kiểm tra và xử lý
+      // `triggerProcessingCheck` sẽ tự động tìm item tiếp theo chưa được xử lý
+      // trong `allScannedItems` (vì item lỗi không nằm trong `processedItems`
+      // và `processingQueue` đã bị xóa hoặc sẽ được xây dựng lại).
+      // Không cần trực tiếp đưa item lỗi vào queue ở đây, để logic chung xử lý.
+      // Người dùng có thể đã thay đổi danh sách `allScannedItems` trên điện thoại
+      // trong lúc chờ bấm "Tiếp tục".
+      triggerProcessingCheck();
+    },
+
     "preparePrintMaHieus": async (data: any) => await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
     "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
     "dieuTin": async (data: any) => await dieuTin(JSON.parse(data.DoiTuong)),
@@ -802,6 +839,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     "getPortal": async (data: any) => await handleGetPortal(data.DoiTuong),
     "printPage": async (data: any) => await handlePrintPage(data.DoiTuong),
     "printPageSort": async (data: any) => await handlePrintPageSort(data),
+    "printSortTinhVaNoiDung": async (data: any) => await handlePrintSortTinhVaNoiDung(data),
     "getMaHieus": async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
       await updateToPhone("getMaHieus", JSON.stringify(maHieus));
@@ -1358,8 +1396,191 @@ const prepareBlobs = async (maHieus: string[]) => {
   }
 }
 
+// Lưu trữ dữ liệu tỉnh thành để không phải load lại nhiều lần
+let tinhThanhData: { vo: string[]; ra: string[] } | null = null;
+/**
+ * Nạp dữ liệu từ file tinhthanh.json.
+ * Sử dụng cache để chỉ nạp một lần duy nhất.
+ */
+const loadTinhThanhData = async () => {
+  if (tinhThanhData) {
+    return tinhThanhData;
+  }
+  try {
+    const url = chrome.runtime.getURL('tinhthanh.json');
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error('Không thể tải file tinhthanh.json');
+    }
+    tinhThanhData = await response.json();
+    return tinhThanhData;
+  } catch (error) {
+    console.error("Lỗi khi nạp dữ liệu tỉnh thành:", error);
+    // Trả về đối tượng rỗng để tránh lỗi ở các bước sau
+    return { vo: [], ra: [] };
+  }
+};
+
+/**
+ * Xóa dấu tiếng Việt khỏi một chuỗi, và chuyển đổi 'đ' thành 'd'.
+ * Đây là bước quan trọng để so sánh với danh sách tỉnh không dấu.
+ * @param str Chuỗi đầu vào có dấu.
+ * @returns Chuỗi đã được xóa dấu và chuyển thành chữ thường.
+ */
+const removeDiacritics = (str: string): string => {
+  if (!str) return '';
+  return str
+    .toLowerCase() // 1. Chuyển thành chữ thường
+    .normalize('NFD') // 2. Tách ký tự và dấu (e.g., 'vĩnh' -> 'v' + 'i' + 'n' + 'h' + '´')
+    .replace(/[\u0300-\u036f]/g, '') // 3. Xóa tất cả các ký tự dấu
+    .replace(/đ/g, 'd'); // 4. Xử lý riêng chữ 'đ' thành 'd'
+};
+
+/**
+ * Xác định hướng đi ('ra', 'vo', hoặc 'khong_xac_dinh') từ địa chỉ.
+ * @param address - Chuỗi địa chỉ người nhận.
+ * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
+ * @returns 'ra', 'vo', hoặc 'khong_xac_dinh'.
+ */
+const getDirection = (address: string, provinces: { vo: string[]; ra: string[] }): string => {
+  const normalizedAddress = removeDiacritics(address.toLowerCase());
+
+  // Kiểm tra trong danh sách "ra" trước
+  for (const province of provinces.ra) {
+    if (normalizedAddress.lastIndexOf(province) != -1) {
+      return 'ra';
+    }
+  }
+
+  // Kiểm tra trong danh sách "vô"
+  for (const province of provinces.vo) {
+    if (normalizedAddress.lastIndexOf(province) != -1) {
+      return 'vo';
+    }
+  }
+
+  // Nếu không tìm thấy
+  return 'khong_xac_dinh';
+};
+
+// --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
+/**
+ * Xác định nhóm sắp xếp ('quang_nam', 'quang_ngai', 'ra', 'vo', hoặc 'khong_xac_dinh') từ địa chỉ.
+ * Kiểm tra các tỉnh đặc biệt trước rồi mới đến các nhóm chung.
+ * @param address - Chuỗi địa chỉ người nhận.
+ * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
+ * @returns 'quang_nam', 'quang_ngai', 'ra', 'vo', hoặc 'khong_xac_dinh'.
+ */
+const getSortingGroup = (address: string, provinces: { vo: string[]; ra: string[] }): string => {
+  const normalizedAddress = address.toLowerCase();
+
+  // Ưu tiên kiểm tra các trường hợp đặc biệt trước
+  if (normalizedAddress.lastIndexOf("quảng nam") != -1) {
+    return 'quang_nam';
+  }
+  if (normalizedAddress.lastIndexOf("quảng ngãi") != -1) {
+    return 'quang_ngai';
+  }
+
+  // Nếu không phải trường hợp đặc biệt, kiểm tra trong danh sách "ra"
+  for (const province of provinces.ra) {
+    // Bỏ qua các tỉnh đã được xử lý riêng để tránh trùng lặp
+    if (province === 'quảng nam' || province === 'quảng ngãi') continue;
+
+    if (normalizedAddress.lastIndexOf(province) != -1) {
+      return 'ra';
+    }
+  }
+
+  // Kiểm tra trong danh sách "vô"
+  for (const province of provinces.vo) {
+    if (normalizedAddress.lastIndexOf(province) != -1) {
+      return 'vo';
+    }
+  }
+
+  // Nếu không tìm thấy
+  return 'khong_xac_dinh';
+};
+// --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
+const handlePrintSortTinhVaNoiDung = async (data: any) => {
+  try {
+    // Bước 1: Lấy dữ liệu tỉnh thành từ file JSON
+    const provinces = await loadTinhThanhData();
+
+    // Bước 2: Lấy dữ liệu chi tiết các mã hiệu
+    const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
+    if (!res) {
+      console.error("Không lấy được dữ liệu chi tiết từ Portal.");
+      updateToPhone("error", "Lỗi: Không lấy được dữ liệu chi tiết từ Portal.");
+      return;
+    }
+    console.log("Dữ liệu gốc từ API:", res);
+
+    // Bước 3: Làm phẳng mảng để có danh sách tất cả các item
+    const allItems = (res as NguoiGuiDetailProp[]).flatMap(m => m.itemDetails);
+
+    // *** ĐỊNH NGHĨA THỨ TỰ ƯU TIÊN MỚI ***
+    // Gán một giá trị số cho mỗi nhóm. Số nhỏ hơn sẽ được ưu tiên xếp trước.
+    const groupPriorities: { [key: string]: number } = {
+      'quang_nam': 1,
+      'quang_ngai': 2,
+      'ra': 3,
+      'vo': 4,
+      'khong_xac_dinh': 5, // Xếp cuối cùng
+    };
+
+    // Bước 4: Sắp xếp mảng allItems theo logic đa cấp mới
+    allItems.sort((a, b) => {
+      // Tiêu chí 1: Sắp xếp theo Nhóm (Quảng Nam -> Quảng Ngãi -> Ra -> Vô)
+      const safeProvinces = provinces ?? { vo: [], ra: [] };
+      const groupA = getSortingGroup(a.receiverAddress, safeProvinces);
+      const groupB = getSortingGroup(b.receiverAddress, safeProvinces);
+
+      const priorityA = groupPriorities[groupA];
+      const priorityB = groupPriorities[groupB];
+
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB; // So sánh trực tiếp độ ưu tiên
+      }
+
+         // *** BẮT ĐẦU THAY ĐỔI ***
+      // Nếu cùng nhóm chính, chuyển sang tiêu chí 2
+      // Tiêu chí 2: Sắp xếp theo dispatchNumber để nhóm các chuỗi giống hệt nhau lại với nhau.
+      // Chúng ta sử dụng localeCompare để so sánh chuỗi một cách tự nhiên.
+      // Điều này sẽ đặt "DO" cạnh "DO", "TRANG" cạnh "TRANG", v.v.
+      const dispatchA = a.dispatchNumber || ''; // Xử lý trường hợp null/undefined
+      const dispatchB = b.dispatchNumber || ''; // Xử lý trường hợp null/undefined
+
+      const dispatchComparison = dispatchA.localeCompare(dispatchB);
+      if (dispatchComparison !== 0) {
+        return dispatchComparison;
+      }
+      // *** KẾT THÚC THAY ĐỔI ***
+
+      // Nếu mọi tiêu chí đều giống nhau, giữ nguyên thứ tự
+      return 0;
+    });
+    const safeProvinces = provinces ?? { vo: [], ra: [] };
+    console.log("Dữ liệu sau khi sắp xếp:", allItems.map(item => ({ ma: item.ttNumber, diaChi: item.receiverAddress, nhom: getSortingGroup(item.receiverAddress, safeProvinces) })));
+
+    // Bước 5: Trích xuất chỉ ttNumber từ danh sách đã sắp xếp
+    const sortedMaHieus = allItems.map(item => item.ttNumber);
+
+    console.log("Danh sách mã hiệu cuối cùng để in:", sortedMaHieus);
+
+    // Bước 6: Gọi hàm in
+    await printMaHieus(sortedMaHieus);
+
+  } catch (error) {
+    console.error("Đã xảy ra lỗi trong quá trình xử lý in:", error);
+    updateToPhone("error", `Lỗi khi sắp xếp và in: ${error}`);
+  }
+};
+
 const handlePrintPageSort = async (data: any) => {
   var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token)
+  console.log("handlePrintPageSort: res", res);
 
   var maHieus = (res as NguoiGuiDetailProp[])
     .map((m) => m.itemDetails.map((n) => n.ttNumber))
@@ -1854,7 +2075,7 @@ const changeSnapshotToKHs = (snapshots: DataSnapshotProps[]): KhachHangProps[] =
       // Bổ sung các thuộc tính còn thiếu từ type BuuGuiProps
       Id: null, // Hoặc giá trị mặc định phù hợp khác
       IsBlackList: false, // Hoặc giá trị mặc định phù hợp khác
-      Money: null, // Hoặc giá trị mặc định phù hợp khác
+      Money: 0, // Hoặc giá trị mặc định phù hợp khác
       ListDo: null, // Hoặc giá trị mặc định phù hợp khác
       TrangThaiRequest: null // Hoặc giá trị mặc định phù hợp khác,
     };
@@ -2254,6 +2475,33 @@ async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
   res.status === 200 ? updateToPhone("message", "Xóa thành công") : updateToPhone("message", "Xóa thất bại")
   console.log("Đã xóa thành công", await res.json())
 }
+async function handleXoaNhieuBuuGui(id: any): Promise<void | PromiseLike<void>> {
+  console.log(id)
+
+  var res = await fetch("https://api-portalkhl.vnpost.vn/khl/portalItem/deleteItemDetail", {
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+      "authorization": `Bearer  ${token}`,
+      "content-type": "application/json; charset=UTF-8",
+      "priority": "u=1, i",
+      "sec-ch-ua": "\"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"134\"",
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": "\"Windows\"",
+      "sec-fetch-dest": "empty",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-site",
+      "Referer": "https://portalkhl.vnpost.vn/",
+      "Referrer-Policy": "strict-origin-when-cross-origin"
+    },
+    "body": id.toString(),
+    "method": "POST"
+  });
+
+
+  res.status === 200 ? updateToPhone("message", "Xóa thành công") : updateToPhone("message", "Xóa thất bại")
+  console.log("Đã xóa thành công", await res.json())
+}
 
 function handleSaveKHOption(data: any): void | PromiseLike<void> {
   var temp1 = JSON.parse(data.DoiTuong);
@@ -2293,16 +2541,16 @@ const handleEditKL = async (data: any): Promise<void> => {
 
   // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
   if (loginSuccess && loadedTab && !loadedTab.url?.includes('accept-api-dtl')) {
-      console.log("handleEditKL: Đăng nhập thành công, mở lại đúng URL chỉnh sửa KL...");
-      await createOrActiveTab(
-          "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
-          "portalkhl.vnpost.vn",
-          true // Kích hoạt tab này
-      );
-      // Chờ tab mới tải xong (hoặc tab cũ điều hướng xong)
-      loadedTab = await waitForTabToLoad(loadedTab.id!); // Chờ trên cùng tabId
-      console.log(`handleEditKL: Tab ${loadedTab?.id} đã ở đúng URL chỉnh sửa KL: ${loadedTab?.url}`);
-      await delay(1500); // Chờ thêm chút cho ổn định
+    console.log("handleEditKL: Đăng nhập thành công, mở lại đúng URL chỉnh sửa KL...");
+    await createOrActiveTab(
+      "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
+      "portalkhl.vnpost.vn",
+      true // Kích hoạt tab này
+    );
+    // Chờ tab mới tải xong (hoặc tab cũ điều hướng xong)
+    loadedTab = await waitForTabToLoad(loadedTab.id!); // Chờ trên cùng tabId
+    console.log(`handleEditKL: Tab ${loadedTab?.id} đã ở đúng URL chỉnh sửa KL: ${loadedTab?.url}`);
+    await delay(1500); // Chờ thêm chút cho ổn định
   }
   // --- Kết thúc sử dụng hàm ensurePortalLogin ---
 
@@ -2324,11 +2572,11 @@ const handleEditKL = async (data: any): Promise<void> => {
       console.log("handleEditKL: Phản hồi từ CHANGEKL:", response);
       // Xử lý phản hồi nếu cần
       if (response && response.status === 'success') {
-          updateToPhone("message", `Đã cập nhật KL cho ${temp1.IDCODE}`);
-          // Có thể đóng tab sau khi thành công nếu muốn
-          // await chrome.tabs.remove(loadedTab.id!);
+        updateToPhone("message", `Đã cập nhật KL cho ${temp1.IDCODE}`);
+        // Có thể đóng tab sau khi thành công nếu muốn
+        // await chrome.tabs.remove(loadedTab.id!);
       } else {
-          updateToPhone("message", `Lỗi cập nhật KL cho ${temp1.IDCODE}: ${response?.error || 'Không rõ'}`);
+        updateToPhone("message", `Lỗi cập nhật KL cho ${temp1.IDCODE}: ${response?.error || 'Không rõ'}`);
       }
 
     });
@@ -2338,3 +2586,210 @@ const handleEditKL = async (data: any): Promise<void> => {
   }
   // Hàm này không cần trả về boolean nữa vì nó xử lý hoàn toàn bên trong
 }
+type MyPostOrderProps = {
+  codAmount: number;
+  itemCode: string;
+  senderCode: string;
+  orderHdrId: string;
+  senderName: string;
+  createdDate: string;
+  statusName: string;
+  weight: number; // Thêm trường này nếu có trong dữ liệu thật
+  //... thêm các trường khác nếu cần
+};
+/**
+ * Định dạng ngày theo YYYY-MM-DD HH:mm
+ */
+function formatMyPostDate(date: Date): string {
+  const pad = (num: number) => num.toString().padStart(2, '0');
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+}
+
+
+/**
+ * Nhóm dữ liệu MyPost theo Khách hàng
+ */
+function groupMyPostDataByKhachHang(items: MyPostOrderProps[]): KhachHangProps[] {
+  if (!items || items.length === 0) {
+    return [];
+  }
+  const khachHangMap = new Map<string, KhachHangProps>();
+
+  items.forEach(item => {
+    const maKH = item.senderCode;
+    if (!khachHangMap.has(maKH)) {
+      khachHangMap.set(maKH, {
+        MaKH: maKH,
+        TenKH: item.senderName,
+        TenNguoiGui: item.senderName,
+        TimeNhanTin: item.createdDate,
+        MaTin: item.orderHdrId, // Lấy từ bưu gửi đầu tiên
+        Index: 0, // Sẽ cập nhật sau
+
+        BuuGuis: [],
+        countState: { countChapNhan: 0, countDangGom: 0, countNhanHang: 0, countPhanHuong: 0 }
+      });
+    }
+
+    const khachHang = khachHangMap.get(maKH)!;
+    const buuGui: BuuGuiProps = {
+      MaBuuGui: item.itemCode,
+      TimeTrangThai: item.createdDate,
+      TrangThai: item.statusName,
+      KhoiLuong: item.weight?.toString() || "0", // Lấy KL nếu có, nếu không thì mặc định là "0"
+      index: khachHang.BuuGuis.length + 1,
+      // Các trường khác có thể để null hoặc giá trị mặc định
+      Id: null,
+      IsBlackList: false,
+      Money: item.codAmount,
+      ListDo: null,
+      TrangThaiRequest: null
+    };
+    khachHang.BuuGuis.push(buuGui);
+    khachHangMap.forEach((m) => {
+      m.countState.countChapNhan = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Đã chấp nhận"
+      ).length;
+      m.countState.countDangGom = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Tạo đơn"
+      ).length;
+      m.countState.countNhanHang = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Bưu tá nhận yêu cầu thu gom"
+      ).length;
+      m.countState.countPhanHuong = m.BuuGuis.filter(
+        (m) => m.TrangThai === "Đã lấy hàng"
+      ).length;
+    });
+  });
+
+  return Array.from(khachHangMap.values());
+}
+
+/**
+ * Lấy dữ liệu từ API MyPost
+ */
+async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderProps[] | null> {
+  const now = new Date();
+  const past = new Date();
+  past.setDate(now.getDate() - 20);
+
+  const toDateFromDate = [formatMyPostDate(past), formatMyPostDate(now)];
+
+  try {
+    const res = await fetch("https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParam?page=0&size=1000", {
+      headers: {
+        "accept": "*/*",
+        "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+        "authorization": token, // Sử dụng token được truyền vào
+        "capikey": "19001111",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        "toDateFromDate": toDateFromDate, // Sử dụng ngày đã định dạng
+        "orgCode": [maKH], // Sử dụng buuCuc từ storage
+        "isInternational": "0",
+        "lstStatus": ["1", "2", "3", "4", "5", "6", "7", "30"],
+        "orderType": "1"
+      }),
+      method: "POST",
+    });
+
+    if (!res.ok) {
+      console.error(`Lỗi API MyPost: ${res.status} ${res.statusText}`);
+      const errorText = await res.text();
+      console.error(`Nội dung lỗi: ${errorText}`);
+      updateToPhone("error", `Lỗi lấy dữ liệu MyPost: ${res.statusText}`);
+      return null;
+    }
+    const data = await res.json();
+    return data || [];
+  } catch (error: any) {
+    console.error("Lỗi fetch dữ liệu MyPost:", error);
+    updateToPhone("error", `Lỗi hệ thống khi lấy MyPost: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Hàm chính xử lý việc lấy dữ liệu MyPost và lưu vào Firebase
+ */
+async function handleGetMyPostData(data: any) {
+  updateToPhone("message", "Bắt đầu lấy dữ liệu từ MyVNPost...");
+  try {
+    const myPostTabs = await chrome.tabs.query({ url: "https://my.vnpost.vn/*" });
+
+    if (myPostTabs.length === 0) {
+      updateToPhone("error", "Không tìm thấy tab MyVNPost. Vui lòng mở và đăng nhập.");
+      await createOrActiveTab("https://my.vnpost.vn/", "my.vnpost.vn");
+      return;
+    }
+
+    const tabId = myPostTabs[0].id;
+    if (!tabId) {
+      updateToPhone("error", "Không lấy được ID của tab MyVNPost.");
+      return;
+    }
+
+    updateToPhone("message", "Đang lấy token xác thực...");
+
+    const response = await new Promise<{ token: string | null }>((resolve) => {
+      chrome.tabs.sendMessage(tabId, { message: "GET_MYPOST_TOKEN" }, (res) => {
+        if (chrome.runtime.lastError) {
+          console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
+          resolve({ token: null });
+        } else {
+          resolve(res);
+        }
+      });
+    });
+
+    if (!response || !response.token) {
+      updateToPhone("error", "Không lấy được token. Vui lòng đăng nhập vào MyVNPost và thử lại.");
+      return;
+    }
+    console.log("Token MyVNPost:", response.token);
+
+    updateToPhone("message", "Đang tải dữ liệu đơn hàng...");
+    var dataJson = JSON.parse(data.DoiTuong);
+
+    const myPostData = await getDataFromMyPost(response.token, dataJson['maKH']);
+
+    if (myPostData === null) {
+      // Hàm getDataFromMyPost đã gửi thông báo lỗi
+      return;
+    }
+
+    if (myPostData.length === 0) {
+      updateToPhone("info", "Không có đơn hàng nào trong 20 ngày qua.");
+      return;
+    }
+
+    updateToPhone("message", `Đã tải ${myPostData.length} đơn hàng. Đang xử lý...`);
+    const khachHangs = groupMyPostDataByKhachHang(myPostData);
+
+    if (db === null) {
+      console.error("Firebase DB chưa được khởi tạo.");
+      updateToPhone("error", "Lỗi kết nối Firebase.");
+      return;
+    }
+
+    // Ghi dữ liệu của từng khách hàng vào node riêng
+    for (const kh of khachHangs) {
+      await db.ref(`MYVNPOST/KhachHangs/${kh.MaKH}`).set(kh);
+    }
+
+    await db.ref("MYVNPOST/TimeUpdate").set(new Date().toLocaleString('vi-VN'));
+    updateToPhone("message", "Cập nhật dữ liệu MyVNPost thành công!");
+  } catch (error: any) {
+    console.error("Lỗi trong handleGetMyPostData:", error);
+    updateToPhone("error", `Lỗi: ${error.message}`);
+  }
+}
+// END: ================== MY VNPOST ==================
+
+

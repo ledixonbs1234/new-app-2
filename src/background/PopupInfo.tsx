@@ -32,7 +32,8 @@ type ItemDetailProp = {
   id: string;
   ttNumber: string;
   weight: string;
-  receiverAddress:string;
   receiverName:string;
   createdDate:string;
+  dispatchNumber:string;
+  receiverAddress:string;
 };
