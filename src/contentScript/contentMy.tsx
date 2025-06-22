@@ -1,3 +1,4 @@
+import { Order } from "../popup/popup.slice";
 import { delay, waitForElm } from "./utils";
 function forceChange(e: HTMLInputElement) {
     e.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
@@ -6,35 +7,38 @@ function forceChange(e: HTMLInputElement) {
 }
 var listDichVu = ["Tiêu chuẩn TMĐT ĐG", "Nhanh - TMĐT ĐG"]
 var tinhKien = ['kon tum', 'gia lai', 'dak lak', 'binh dinh', 'phu yen', 'khanh hoa', 'quang nam', 'quang ngai', 'da nang']
-
+let uiContainer: HTMLDivElement | null = null;
 window.onload = async () => {
-    // 2. Định nghĩa selector cho phần tử chứa text đó.
-    // Sử dụng attribute selector `[title="..."]` là cách rất ổn định.
-    const targetSelector: string = `#form-create-order > div > div:nth-child(1) > div > div:nth-child(1) > div > div.ant-card-body > div > div:nth-child(2) > div:nth-child(1) > div > div.ant-col.ant-form-item-control > div > div`;
-    // 3. Gọi hàm waitForElementWithText và truyền vào hành động bạn muốn làm
-    console.log("Đang bắt đầu chờ hợp đồng...");
-    onContentStateChange(targetSelector, async (element: Element) => {
-        // `element` ở đây được TypeScript hiểu là kiểu `Element`.
-        // Bắt đầu chạy
-        await initialize();
-        console.log("Đã tìm thấy phần tử hợp đồng!", element);
+    // `element` ở đây được TypeScript hiểu là kiểu `Element`.
+    // Bắt đầu chạy
+    await initialize();
 
-        // Tìm phần tử có class 'g-avatar'
-        const nameElement = document.querySelector('.g-avatar');
 
-        // Kiểm tra xem phần tử có tồn tại không
-        if (!nameElement) {
-            return;
-        }
+    // Tìm phần tử có class 'g-avatar'
+    await waitForElement('.g-avatar')
+    const nameElement = document.querySelector('.g-avatar');
 
-        // .firstChild.textContent sẽ lấy chính xác text của phần tử này,
-        // bỏ qua text của các phần tử con (như icon mũi tên xuống).
-        const userName = nameElement.firstChild && nameElement.firstChild.textContent
-            ? nameElement.firstChild.textContent.trim()
-            : "";
+    // Kiểm tra xem phần tử có tồn tại không
+    if (!nameElement) {
+        return;
+    }
 
-        console.log(userName); console.log("Mã khách hàng:", userName);
-        if (userName.indexOf("Lan") != -1) {
+    // .firstChild.textContent sẽ lấy chính xác text của phần tử này,
+    // bỏ qua text của các phần tử con (như icon mũi tên xuống).
+    const userName = nameElement.firstChild && nameElement.firstChild.textContent
+        ? nameElement.firstChild.textContent.trim()
+        : "";
+
+    console.log(userName); console.log("Mã khách hàng:", userName);
+    if (userName.indexOf("Lan") != -1) {
+        // 2. Định nghĩa selector cho phần tử chứa text đó.
+        // Sử dụng attribute selector `[title="..."]` là cách rất ổn định.
+        const targetSelector: string = `#form-create-order > div > div:nth-child(1) > div > div:nth-child(1) > div > div.ant-card-body > div > div:nth-child(2) > div:nth-child(1) > div > div.ant-col.ant-form-item-control > div > div`;
+        // 3. Gọi hàm waitForElementWithText và truyền vào hành động bạn muốn làm
+        console.log("Đang bắt đầu chờ hợp đồng...");
+        onContentStateChange(targetSelector, async (element: Element) => {
+
+            console.log("Đã tìm thấy phần tử hợp đồng!", element);
             var de = document.querySelector("#form-create-order_weight") as HTMLInputElement;
             de.value = "2000";
             forceChange(de);
@@ -87,24 +91,203 @@ window.onload = async () => {
                 butonKoXem.click();
                 // doSomething(newText);
             });
+        })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    } else if (userName.indexOf("Duy") != -1) {
+        if (window.location.href.includes("https://my.vnpost.vn/order/domestic/create")) {
+            createUI();
+            updateUI();
+
+            // Lắng nghe thông báo từ background để cập nhật UI
+            chrome.runtime.onMessage.addListener((msg) => {
+                if (msg.type === "STORAGE_UPDATED") {
+                    updateUI();
+                }
+            });
+            console.log("Đã khởi tạo UI cho Duy");
+            await selectedDonMau("ĐƠN TRẮNG")
+            onContentDisappearWithDelay('#form-create-order_contentNote', async () => {
+                console.log("Đã phát hiện phần tử rc_select_0 biến mất, đang tự động chọn đơn mẫu...");
+                await selectedDonMau("ĐƠN TRẮNG")
+
+            });
+
         }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    });
+    }
     // Thực hiện các hành động khác...
 };
+
+// MY HO DUY///////////////////////////////////////////////////
+function createUI() {
+    if (document.getElementById('auto-fill-container')) return;
+
+    uiContainer = document.createElement('div');
+    uiContainer.id = 'auto-fill-container';
+
+    Object.assign(uiContainer.style, {
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        zIndex: '9999',
+        backgroundColor: '#ffffff',
+        padding: '12px',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        display: 'flex',
+        gap: '10px',
+        alignItems: 'center',
+        fontFamily: 'system-ui, sans-serif'
+    });
+
+    const backButton = document.createElement('button');
+    backButton.id = 'auto-fill-back';
+    backButton.textContent = '<< Quay lại';
+    backButton.onclick = handleGoBack;
+
+    const fillButton = document.createElement('button');
+    fillButton.id = 'auto-fill-next';
+    fillButton.textContent = 'Điền đơn >>';
+    fillButton.onclick = handleFillData;
+
+    [backButton, fillButton].forEach(button => {
+        Object.assign(button.style, {
+            padding: '8px 14px',
+            border: '1px solid #d9d9d9',
+            borderRadius: '6px',
+            backgroundColor: '#fff',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            fontSize: '14px',
+        });
+        button.onmouseover = () => button.style.borderColor = '#40a9ff';
+        button.onmouseout = () => button.style.borderColor = '#d9d9d9';
+    });
+
+    fillButton.style.backgroundColor = '#1890ff';
+    fillButton.style.color = 'white';
+
+    uiContainer.appendChild(backButton);
+    uiContainer.appendChild(fillButton);
+
+    document.body.appendChild(uiContainer);
+}
+
+function updateUI() {
+    const fillButton = document.getElementById('auto-fill-next') as HTMLButtonElement | null;
+    const backButton = document.getElementById('auto-fill-back') as HTMLButtonElement | null;
+    if (!fillButton || !backButton) return;
+
+    chrome.runtime.sendMessage({ type: "GET_STATUS" }, (response) => {
+        if (!response || !response.orders || response.orders.length === 0) {
+            fillButton.textContent = 'Chưa có dữ liệu';
+            fillButton.disabled = true;
+            backButton.disabled = true;
+            fillButton.style.backgroundColor = '#f5f5f5';
+            fillButton.style.color = 'rgba(0, 0, 0, 0.25)';
+            return;
+        }
+
+        const currentIndex = response.currentIndex ?? 0;
+        const total = response.orders.length;
+
+        backButton.disabled = currentIndex === 0;
+
+        if (currentIndex >= total) {
+            fillButton.textContent = 'Hoàn thành!';
+            fillButton.disabled = true;
+            fillButton.style.backgroundColor = '#52c41a';
+        } else {
+            fillButton.textContent = `Điền đơn (${currentIndex + 1}/${total})`;
+            fillButton.disabled = false;
+            fillButton.style.backgroundColor = '#1890ff';
+        }
+    });
+}
+
+async function populateForm(order: Order) {
+    const fieldMapping: { [key: string]: string | number } = {
+        'form-create-order_receiverPhone': order.SDT,
+        'form-create-order_saleOrderCode': order.MAUSAC,
+        'form-create-order_receiverName': order.NGUOINHAN,
+        'form-create-order_receiverAddress': order.DIACHI,
+
+        'cod': order.COD
+    };
+    var cod = document.querySelector("#scrollableDiv > div:nth-child(2) > table > tr:nth-child(1) > td:nth-child(3) > div > div.ant-col.ant-col-10 > div > div.ant-input-number-input-wrap > input") as HTMLInputElement | HTMLTextAreaElement
+    for (const id in fieldMapping) {
+        const element = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement;
+        if (element) {
+            element.value = String(fieldMapping[id]);
+            // Kích hoạt sự kiện để các framework (React, Vue,...) nhận diện
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            if (id === 'form-create-order_receiverName') {
+                await delay(500);
+            } else if (id === 'form-create-order_receiverAddress') {
+                element.focus();
+                element.setSelectionRange(element.value.length, element.value.length);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+                element.dispatchEvent(new Event('change', { bubbles: true }));
+            } else {
+                console.warn(`[Form Filler] Không tìm thấy element với ID: #${id}`);
+            }
+        }
+        if (cod) {
+            cod.value = String(order.COD);
+            cod.dispatchEvent(new Event('input', { bubbles: true }));
+            cod.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        var donmau = document.querySelector("#form-create-order_saleOrderCode") as HTMLInputElement;
+        //focus địa chỉ và caret vào cuối và enter
+        donmau.focus();
+        // address.setSelectionRange(address.value.length, address.value.length);
+        // address.dispatchEvent(new Event('input', { bubbles: true }));
+        // address.dispatchEvent(new Event('change', { bubbles: true }));
+        simulateRealClick(donmau);
+
+    }
+
+}
+
+function handleFillData() {
+    chrome.runtime.sendMessage({ type: "FILL_NEXT" }, async (response) => {
+        if (response && response.order) {
+            await populateForm(response.order);
+        }
+        updateUI();
+    });
+}
+
+function handleGoBack() {
+    chrome.runtime.sendMessage({ type: "GO_BACK" }, (response) => {
+        if (response && response.order) {
+            populateForm(response.order);
+        }
+        updateUI();
+    });
+}
+
+
+
+//END HO DUY///////////////////////////////////////////////////
+
+
+
+
 
 function simulateRealClick(element: HTMLElement) {
     // Hàm này mô phỏng một cú click chuột thực tế hơn
@@ -180,6 +363,47 @@ async function selectService(dichVu: string) {
         console.error(`LỖI: Không tìm thấy dịch vụ '${dichVu}' trong danh sách.`);
         // Đóng dropdown lại
         simulateRealClick(clickableSelectBox as HTMLElement);
+    }
+}
+
+async function selectedDonMau(tenDonMau: string) {
+    console.log(`Bắt đầu chọn dịch vụ: ${tenDonMau}`);
+
+    // 1. Tìm ô chọn dịch vụ
+    await waitForElm('#rc_select_0')
+    const serviceSelectInput = document.getElementById('rc_select_0');
+    if (!serviceSelectInput) {
+        console.error("Không tìm thấy ô nhập liệu dịch vụ.");
+        return;
+    }
+
+    // const clickableSelectBox = serviceSelectInput.closest('.ant-select-selection-placeholder');
+    // if (!clickableSelectBox) {
+    //     console.error("Không tìm thấy ô chọn dịch vụ để click.");
+    //     return;
+    // }
+
+    // 2. Mở danh sách
+    simulateRealClick(serviceSelectInput as HTMLElement);
+    console.log("Đã click để mở danh sách, đang chờ...");
+
+    // 3. Chờ một khoảng thời gian cố định (thay thế cho setTimeout)
+    await delay(800);
+
+    // 4. Tìm và click vào lựa chọn
+    const options = document.querySelectorAll<HTMLElement>('.ant-select-item-option');
+    let foundOption: HTMLElement | null = null;
+
+    options.forEach(option => {
+        if (option.textContent && option.textContent.trim() === tenDonMau) {
+            foundOption = option.closest('.ant-select-item');
+        }
+    });
+
+    if (foundOption) {
+        console.log("Đã tìm thấy dịch vụ! Đang tiến hành chọn...");
+        simulateRealClick(foundOption as HTMLElement);
+        console.log(`THÀNH CÔNG! Đã tự động chọn dịch vụ '${tenDonMau}'.`);
     }
 }
 function watchTextChange(element: HTMLElement, callback: (newText: string) => void) {
@@ -424,7 +648,65 @@ function onContentStateChange(
     // Kiểm tra trạng thái ban đầu ngay khi hàm được gọi
     handleStateCheck();
 }
+/**
+ * Theo dõi một phần tử trong DOM và thực thi một callback sau một khoảng trễ
+ * mỗi khi nó chuyển từ trạng thái "có nội dung" sang "trống/không tồn tại".
+ *
+ * @param selector - Chuỗi CSS selector để xác định phần tử.
+ * @param callback - Hàm chứa code chính, sẽ được thực thi sau khi phần tử biến mất.
+ * @param delayMs - Khoảng thời gian trễ (tính bằng mili giây) trước khi thực thi callback. Mặc định là 500.
+ */
+function onContentDisappearWithDelay(
+    selector: string,
+    callback: () => void, // Lưu ý: callback không còn nhận `element` vì nó đã biến mất
+    delayMs: number = 500
+): void {
+    // Biến trạng thái để theo dõi xem nội dung có đang hiển thị hay không
+    let isContentVisible = false;
 
+    const handleStateCheck = () => {
+        const element = document.querySelector(selector) as HTMLElement | null;
+        // Điều kiện để coi là "có nội dung" không thay đổi
+        const isCurrentlyVisible =
+            element && (element.textContent?.trim().length !== 0 || element.title?.trim().length !== 0);
+
+        if (!isCurrentlyVisible && isContentVisible) {
+            // TRẠNG THÁI THAY ĐỔI: Từ đang hiển thị -> SANG KHÔNG hiển thị
+            // -> Đây là thời điểm chúng ta cần chạy code, sau khi delay
+            isContentVisible = false; // Reset lại trạng thái
+            console.log('Phát hiện thay đổi: Nội dung đã biến mất.');
+
+            // Thực thi callback sau một khoảng trễ
+            setTimeout(() => {
+                console.log(`Thực thi callback sau ${delayMs}ms.`);
+                callback();
+            }, delayMs);
+
+        } else if (isCurrentlyVisible && !isContentVisible) {
+            // TRẠNG THÁI THAY ĐỔI: Từ KHÔNG hiển thị -> SANG hiển thị
+            // -> Đánh dấu là đã nhìn thấy, sẵn sàng để theo dõi khi nó biến mất
+            isContentVisible = true;
+            console.log('Nội dung đã xuất hiện. Đang theo dõi khi nào nó biến mất...');
+        }
+    };
+
+    // Tạo một MutationObserver để lắng nghe thay đổi liên tục
+    const observer = new MutationObserver(() => {
+        handleStateCheck();
+    });
+
+    // Bắt đầu quan sát toàn bộ body của trang
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        characterData: true
+    });
+
+    // Kiểm tra trạng thái ban đầu ngay khi hàm được gọi
+    // Điều này quan trọng để "ghi nhận" trạng thái ban đầu của phần tử
+    handleStateCheck();
+}
 
 
 
@@ -800,7 +1082,7 @@ async function initialize(): Promise<void> {
         if (data && Array.isArray(data.QuocGia)) {
             addressData = data.QuocGia;
             console.log("Dữ liệu địa chỉ đã được tải.");
-            observeForAddressInput();
+         observeForAddressInput();
         } else {
             console.error("Định dạng data.json không hợp lệ.");
         }
@@ -812,7 +1094,7 @@ async function initialize(): Promise<void> {
 /**
  * Sử dụng MutationObserver để tìm ô input địa chỉ khi nó xuất hiện trên trang.
  */
-function observeForAddressInput(): void {
+ function observeForAddressInput(): void {
     const observer = new MutationObserver((mutationsList: MutationRecord[]) => {
         const addressInput = document.getElementById(ADDRESS_INPUT_ID) as HTMLInputElement | null;
         if (addressInput) {

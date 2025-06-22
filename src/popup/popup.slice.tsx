@@ -1,5 +1,18 @@
-import { PayloadAction, createSlice } from "@reduxjs/toolkit";
+import { PayloadAction, createSlice, current } from "@reduxjs/toolkit";
 import { BuuGuiProps, KhachHangProps, KhachLeProps, KhachNuocMamProps } from "../states/states";
+import { set } from "firebase/database";
+
+
+// ADD: Định nghĩa kiểu cho một đơn hàng
+export interface Order {
+  GOC: string;
+  MAUSAC: string;
+  NGUOINHAN: string;
+  DIACHI: string;
+  SDT: string;
+  COD: number;
+}
+
 export interface PopupState {
   khachHangList: KhachHangProps[];
   tenKH: string;
@@ -7,30 +20,38 @@ export interface PopupState {
   selectedBG: BuuGuiProps | null;
   checkOption: number[]
   keyMessage: string;
-  passwordPortal:string
-  accountPortal:string
-  tokenPortal:string
+  passwordPortal: string
+  accountPortal: string
+  tokenPortal: string
   khachNuocMamList: KhachNuocMamProps[];
   khachLeList: KhachLeProps[];
   selectedKhachLe: KhachLeProps | null;
   selectedKhachNuocMam: KhachNuocMamProps | null;
+
+  // ADD: Thêm trạng thái cho tính năng điền form
+  orderData: Order[];
+  currentIndex: number;
 }
 
 
 const initialState: PopupState = {
-  keyMessage:"",
+  keyMessage: "",
   khachHangList: [],
   khachNuocMamList: [],
   khachLeList: [],
   tenKH: "",
-  accountPortal:"",
-  passwordPortal:"",
+  accountPortal: "",
+  passwordPortal: "",
   selectedBG: null,
   selectedKH: null,
-  tokenPortal:"",
+  tokenPortal: "",
   selectedKhachNuocMam: null,
   selectedKhachLe: null,
   checkOption: [0, 1, 2],
+
+  // ADD: Khởi tạo giá trị cho state mới
+  orderData: [],
+  currentIndex: 0,
 };
 export const popupSlice = createSlice({
   name: "popup",
@@ -74,14 +95,14 @@ export const popupSlice = createSlice({
     setSelectedKhachLe: (state, action: PayloadAction<KhachLeProps>) => {
       state.selectedKhachLe = action.payload;
     },
-    setKeyMessage:(state, action: PayloadAction<string>)=>{
+    setKeyMessage: (state, action: PayloadAction<string>) => {
       state.keyMessage = action.payload
     },
-    setAccountPortal:(state, action: PayloadAction<string>)=>{
+    setAccountPortal: (state, action: PayloadAction<string>) => {
       state.accountPortal = action.payload
-      console.log("setAccountPortal",state.accountPortal)
+      console.log("setAccountPortal", state.accountPortal)
     },
-    setPasswordPortal:(state, action: PayloadAction<string>)=>{
+    setPasswordPortal: (state, action: PayloadAction<string>) => {
       state.passwordPortal = action.payload
     },
     setSelectedBG: (state, action: PayloadAction<BuuGuiProps>) => {
@@ -120,8 +141,32 @@ export const popupSlice = createSlice({
       }
 
     },
+    //ADD: Thêm action để cập nhật dữ liệu đơn hàng
+    setOrders: (state, action: PayloadAction<{ orders: Order[], from: 'popup' | 'background' }>) => {
+      state.orderData = action.payload.orders;
+      state.currentIndex = 0; // Reset current index when orders are set
+      if (action.payload.from === 'popup') {
+        // Nếu từ popup, có thể thực hiện thêm các hành động khác nếu cần
+        chrome.runtime.sendMessage({ type: 'SAVE_ORDERS', payload: { orders: action.payload.orders, currentIndex: 0 } });
+      }
+    },
+    setCurrentIndex: (state, action: PayloadAction<{ index: number, from: 'popup' | 'background' }>) => {
+      state.currentIndex = action.payload.index;
+      if (action.payload.from === 'popup') {
+        // Nếu từ popup, có thể thực hiện thêm các hành động khác nếu cần
+        chrome.runtime.sendMessage({ type: 'SET_CURRENT_INDEX', payload: { index: action.payload.index } });
+      }
+    },
+    clearOrders: (state, action: PayloadAction<{ from: 'popup' | 'background' }>) => {
+      state.orderData = [];
+      state.currentIndex = 0; // Reset current index when orders are cleared
+      if (action.payload.from === 'popup') {
+        // Nếu từ popup, có thể thực hiện thêm các hành động khác nếu cần
+        chrome.runtime.sendMessage({ type: 'CLEAR_ORDERS' });
+      }
+    }
   },
 });
-export const { sortNumber,setTokenPortal, sortWeight, setKhachHangs, setCheckChange, clearData, setSelectedBG, setSelectedKH ,setKeyMessage, setAccountPortal,setPasswordPortal, setKhachNuocMams,setSelectedKhachNuocMam, setKhachLes,setSelectedKhachLe} =
+export const { setOrders, setCurrentIndex, clearOrders, sortNumber, setTokenPortal, sortWeight, setKhachHangs, setCheckChange, clearData, setSelectedBG, setSelectedKH, setKeyMessage, setAccountPortal, setPasswordPortal, setKhachNuocMams, setSelectedKhachNuocMam, setKhachLes, setSelectedKhachLe } =
   popupSlice.actions;
 export default popupSlice.reducer;

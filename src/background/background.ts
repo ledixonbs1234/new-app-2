@@ -1544,7 +1544,7 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
         return priorityA - priorityB; // So sánh trực tiếp độ ưu tiên
       }
 
-         // *** BẮT ĐẦU THAY ĐỔI ***
+      // *** BẮT ĐẦU THAY ĐỔI ***
       // Nếu cùng nhóm chính, chuyển sang tiêu chí 2
       // Tiêu chí 2: Sắp xếp theo dispatchNumber để nhóm các chuỗi giống hệt nhau lại với nhau.
       // Chúng ta sử dụng localeCompare để so sánh chuỗi một cách tự nhiên.
@@ -2790,6 +2790,118 @@ async function handleGetMyPostData(data: any) {
     updateToPhone("error", `Lỗi: ${error.message}`);
   }
 }
+
+
+
+
+
+
+
+
+
+
+//HO DUY--------------------------------
+
+interface Order {
+  GOC: string;
+  MAUSAC: string;
+  NGUOINHAN: string;
+  DIACHI: string;
+  SDT: string;
+  COD: number;
+}
+
+interface SessionData {
+  orders?: Order[];
+  currentIndex?: number;
+}
+
+// Hàm để thông báo cho tất cả các tab và popup về sự thay đổi
+function broadcastUpdate(payload: SessionData) {
+  chrome.runtime.sendMessage({ type: "STORAGE_UPDATED", payload });
+  chrome.tabs.query({}, (tabs) => {
+    for (const tab of tabs) {
+      if (tab.id) {
+        chrome.tabs.sendMessage(tab.id, { type: "STORAGE_UPDATED", payload }).catch(() => { });
+      }
+    }
+  });
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "SAVE_ORDERS") {
+    debugger
+    const dataToSave: SessionData = {
+      orders: msg.payload.orders,
+      currentIndex: 0
+    };
+    chrome.storage.session.set(dataToSave, () => {
+      broadcastUpdate(dataToSave);
+      sendResponse({ status: 'ok' });
+    });
+    return true; // Giữ kênh message mở cho response bất đồng bộ
+  }
+
+  if (msg.type === "GET_INITIAL_DATA" || msg.type === "GET_STATUS") {
+    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
+      sendResponse({
+        orders: result.orders || [],
+        currentIndex: result.currentIndex || 0
+      });
+    });
+    return true;
+  }
+
+  if (msg.type === "CLEAR_ORDERS") {
+    const emptyData: SessionData = { orders: [], currentIndex: 0 };
+    chrome.storage.session.set(emptyData, () => {
+      broadcastUpdate(emptyData);
+      sendResponse({ status: 'cleared' });
+    });
+    return true;
+  }
+
+  if (msg.type === "FILL_NEXT") {
+    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
+      const orders = result.orders || [];
+      let currentIndex = result.currentIndex || 0;
+
+      if (currentIndex >= orders.length) {
+        sendResponse({ order: null });
+        return;
+      }
+
+      const nextOrder = orders[currentIndex];
+      currentIndex++;
+
+      chrome.storage.session.set({ currentIndex }, () => {
+        broadcastUpdate({ currentIndex });
+        sendResponse({ order: nextOrder });
+      });
+    });
+    return true;
+  }
+
+  if (msg.type === "GO_BACK") {
+    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
+      const orders = result.orders || [];
+      let currentIndex = result.currentIndex || 0;
+
+      if (currentIndex > 0) {
+        currentIndex--;
+      }
+
+      const prevOrder = orders[currentIndex];
+
+      chrome.storage.session.set({ currentIndex }, () => {
+        broadcastUpdate({ currentIndex });
+        sendResponse({ order: prevOrder });
+      });
+    });
+    return true;
+  }
+});
+//END Ho Duy--------------------------------
+
+
 // END: ================== MY VNPOST ==================
-
-

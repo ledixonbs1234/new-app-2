@@ -69,7 +69,7 @@
         },
         {
             "matches": [
-                "https://my.vnpost.vn/*"
+                "https://my.vnpost.vn/order/domestic/create/*"
             ],
             "js": [
                 "contentMy.js"

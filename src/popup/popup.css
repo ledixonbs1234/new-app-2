@@ -5,3 +5,29 @@ body{
     --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
     --tw-gradient-to: #f97316 var(--tw-gradient-to-position);
 }
+
+.order-item .status-icon {
+    margin-right: 10px;
+    font-size: 18px;
+    width: 20px;
+    text-align: center;
+}
+.order-item.completed {
+    background-color: #f0f0f0;
+    color: #999;
+    text-decoration: line-through;
+}
+.order-item.completed .status-icon {
+    color: green;
+}
+.order-item.current {
+    background-color: #e6f7ff;
+    font-weight: bold;
+    border-left: 3px solid #1890ff;
+}
+.order-item.current .status-icon {
+    color: #1890ff;
+}
+.order-item.pending .status-icon {
+    color: #ccc;
+}
