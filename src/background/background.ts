@@ -2791,6 +2791,15 @@ async function handleGetMyPostData(data: any) {
   }
 }
 
+chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
+  //Lọc url 
+  if(details.url.includes("https://my.vnpost.vn/")){
+    console.log("Đã vào trang tạo đơn hàng MyVNPost");
+    // Gửi thông báo đến tab hiện tại
+    chrome.tabs.sendMessage(details.tabId, { type:'URL_CHANGED',url:details.url });
+  }
+},{url:[{hostContains:"my.vnpost.vn"}] });
+
 
 
 

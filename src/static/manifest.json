@@ -29,6 +29,7 @@
         "storage",
         "alarms",
         "contextMenus",
+        "webNavigation",
         "scripting",
         "sidePanel",
         "cookies"

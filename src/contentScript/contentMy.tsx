@@ -7,8 +7,55 @@ function forceChange(e: HTMLInputElement) {
 }
 var listDichVu = ["Tiêu chuẩn TMĐT ĐG", "Nhanh - TMĐT ĐG"]
 var tinhKien = ['kon tum', 'gia lai', 'dak lak', 'binh dinh', 'phu yen', 'khanh hoa', 'quang nam', 'quang ngai', 'da nang']
+// <<< THAY ĐỔI 1: Quản lý trạng thái toàn cục >>>
+// Mảng này sẽ lưu trữ tất cả các MutationObserver đang hoạt động
+// để chúng ta có thể dọn dẹp chúng sau này.
+let activeObservers: MutationObserver[] = [];
 let uiContainer: HTMLDivElement | null = null;
-window.onload = async () => {
+
+// Định nghĩa cấu trúc của một mục địa chỉ trong data.json
+interface AddressItem {
+    NameXPKD?: string;
+    NameQHKD?: string;
+    NameTTPKD?: string;
+    // Thêm các thuộc tính khác nếu cần
+}
+
+// ==========================================================================
+// Cấu hình & Biến toàn cục
+// ==========================================================================
+
+const ADDRESS_INPUT_ID: string = "form-create-order_receiverAddress";
+const GHOST_INPUT_ID: string = "ghost-address-input-suggestion";
+
+let addressData: AddressItem[] = []; // Mảng chứa các đối tượng địa chỉ
+let currentSuggestion: string | null = null; // Gợi ý hiện tại
+let ghostInput: HTMLInputElement | null = null; // Tham chiếu đến element ghost input
+
+runMainLogic();
+/**
+ * Hàm tiện ích để tạo và theo dõi một MutationObserver.
+ * Thay vì dùng `new MutationObserver` trực tiếp, hãy dùng hàm này.
+ * @param {MutationCallback} callback - Hàm callback cho observer.
+ * @returns {MutationObserver}
+ */
+function createAndTrackObserver(callback: MutationCallback) {
+    const observer = new MutationObserver(callback);
+    activeObservers.push(observer); // Tự động thêm vào mảng theo dõi
+    return observer;
+}
+
+// <<< THAY ĐỔI 3: Di chuyển tất cả logic vào hàm chính >>>
+/**
+ * Hàm logic chính của extension.
+ * Hàm này bao gồm TẤT CẢ code từ `window.onload` cũ của bạn.
+ */
+async function runMainLogic() {
+    // Bước 1: Dọn dẹp trạng thái cũ
+    cleanup();
+    // Chờ một chút để đảm bảo DOM của SPA đã cập nhật xong
+    await delay(500);
+    console.log("Running main logic for URL:", window.location.href);
     // `element` ở đây được TypeScript hiểu là kiểu `Element`.
     // Bắt đầu chạy
     await initialize();
@@ -112,12 +159,7 @@ window.onload = async () => {
             createUI();
             updateUI();
 
-            // Lắng nghe thông báo từ background để cập nhật UI
-            chrome.runtime.onMessage.addListener((msg) => {
-                if (msg.type === "STORAGE_UPDATED") {
-                    updateUI();
-                }
-            });
+
             console.log("Đã khởi tạo UI cho Duy");
             await selectedDonMau("ĐƠN TRẮNG")
             onContentDisappearWithDelay('#form-create-order_contentNote', async () => {
@@ -129,8 +171,63 @@ window.onload = async () => {
         }
     }
     // Thực hiện các hành động khác...
-};
 
+
+}
+
+// <<< THAY ĐỔI 4: Thiết lập trình lắng nghe tin nhắn một lần >>>
+/**
+ * Lắng nghe tin nhắn từ background script và các phần khác của extension.
+ * Trình lắng nghe này chỉ được đăng ký MỘT LẦN.
+ */
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "URL_CHANGED") {
+        if (message.url.includes("https://my.vnpost.vn/order/domestic/create")) {
+
+            console.log("Received URL_CHANGED message. Re-initializing script.");
+            runMainLogic();
+        }else{
+            cleanup();
+        }
+        return true; // Báo hiệu sẽ trả lời bất đồng bộ (good practice)
+    }
+
+    if (message.type === "STORAGE_UPDATED") {
+        console.log("Storage updated, refreshing UI.");
+        // Chỉ gọi hàm update UI, không cần chạy lại toàn bộ logic
+        if (typeof updateUI === 'function') {
+            updateUI();
+        }
+        return true;
+    }
+});
+
+/**
+ * <<< THAY ĐỔI 2: Hàm Dọn Dẹp (Cleanup) >>>
+ * Hàm này sẽ được gọi trước khi chạy lại logic chính.
+ * Nó đảm bảo không có UI hoặc listener cũ nào còn sót lại.
+ */
+function cleanup() {
+    console.log("Cleaning up previous state...");
+
+    // Ngắt kết nối và xóa tất cả các observer cũ
+    activeObservers.forEach(observer => observer.disconnect());
+    activeObservers = [];
+
+    // Xóa các element UI đã được tạo
+    const autoFillContainer = document.getElementById('auto-fill-container');
+    if (autoFillContainer) {
+        autoFillContainer.remove();
+    }
+    const ghostInput = document.getElementById(GHOST_INPUT_ID);
+    if (ghostInput) {
+        ghostInput.remove();
+    }
+
+    // Reset các biến trạng thái nếu cần
+    uiContainer = null;
+    // Bất kỳ biến toàn cục nào khác cần reset cũng nên được đặt ở đây
+}
 // MY HO DUY///////////////////////////////////////////////////
 function createUI() {
     if (document.getElementById('auto-fill-container')) return;
@@ -242,6 +339,16 @@ async function populateForm(order: Order) {
                 element.setSelectionRange(element.value.length, element.value.length);
                 element.dispatchEvent(new Event('input', { bubbles: true }));
                 element.dispatchEvent(new Event('change', { bubbles: true }));
+            } else if (id === 'form-create-order_saleOrderCode') {
+                //kiểm tra số lượng màu sắc ví dụ DO thì 1, TRANG thì 1, XANH thì 1, TRANGTRANG thì 2, TRANGDO thì 2,XANHTRANG thì 2
+                const mausac = order.MAUSAC;
+                const mausacCount = mausac.match(/(TRANG|DO|XANH)/gi)?.length || 0;
+                if (mausacCount > 1) {
+                    var de = document.querySelector("#form-create-order_weight") as HTMLInputElement;
+                    de.value = "5000";
+                    de.dispatchEvent(new Event('input', { bubbles: true }));
+                    de.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             } else {
                 console.warn(`[Form Filler] Không tìm thấy element với ID: #${id}`);
             }
@@ -370,8 +477,9 @@ async function selectedDonMau(tenDonMau: string) {
     console.log(`Bắt đầu chọn dịch vụ: ${tenDonMau}`);
 
     // 1. Tìm ô chọn dịch vụ
-    await waitForElm('#rc_select_0')
-    const serviceSelectInput = document.getElementById('rc_select_0');
+    // await waitForElm('#rc_select_0')
+    
+    const serviceSelectInput =await findSelectNextToText("Đơn hàng mẫu")
     if (!serviceSelectInput) {
         console.error("Không tìm thấy ô nhập liệu dịch vụ.");
         return;
@@ -407,7 +515,7 @@ async function selectedDonMau(tenDonMau: string) {
     }
 }
 function watchTextChange(element: HTMLElement, callback: (newText: string) => void) {
-    const observer = new MutationObserver(() => {
+    const observer = createAndTrackObserver(() => {
         callback(element.textContent ?? "");
     });
 
@@ -428,10 +536,11 @@ function waitForElement(selector: string): Promise<HTMLElement> {
             return;
         }
 
-        const observer = new MutationObserver(() => {
+        const observer = createAndTrackObserver(() => {
             const el = document.querySelector(selector);
             if (el) {
                 observer.disconnect();
+                activeObservers = activeObservers.filter(o => o !== observer); // Xóa khỏi mảng
                 resolve(el as HTMLElement);
             }
         });
@@ -633,7 +742,7 @@ function onContentStateChange(
     };
 
     // Tạo một MutationObserver để lắng nghe thay đổi liên tục
-    const observer = new MutationObserver(() => {
+    const observer = createAndTrackObserver(() => {
         handleStateCheck();
     });
 
@@ -691,7 +800,7 @@ function onContentDisappearWithDelay(
     };
 
     // Tạo một MutationObserver để lắng nghe thay đổi liên tục
-    const observer = new MutationObserver(() => {
+    const observer = createAndTrackObserver(() => {
         handleStateCheck();
     });
 
@@ -713,24 +822,6 @@ function onContentDisappearWithDelay(
 
 
 
-// Định nghĩa cấu trúc của một mục địa chỉ trong data.json
-interface AddressItem {
-    NameXPKD?: string;
-    NameQHKD?: string;
-    NameTTPKD?: string;
-    // Thêm các thuộc tính khác nếu cần
-}
-
-// ==========================================================================
-// Cấu hình & Biến toàn cục
-// ==========================================================================
-
-const ADDRESS_INPUT_ID: string = "form-create-order_receiverAddress";
-const GHOST_INPUT_ID: string = "ghost-address-input-suggestion";
-
-let addressData: AddressItem[] = []; // Mảng chứa các đối tượng địa chỉ
-let currentSuggestion: string | null = null; // Gợi ý hiện tại
-let ghostInput: HTMLInputElement | null = null; // Tham chiếu đến element ghost input
 
 // ==========================================================================
 // Hàm Tiện ích (Utility Functions)
@@ -1082,7 +1173,7 @@ async function initialize(): Promise<void> {
         if (data && Array.isArray(data.QuocGia)) {
             addressData = data.QuocGia;
             console.log("Dữ liệu địa chỉ đã được tải.");
-         observeForAddressInput();
+            observeForAddressInput();
         } else {
             console.error("Định dạng data.json không hợp lệ.");
         }
@@ -1094,25 +1185,121 @@ async function initialize(): Promise<void> {
 /**
  * Sử dụng MutationObserver để tìm ô input địa chỉ khi nó xuất hiện trên trang.
  */
- function observeForAddressInput(): void {
-    const observer = new MutationObserver((mutationsList: MutationRecord[]) => {
+/**
+ * Sử dụng MutationObserver để liên tục tìm các ô input địa chỉ mới xuất hiện trên trang.
+ * Hàm này đủ mạnh để xử lý việc các component bị render lại trong SPA.
+ */
+function observeForAddressInput(): void {
+    // Hàm này sẽ kiểm tra và thiết lập cho input nếu cần
+    const checkAndSetup = () => {
         const addressInput = document.getElementById(ADDRESS_INPUT_ID) as HTMLInputElement | null;
-        if (addressInput) {
+
+        // Nếu tìm thấy input và nó chưa được thiết lập...
+        if (addressInput && !(addressInput as any)._suggestionSetup) {
             setupAddressSuggestion(addressInput);
-            observer.disconnect();
-            console.log("Đã tìm thấy và thiết lập cho ô địa chỉ. Dừng theo dõi DOM.");
         }
+    };
+
+    const observer = new MutationObserver((mutationsList: MutationRecord[]) => {
+        // Mỗi khi có sự thay đổi trong DOM, ta chỉ cần gọi hàm kiểm tra
+        // Không cần lặp qua mutationsList, vì có thể có quá nhiều thay đổi không liên quan.
+        // Chỉ cần quét lại phần tử ta quan tâm là đủ.
+        checkAndSetup();
     });
 
     observer.observe(document.body, {
-        childList: true,
-        subtree: true
+        childList: true, // theo dõi việc thêm/xóa node
+        subtree: true    // theo dõi toàn bộ cây DOM con
     });
 
-    const existingInput = document.getElementById(ADDRESS_INPUT_ID) as HTMLInputElement | null;
-    if (existingInput) {
-        setupAddressSuggestion(existingInput);
-        observer.disconnect();
-        console.log("Ô địa chỉ đã tồn tại. Dừng theo dõi DOM.");
+    // Rất quan trọng: Kiểm tra ngay lập tức khi hàm được gọi
+    // để xử lý trường hợp input đã tồn tại sẵn khi script chạy.
+    console.log("Bắt đầu theo dõi DOM để tìm ô địa chỉ...");
+    checkAndSetup();
+}
+
+
+/**
+ * Tìm một ô Ant Design Select nằm ngay bên cạnh một đoạn văn bản cụ thể.
+ * @param {string} textContent - Văn bản chính xác của element neo (ví dụ: 'Đơn hàng mẫu').
+ * @returns {Promise<HTMLElement | null>} - Trả về phần tử .ant-select-selector hoặc null nếu không tìm thấy.
+ */
+async function findSelectNextToText(textContent: string) {
+  try {
+    // 1. Chờ cho element chứa text xuất hiện.
+    // Chúng ta không thể dùng querySelector đơn giản vì text có thể chưa render.
+    // Dùng một hàm chờ tùy chỉnh.
+    const textElement = await waitForElementWithTextContent('b', textContent)as HTMLElement;
+    if (!textElement) {
+        console.warn(`Không tìm thấy element 'b' với text "${textContent}".`);
+        return null;
     }
+    console.log(`Đã tìm thấy element neo:`, textElement);
+
+    // 2. Đi ra thẻ cha là .ant-space-item
+    const parentSpaceItem = textElement.closest('.ant-space-item');
+    if (!parentSpaceItem) {
+      console.error(`Không tìm thấy thẻ cha .ant-space-item cho text: "${textContent}"`);
+      return null;
+    }
+    console.log(`Đã tìm thấy thẻ cha:`, parentSpaceItem);
+
+    // 3. Đi sang thẻ "anh em" (.ant-space-item) tiếp theo
+    const siblingSpaceItem = parentSpaceItem.nextElementSibling;
+    if (!siblingSpaceItem || !siblingSpaceItem.classList.contains('ant-space-item')) {
+      console.error(`Không tìm thấy thẻ "anh em" .ant-space-item.`);
+      return null;
+    }
+    console.log(`Đã tìm thấy thẻ anh em:`, siblingSpaceItem);
+
+    // 4. Từ thẻ anh em, tìm ô select có thể click
+    const clickableSelectBox = siblingSpaceItem.querySelector('.ant-select-selector');
+    if (!clickableSelectBox) {
+      console.error(`Không tìm thấy .ant-select-selector trong thẻ anh em.`);
+      return null;
+    }
+
+    console.log(`THÀNH CÔNG: Đã tìm thấy ô select cho "${textContent}"`);
+    return clickableSelectBox;
+
+  } catch (error) {
+    console.error(`Đã xảy ra lỗi khi tìm select bên cạnh text "${textContent}":`, error);
+    return null;
+  }
+}
+
+/**
+ * Hàm tiện ích chờ một element xuất hiện dựa vào selector và text content.
+ * @param {string} selector - CSS selector của element.
+ * @param {string} text - Văn bản cần khớp chính xác (trim).
+ * @returns {Promise<HTMLElement | null>}
+ */
+function waitForElementWithTextContent(selector:any, text:string) {
+  return new Promise((resolve) => {
+    const check = () => {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        if (el.textContent?.trim() === text) {
+          return el;
+        }
+      }
+      return null;
+    };
+
+    let element = check();
+    if (element) {
+      resolve(element);
+      return;
+    }
+
+    const observer = createAndTrackObserver(() => { // Sử dụng hàm đã có
+      element = check();
+      if (element) {
+        observer.disconnect();
+        activeObservers = activeObservers.filter(o => o !== observer);
+        resolve(element);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
 }

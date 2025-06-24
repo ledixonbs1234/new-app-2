@@ -161,7 +161,7 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
                       </span>
                     }
                     title={`${index + 1}. ${item.NGUOINHAN} - ${item.SDT} - ${item.MAUSAC}`}
-                    description={item.DIACHI}
+                    description={item.DIACHI + ' ||| ' + item.GOC}
                   />
                 </List.Item>
               );
