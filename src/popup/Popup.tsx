@@ -59,13 +59,13 @@ const baseColors: string[] = ["TRANG", "DO", "XANH"];
 
   }, [dispatch]);
 
-  const handleSaveJson = () => {
-    if (!jsonInput.trim()) {
+  const handleSaveJson = (jsonText:string) => {
+    if (!jsonText.trim()) {
       message.error("Vui lòng dán dữ liệu JSON.");
       return;
     }
     try {
-      const data = JSON.parse(jsonInput);
+      const data = JSON.parse(jsonText);
       if (!Array.isArray(data)) throw new Error("Dữ liệu phải là một mảng.");
       dispatch(setOrders({ orders: data, from: 'popup' }));
       message.success(`Đã lưu thành công ${data.length} đơn hàng!`);
@@ -74,6 +74,25 @@ const baseColors: string[] = ["TRANG", "DO", "XANH"];
       message.error("Lỗi JSON không hợp lệ: " + e.message);
     }
   };
+  
+function handleUsingAI(): void {
+   if (!jsonInput.trim()) {
+      message.error("Vui lòng dán dữ liệu JSON.");
+      return;
+    }
+    try {
+      chrome.runtime.sendMessage({ type: "SEND_AI_DATA",payload:jsonInput }, (response) => {
+        debugger
+        console.log("Response from AI:", response);
+        handleSaveJson(response.result);
+    }); 
+      message.success(`Đang sử dụng AI để xử lý dữ liệu...`);
+      setJsonInput('');
+    } catch (e: any) {
+      message.error("Lỗi JSON không hợp lệ: " + e.message);
+    }
+}
+
   const handleClearData = () => {
     dispatch(clearOrders({ from: 'popup' }));
     message.info("Đã xóa dữ liệu đơn hàng.");
@@ -182,8 +201,11 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
               value={jsonInput}
               onChange={(e) => setJsonInput(e.target.value)}
             />
-            <Button type="primary" onClick={handleSaveJson} block>
+            <Button type="primary" onClick={()=>{handleSaveJson(jsonInput)}} block>
               Lưu và Bắt đầu
+            </Button>
+             <Button type="primary" onClick={handleUsingAI} block>
+              Dùng AI
             </Button>
           </Space>
         </Card>

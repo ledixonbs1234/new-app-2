@@ -3,7 +3,7 @@ importScripts("xlsxtool.js")
 import { BuuGuiProps, DataSnapshotProps, KhachHangProps } from '../states/states';
 import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
 import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
-import { delay, createOrActiveTab, waitForTabToLoad } from './util';
+import { delay, createOrActiveTab } from './util';
 // import firebase from 'firebase/compat/app';
 
 // Khai báo biến toàn cục từ importScripts để TypeScript nhận diện
@@ -165,7 +165,6 @@ async function initFirebase(): Promise<void> {
   // Khởi tạo các giá trị timestamp lần đầu
 
   console.log("Firebase initialized, listening for scanned items and commands on key:", keyMessage);
-
 }
 
 
@@ -686,6 +685,13 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       saveToken(tokenTemp);
       token = tokenTemp;
     }
+  } else {
+    //       await processWithGemini(`[21/06/2025 10:33:47] Kim Vân: 1.13 hoà hảo 299k 45n trắng dc 6 phùng hưng ph hàng mã hk hà nội dt 0974568086
+    // [21/06/2025 11:40:36] Bích Ngọc: 14.14 Duong trung Hiếu 299k 45n trắng  cao minh phúc yên Vĩnh.phúc 035 8007812
+    // [21/06/2025 11:52:09] Kim Vân: 1.15 thạch trung 299k 45n trắng  địa chỉ 135/35 đường Liên khu 2/10phuong bình hưng hòa a quận Bình Tân TPHCMSDT 0943917650
+    // [21/06/2025 11:53:19] Bích Ngọc: 14.15 Tô trung chất 0972499410 ..299k 45n trắng.. Doi 5 thôn bui xe xã dak ơ Bù Gia Mập binh phước
+    // [21/06/2025 11:58:55] Kim Vân: 1.16 nguyễn dũng 299k 45n trắng Nguyễn Dũng mỹ xả xã Quảng An Quảng điền thừa Thiên Huế 0935196642
+    // [21/06/2025 12:15:25] Bích Ngọc: 14.17 pham xuan thìn  299k 45n trắng ..to 22 p.doi can tp tuyen quang tinh tuyen quang`,null)
   }
 
   const commandHandlers: { [key: string]: (data: any) => Promise<void> } = {
@@ -939,8 +945,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
-    }
-    // Thêm các event khác nếu cần
+    }     // Thêm các event khác nếu cần
   })();
   return true; // Quan trọng: Luôn trả về true để giữ kênh message mở cho các xử lý bất đồng bộ
 });
@@ -2669,7 +2674,18 @@ function groupMyPostDataByKhachHang(items: MyPostOrderProps[]): KhachHangProps[]
 
   return Array.from(khachHangMap.values());
 }
-
+const getTokenMyVNPost = async (tabId: number) => {
+  return new Promise<{ token: string | null }>((resolve) => {
+    chrome.tabs.sendMessage(tabId, { type: "GET_MYPOST_TOKEN" }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
+        resolve({ token: null });
+      } else {
+        resolve(res);
+      }
+    });
+  });
+}
 /**
  * Lấy dữ liệu từ API MyPost
  */
@@ -2737,16 +2753,7 @@ async function handleGetMyPostData(data: any) {
 
     updateToPhone("message", "Đang lấy token xác thực...");
 
-    const response = await new Promise<{ token: string | null }>((resolve) => {
-      chrome.tabs.sendMessage(tabId, { message: "GET_MYPOST_TOKEN" }, (res) => {
-        if (chrome.runtime.lastError) {
-          console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
-          resolve({ token: null });
-        } else {
-          resolve(res);
-        }
-      });
-    });
+    const response = await getTokenMyVNPost(tabId);
 
     if (!response || !response.token) {
       updateToPhone("error", "Không lấy được token. Vui lòng đăng nhập vào MyVNPost và thử lại.");
@@ -2765,7 +2772,7 @@ async function handleGetMyPostData(data: any) {
     }
 
     if (myPostData.length === 0) {
-      updateToPhone("info", "Không có đơn hàng nào trong 20 ngày qua.");
+      updateToPhone("message", "Không có đơn hàng nào trong 20 ngày.");
       return;
     }
 
@@ -2793,12 +2800,18 @@ async function handleGetMyPostData(data: any) {
 
 chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
   //Lọc url 
-  if(details.url.includes("https://my.vnpost.vn/")){
+  if (details.url.includes("https://my.vnpost.vn/")) {
     console.log("Đã vào trang tạo đơn hàng MyVNPost");
     // Gửi thông báo đến tab hiện tại
-    chrome.tabs.sendMessage(details.tabId, { type:'URL_CHANGED',url:details.url });
+    chrome.tabs.sendMessage(details.tabId, { type: 'URL_CHANGED', url: details.url }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
+      } else {
+        console.log("Đã gửi thông báo URL_CHANGED đến tab:", details.tabId);
+      }
+    });
   }
-},{url:[{hostContains:"my.vnpost.vn"}] });
+}, { url: [{ hostContains: "my.vnpost.vn" }] });
 
 
 
@@ -2836,18 +2849,20 @@ function broadcastUpdate(payload: SessionData) {
     }
   });
 }
+const save_order = (msg: any,sendResponse: (response: any) => void) => {
+  const dataToSave: SessionData = {
+    orders: msg.payload.orders,
+    currentIndex: 0
+  };
+  chrome.storage.session.set(dataToSave, () => {
+    broadcastUpdate(dataToSave);
+    sendResponse({ status: 'ok' });
+  });
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {
-    debugger
-    const dataToSave: SessionData = {
-      orders: msg.payload.orders,
-      currentIndex: 0
-    };
-    chrome.storage.session.set(dataToSave, () => {
-      broadcastUpdate(dataToSave);
-      sendResponse({ status: 'ok' });
-    });
+    save_order(msg,sendResponse);
     return true; // Giữ kênh message mở cho response bất đồng bộ
   }
 
@@ -2858,6 +2873,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         currentIndex: result.currentIndex || 0
       });
     });
+    return true;
+  }
+  if (msg.type === "SEND_AI_DATA") {
+    processWithGemini(msg.payload, null).then((response) => {
+      sendResponse({ status: 'ok', result: response });
+
+    })
     return true;
   }
 
@@ -2909,8 +2931,263 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg.event === "CONTENTMY") {
+    if (msg.type === "CREATE_COMPLAINT") {
+      handleCreateComplaint(msg.payload, sendResponse);
+      return true; // Quan trọng: Luôn trả về true để xử lý bất đồng bộ
+    } sendResponse({ status: "badge_updated" });
+  }
+
+
 });
 //END Ho Duy--------------------------------
+
+
+// Bạn cần đảm bảo đã có hàm `waitForTabToLoad`
+// Nếu chưa có, đây là một phiên bản đơn giản:
+async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
+  return new Promise((resolve) => {
+    const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete' && tab.url) {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(tab);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    // Fallback trong trường hợp tab đã load xong trước khi listener được thêm
+    chrome.tabs.get(tabId, (tab) => {
+      if (tab.status === 'complete' && tab.url) {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(tab);
+      }
+    });
+  });
+}
+
+/**
+ * Hàm chính xử lý quy trình khiếu nại
+ */
+async function handleCreateComplaint(payload: { itemCode: string, token: string | null, type: string }, sendResponse: (response: any) => void) {
+  const { itemCode, token, type } = payload;
+  console.log(`[BG] Bắt đầu xử lý khiếu nại cho: ${itemCode}`);
+
+  try {
+
+
+    const commonHeaders = {
+      "accept": "*/*",
+      "authorization": token!, // Sử dụng token động
+      "capikey": "19001111",
+      "content-type": "application/json",
+      "sec-fetch-mode": "cors",
+      "sec-fetch-site": "same-site",
+      "referrer": "https://my.vnpost.vn/",
+    };
+
+    // 2. Fetch lần 1 để lấy orderHdrId
+    console.log(`[BG] Fetching orderHdrId for ${itemCode}...`);
+    const searchRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`, {
+      headers: commonHeaders,
+      method: "POST",
+    });
+
+    if (!searchRes.ok) throw new Error(`API search lỗi: ${searchRes.status} ${searchRes.statusText}`);
+    const searchData = await searchRes.json();
+    if (!searchData || !searchData.orderHdrId) throw new Error("API không trả về orderHdrId.");
+
+    const orderHdrId = searchData.orderHdrId;
+    console.log(`[BG] Lấy được orderHdrId: ${orderHdrId}`);
+
+    // 3. Fetch lần 2 để lấy chi tiết đơn hàng
+    console.log(`[BG] Fetching order details for ${orderHdrId}...`);
+    const detailRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${orderHdrId}`, {
+      headers: commonHeaders,
+      method: "GET",
+    });
+
+    if (!detailRes.ok) throw new Error(`API detail lỗi: ${detailRes.status} ${detailRes.statusText}`);
+    const detailData = await detailRes.json();
+    if (!detailData) throw new Error("API không trả về chi tiết đơn hàng.");
+
+    const complaintData = {
+      orgCode: detailData.orgCode,
+      serviceCode: detailData.serviceCode,
+      itemCode: detailData.itemCode,
+      type: type
+    };
+    console.log("[BG] Dữ liệu khiếu nại đã trích xuất:", complaintData);
+
+    // 4. Tìm hoặc tạo tab CMS
+    const cmsUrl = "https://cms.vnpost.vn/admin/complaints";
+    const cmsUrlHost = "https://cms.vnpost.vn";
+    let cmsTabs = await chrome.tabs.query({ url: `${cmsUrlHost}/*` });
+    let cmsTab;
+
+    if (cmsTabs.length > 0) {
+      console.log("[BG] Tìm thấy tab CMS. Kích hoạt nó...");
+      cmsTab = await chrome.tabs.update(cmsTabs[0].id!, { active: true, url: cmsUrl });
+    } else {
+      console.log("[BG] Không tìm thấy tab CMS. Tạo tab mới...");
+      cmsTab = await chrome.tabs.create({ url: cmsUrl, active: true });
+    }
+
+    // Chờ tab load xong
+    await waitForTabToLoad(cmsTab.id!);
+    console.log(`[BG] Tab CMS (ID: ${cmsTab.id}) đã sẵn sàng. Gửi dữ liệu...`);
+
+    // 5. Gửi dữ liệu sang tab CMS
+    chrome.tabs.sendMessage(cmsTab.id!, {
+      type: "PREPARE_COMPLAINT_FORM",
+      payload: complaintData
+    });
+
+    // 6. Phản hồi thành công về cho content script ban đầu
+    sendResponse({ status: "success" });
+
+  } catch (error: any) {
+    console.error("[BG] Lỗi trong quá trình tạo khiếu nại:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+// Định nghĩa kiểu cho dữ liệu file
+interface FileData {
+  mimeType: string;
+  base64Data: string;
+}
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+const GEMINI_API_KEY = "AIzaSyDi6U8u1FK-wLKejyzJ1dntVUHpiaHipIE"; // Thay thế bằng API key thực tế của bạn
+// Hàm gọi API đã được cập nhật
+async function processWithGemini(userPrompt: string, fileData: FileData | null): Promise<string> {
+
+  const systemInstruction = `ta có file địa chỉ mẫu, dựa vào thông tin sau, chuyển sang json (chỉ trả về json) có tag sau (GOC,MAUSAC,NGUOINHAN,DIACHI,SDT,COD) .trong đó nội dung gốc ví dụ (1.6 nguyễn duy khuyến 350k 35n 2đỏ Nguyễn Duy Khuyến, đường số 6, ấp Phú Tân, xã Phú Bình, huyện Tân Phú, tỉnh Đồng Nai. Đt 0916302413), màu sắc ví dụ đỏ là DO ,trắng TRẮNG , xanh XANH, 1 đỏ 1 xanh DOXANH , 2đỏ DODO 2 xanh XANHXANH, tên người nhận theo mẫu sau 1.6 nguyễn duy khuyến 350k hoặc 14.2 uyên trần 538k) , số điện thoại, và địa chỉ (trong địa chỉ có  tự chỉnh lại cho đúng nếu sai ví dụ xa thong nhat huyen bu dang binh phuoc thành xã thống nhất huyện bù đăng tỉnh bình phước ),số tiền cod ( 510k là 510000, 538k là 538000)
+    sai phần người nhận rồi, ý tôi muốn là 20a1 ót duong van 320k 35n 2đỏ 0918820593\n313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre thì người nhận là 20a1 ót duong van 320k , hay 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt thì NGUOINHAN là 32a4 phương dinh 450k
+
+[19/06/2025 11:55:52] Bích Ngọc: 14.1 do nguyễn 570k 45n 2trắng 0916333309 Đ/C 3/161 ấp ngãi lợi b,xã lợi bình nhơn,TP Tân An,Long An
+[19/06/2025 15:41:40] Kim Vân: 14.2 uyên trần 538k 45n trang 40n xanh  địa chỉ số nhà 052 tổ dân phố 13 phường Tân Giang thành phố cao bằng tỉnh cao bằng 0904611961
+[19/06/2025 16:25:53] Kim Vân: 26a3 trần thanh trúc 350k 35n 2đỏ Địa chỉ: 107 Thủ Khoa Huân, phường 1, Thành phố Tân An, Long An (0983288725)
+[20/06/2025 07:49:49] Nguyễn Diệu: 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt
+[21/06/2025 08:46:10] Bích Ngọc: 20a1 ót duong van 320k 35n 2đỏ 0918820593
+313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre 
+và đây là kết quả của tôi 
+[
+    {
+        "GOC": "14.1 do nguyễn 570k 45n 2trắng 0916333309 Đ/C 3/161 ấp ngãi lợi b,xã lợi bình nhơn,TP Tân An,Long An",
+        "MAUSAC": "TRANGTRANG",
+        "NGUOINHAN": "14.1 do nguyễn 570k",
+        "DIACHI": "3/161 Ấp Ngãi Lợi B, Xã Lợi Bình Nhơn, Thành phố Tân An, Tỉnh Long An",
+        "SDT": "0916333309",
+        "COD": 570000
+    },
+    {
+        "GOC": "14.2 uyên trần 538k 45n trang 40n xanh  địa chỉ số nhà 052 tổ dân phố 13 phường Tân Giang thành phố cao bằng tỉnh cao bằng 0904611961",
+        "MAUSAC": "TRANGXANH",
+        "NGUOINHAN": "14.2 uyên trần 538k",
+        "DIACHI": "Số nhà 052, Tổ dân phố 13, Phường Tân Giang, Thành phố Cao Bằng, Tỉnh Cao Bằng",
+        "SDT": "0904611961",
+        "COD": 538000
+    },
+    {
+        "GOC": "26a3 trần thanh trúc 350k 35n 2đỏ Địa chỉ: 107 Thủ Khoa Huân, phường 1, Thành phố Tân An, Long An (0983288725)",
+        "MAUSAC": "DODO",
+        "NGUOINHAN": "26a3 trần thanh trúc 350k",
+        "DIACHI": "107 Thủ Khoa Huân, Phường 1, Thành phố Tân An, Tỉnh Long An",
+        "SDT": "0983288725",
+        "COD": 350000
+    },
+    {
+        "GOC": "32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt",
+        "MAUSAC": "XANHXANH",
+        "NGUOINHAN": "32a4 phương dinh 450k",
+        "DIACHI": "96 Thánh Tâm, Du Sinh, Phường 5, Thành phố Đà Lạt, Tỉnh Lâm Đồng",
+        "SDT": "0333395115",
+        "COD": 450000
+    },
+    {
+        "GOC": "20a1 ót duong van 320k 35n 2đỏ 0918820593\n313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre",
+        "MAUSAC": "DODO",
+        "NGUOINHAN": "20a1 ót duong van 320k",
+        "DIACHI": "313, Ấp Phú Lợi, Xã Bình Phú, Thành phố Bến Tre, Tỉnh Bến Tre",
+        "SDT": "0918820593",
+        "COD": 320000
+    }
+]
+    \n `;
+
+  // Xây dựng các "parts" cho request
+  const requestParts = [
+    { "text": systemInstruction },
+    { "text": `\n\nYêu cầu của người dùng:\n"${userPrompt}"` }
+  ];
+
+  // Nếu có file, thêm nó vào như một part riêng
+  if (fileData) {
+    requestParts.push({
+      // @ts-ignore
+      "inlineData": {
+        "mimeType": fileData.mimeType,
+        "data": fileData.base64Data
+      }
+    });
+  }
+
+  // Body của request bây giờ chứa một mảng các parts
+  const requestBody = {
+    "contents": [{
+      "parts": requestParts
+    }],
+    "generationConfig": {
+      "temperature": 0.3,
+      "topK": 1,
+      "topP": 1,
+      "maxOutputTokens": 65536,
+    }
+  };
+
+  try {
+    const response = await fetch(GEMINI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.json();
+      console.error("API Error:", errorBody);
+      throw new Error(`Lỗi API: ${errorBody.error.message || response.statusText}`);
+    }
+
+
+    const data = await response.json();
+
+    // Kiểm tra xem có response trả về không
+    if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content.parts) {
+      throw new Error("Không nhận được phản hồi hợp lệ từ Gemini.");
+    }
+
+    const textResult = data.candidates[0].content.parts[0].text;
+    // Bước 1: Trích xuất phần nội dung JSON.
+    // Chúng ta tìm vị trí của dấu `[` đầu tiên và dấu `]` cuối cùng.
+    const startIndex = textResult.indexOf('[');
+    const endIndex = textResult.lastIndexOf(']');
+    const jsonContentString = textResult.substring(startIndex, endIndex + 1);
+
+    // Bước 2: Phân tích chuỗi JSON thành đối tượng JavaScript
+    // Thao tác này sẽ loại bỏ tất cả các khoảng trắng và xuống dòng thừa.
+    const jsObject = JSON.parse(jsonContentString);
+
+    // Bước 3: Chuyển đối tượng JavaScript trở lại thành một JSON string chuẩn
+    const finalJsonString = JSON.stringify(jsObject);
+    debugger
+    return finalJsonString; // Trả về chuỗi JSON đã chuẩn hóa
+
+  } catch (error) {
+    console.error("Lỗi khi gọi Gemini API:", error);
+    throw error;
+  }
+}
 
 
 // END: ================== MY VNPOST ==================

@@ -66,11 +66,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
       if (msg) {
         console.log("LISTENER CONTENT SCRIPT", msg);
 
-        if (msg.message === "GET_MYPOST_TOKEN") {
-          const token = localStorage.getItem('accessToken');
-          callback({ token: token || null });
-          return true; // Giữ kênh mở cho phản hồi bất đồng bộ
-        }
+       
         // END: Thêm listener mới cho MyPost
 
         if (msg.message === "PROCESS_SINGLE_ITEM") {

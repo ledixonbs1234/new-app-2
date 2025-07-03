@@ -51,8 +51,16 @@
     "content_scripts": [
         {
             "matches": [
+                "https://cms.vnpost.vn/*"
+            ],
+            "js": [
+                "contentCms.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
                 "https://portalkhl.vnpost.vn/*",
-                "https://my.vnpost.vn/*",
                 "https://example.com/",
                 "https://packnsend.vnpost.vn/*"
             ],
@@ -70,7 +78,7 @@
         },
         {
             "matches": [
-                "https://my.vnpost.vn/order/domestic/create/*"
+                "https://my.vnpost.vn/*"
             ],
             "js": [
                 "contentMy.js"

@@ -11,6 +11,7 @@ module.exports = {
         util:path.resolve('./src/background/util.ts'),
         contentScript:path.resolve('./src/contentScript/contentScript.tsx'),
         contentLoginPortal:path.resolve('./src/contentScript/contentLoginPortal.tsx'),
+        contentCms:path.resolve('./src/contentScript/contentCms.tsx'),
         contentMy:path.resolve('./src/contentScript/contentMy.tsx'),
         mainScript:path.resolve('./src/contentScript/mainScript.tsx'),
     },

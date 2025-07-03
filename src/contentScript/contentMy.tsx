@@ -32,7 +32,19 @@ let addressData: AddressItem[] = []; // Mảng chứa các đối tượng đị
 let currentSuggestion: string | null = null; // Gợi ý hiện tại
 let ghostInput: HTMLInputElement | null = null; // Tham chiếu đến element ghost input
 
-runMainLogic();
+
+window.onload = async () => {
+    if (window.location.href.includes("domestic/create")) {
+
+        console.log("Received URL_CHANGED message. Re-initializing script.");
+        await runMainLogic();
+    } else if (window.location.href.includes("order-manager")) {
+        console.log("Tìm thấy Order Manager, đang chạy logic đơn hàng.");
+        await runOrderLogic()
+    } else {
+        cleanup();
+    }
+}
 /**
  * Hàm tiện ích để tạo và theo dõi một MutationObserver.
  * Thay vì dùng `new MutationObserver` trực tiếp, hãy dùng hàm này.
@@ -180,27 +192,35 @@ async function runMainLogic() {
  * Lắng nghe tin nhắn từ background script và các phần khác của extension.
  * Trình lắng nghe này chỉ được đăng ký MỘT LẦN.
  */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     if (message.type === "URL_CHANGED") {
-        if (message.url.includes("https://my.vnpost.vn/order/domestic/create")) {
+        if (message.url.includes("domestic/create")) {
 
             console.log("Received URL_CHANGED message. Re-initializing script.");
-            runMainLogic();
-        }else{
+            await runMainLogic();
+        } else if (message.url.includes("order-manager")) {
+            console.log("Tìm thấy Order Manager, đang chạy logic đơn hàng.");
+            cleanup();
+            await runOrderLogic()
+        } else {
             cleanup();
         }
         return true; // Báo hiệu sẽ trả lời bất đồng bộ (good practice)
-    }
-
-    if (message.type === "STORAGE_UPDATED") {
+    } else if (message.type === "STORAGE_UPDATED") {
         console.log("Storage updated, refreshing UI.");
         // Chỉ gọi hàm update UI, không cần chạy lại toàn bộ logic
         if (typeof updateUI === 'function') {
             updateUI();
         }
         return true;
-    }
-});
+    } else
+        if (message.type === "GET_MYPOST_TOKEN") {
+            const token = localStorage.getItem('accessToken');
+            sendResponse({ token: token || null });
+            return true; // Giữ kênh mở cho phản hồi bất đồng bộ
+        }
+})
+
 
 /**
  * <<< THAY ĐỔI 2: Hàm Dọn Dẹp (Cleanup) >>>
@@ -230,6 +250,18 @@ function cleanup() {
 }
 // MY HO DUY///////////////////////////////////////////////////
 function createUI() {
+    if(!document.getElementById('fulladdress')){
+        var khungCanInsert  = document .querySelector("#form-create-order > div > div:nth-child(1) > div:nth-child(1) > div:nth-child(2) > div > div.ant-card-body > div > div:nth-child(5)") as HTMLDivElement;
+        //insert tag p nằm vị trí kế tiếp của khungCanInsert
+        var fullAddress = document.createElement("p");
+        fullAddress.id = "fulladdress";
+        fullAddress.style.fontSize = "14px";
+        fullAddress.style.color = "#1890ff";
+        fullAddress.style.marginTop = "10px";
+        fullAddress.textContent = "Địa chỉ đầy đủ sẽ hiện thị tại đây";
+
+        khungCanInsert.insertAdjacentElement("afterend", fullAddress);
+    }
     if (document.getElementById('auto-fill-container')) return;
 
     uiContainer = document.createElement('div');
@@ -325,6 +357,10 @@ async function populateForm(order: Order) {
         'cod': order.COD
     };
     var cod = document.querySelector("#scrollableDiv > div:nth-child(2) > table > tr:nth-child(1) > td:nth-child(3) > div > div.ant-col.ant-col-10 > div > div.ant-input-number-input-wrap > input") as HTMLInputElement | HTMLTextAreaElement
+    var fullAddressElement = document.getElementById('fulladdress') as HTMLParagraphElement;
+    if( fullAddressElement) {
+        fullAddressElement.textContent = order.GOC || "Địa chỉ đầy đủ sẽ hiện thị tại đây";
+    }
     for (const id in fieldMapping) {
         const element = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement;
         if (element) {
@@ -478,8 +514,8 @@ async function selectedDonMau(tenDonMau: string) {
 
     // 1. Tìm ô chọn dịch vụ
     // await waitForElm('#rc_select_0')
-    
-    const serviceSelectInput =await findSelectNextToText("Đơn hàng mẫu")
+
+    const serviceSelectInput = await findSelectNextToText("Đơn hàng mẫu")
     if (!serviceSelectInput) {
         console.error("Không tìm thấy ô nhập liệu dịch vụ.");
         return;
@@ -1225,47 +1261,47 @@ function observeForAddressInput(): void {
  * @returns {Promise<HTMLElement | null>} - Trả về phần tử .ant-select-selector hoặc null nếu không tìm thấy.
  */
 async function findSelectNextToText(textContent: string) {
-  try {
-    // 1. Chờ cho element chứa text xuất hiện.
-    // Chúng ta không thể dùng querySelector đơn giản vì text có thể chưa render.
-    // Dùng một hàm chờ tùy chỉnh.
-    const textElement = await waitForElementWithTextContent('b', textContent)as HTMLElement;
-    if (!textElement) {
-        console.warn(`Không tìm thấy element 'b' với text "${textContent}".`);
+    try {
+        // 1. Chờ cho element chứa text xuất hiện.
+        // Chúng ta không thể dùng querySelector đơn giản vì text có thể chưa render.
+        // Dùng một hàm chờ tùy chỉnh.
+        const textElement = await waitForElementWithTextContent('b', textContent) as HTMLElement;
+        if (!textElement) {
+            console.warn(`Không tìm thấy element 'b' với text "${textContent}".`);
+            return null;
+        }
+        console.log(`Đã tìm thấy element neo:`, textElement);
+
+        // 2. Đi ra thẻ cha là .ant-space-item
+        const parentSpaceItem = textElement.closest('.ant-space-item');
+        if (!parentSpaceItem) {
+            console.error(`Không tìm thấy thẻ cha .ant-space-item cho text: "${textContent}"`);
+            return null;
+        }
+        console.log(`Đã tìm thấy thẻ cha:`, parentSpaceItem);
+
+        // 3. Đi sang thẻ "anh em" (.ant-space-item) tiếp theo
+        const siblingSpaceItem = parentSpaceItem.nextElementSibling;
+        if (!siblingSpaceItem || !siblingSpaceItem.classList.contains('ant-space-item')) {
+            console.error(`Không tìm thấy thẻ "anh em" .ant-space-item.`);
+            return null;
+        }
+        console.log(`Đã tìm thấy thẻ anh em:`, siblingSpaceItem);
+
+        // 4. Từ thẻ anh em, tìm ô select có thể click
+        const clickableSelectBox = siblingSpaceItem.querySelector('.ant-select-selector');
+        if (!clickableSelectBox) {
+            console.error(`Không tìm thấy .ant-select-selector trong thẻ anh em.`);
+            return null;
+        }
+
+        console.log(`THÀNH CÔNG: Đã tìm thấy ô select cho "${textContent}"`);
+        return clickableSelectBox;
+
+    } catch (error) {
+        console.error(`Đã xảy ra lỗi khi tìm select bên cạnh text "${textContent}":`, error);
         return null;
     }
-    console.log(`Đã tìm thấy element neo:`, textElement);
-
-    // 2. Đi ra thẻ cha là .ant-space-item
-    const parentSpaceItem = textElement.closest('.ant-space-item');
-    if (!parentSpaceItem) {
-      console.error(`Không tìm thấy thẻ cha .ant-space-item cho text: "${textContent}"`);
-      return null;
-    }
-    console.log(`Đã tìm thấy thẻ cha:`, parentSpaceItem);
-
-    // 3. Đi sang thẻ "anh em" (.ant-space-item) tiếp theo
-    const siblingSpaceItem = parentSpaceItem.nextElementSibling;
-    if (!siblingSpaceItem || !siblingSpaceItem.classList.contains('ant-space-item')) {
-      console.error(`Không tìm thấy thẻ "anh em" .ant-space-item.`);
-      return null;
-    }
-    console.log(`Đã tìm thấy thẻ anh em:`, siblingSpaceItem);
-
-    // 4. Từ thẻ anh em, tìm ô select có thể click
-    const clickableSelectBox = siblingSpaceItem.querySelector('.ant-select-selector');
-    if (!clickableSelectBox) {
-      console.error(`Không tìm thấy .ant-select-selector trong thẻ anh em.`);
-      return null;
-    }
-
-    console.log(`THÀNH CÔNG: Đã tìm thấy ô select cho "${textContent}"`);
-    return clickableSelectBox;
-
-  } catch (error) {
-    console.error(`Đã xảy ra lỗi khi tìm select bên cạnh text "${textContent}":`, error);
-    return null;
-  }
 }
 
 /**
@@ -1274,32 +1310,296 @@ async function findSelectNextToText(textContent: string) {
  * @param {string} text - Văn bản cần khớp chính xác (trim).
  * @returns {Promise<HTMLElement | null>}
  */
-function waitForElementWithTextContent(selector:any, text:string) {
-  return new Promise((resolve) => {
-    const check = () => {
-      const elements = document.querySelectorAll(selector);
-      for (const el of elements) {
-        if (el.textContent?.trim() === text) {
-          return el;
+function waitForElementWithTextContent(selector: any, text: string) {
+    return new Promise((resolve) => {
+        const check = () => {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+                if (el.textContent?.trim() === text) {
+                    return el;
+                }
+            }
+            return null;
+        };
+
+        let element = check();
+        if (element) {
+            resolve(element);
+            return;
         }
-      }
-      return null;
+
+        const observer = createAndTrackObserver(() => { // Sử dụng hàm đã có
+            element = check();
+            if (element) {
+                observer.disconnect();
+                activeObservers = activeObservers.filter(o => o !== observer);
+                resolve(element);
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    });
+}
+
+function runOrderLogic() {
+    console.log("Order Logic is running. Waiting for order detail modal...");
+
+    // Hàm để xử lý khi modal xuất hiện
+    const processModal = (modalElement: Element) => {
+       
+        // 1. Kiểm tra xem nút của chúng ta đã được thêm vào chưa
+        const existingButton = modalElement.querySelector('#custom-copy-info-btn');
+        if (existingButton) {
+            return; // Đã có nút rồi, không làm gì cả
+        }
+
+        // 2. Tìm nút "Đánh giá" để làm điểm neo
+        const reviewButton = modalElement.querySelector('button[title="Đánh giá"]');
+        if (!reviewButton) {
+            // Đôi khi nút chưa render kịp, chúng ta sẽ chờ ở lần kiểm tra sau
+            return;
+        }
+
+        // 3. Tạo nút mới
+        const copyButton = document.createElement('button');
+        copyButton.id = 'custom-copy-info-btn';
+        copyButton.textContent = 'Copy Thông tin';
+        // Thêm các class yêu cầu
+        copyButton.className = 'ant-btn ant-btn-default btn-outline-warning';
+        // Thêm một chút khoảng cách cho đẹp
+        copyButton.style.marginLeft = '8px';
+
+        // 4. Gán sự kiện click để sao chép thông tin
+        copyButton.onclick = () => {
+            // Tìm thẻ cha chứa tất cả thông tin
+            const modalBody = modalElement.querySelector('.ant-modal-body');
+            if (!modalBody) {
+                console.error("Không tìm thấy modal body!");
+                return;
+            }
+
+            // --- Hàm trợ giúp để lấy text an toàn ---
+            const getTextFromLabel = (container: Element, labelText: string): string => {
+                const allThs = container.querySelectorAll('th');
+                for (const th of allThs) {
+                    // Dùng includes để linh hoạt hơn (ví dụ: "Họ và tên" và "Họ và tên ")
+                    if (th.textContent?.trim().includes(labelText)) {
+                        const td = th.nextElementSibling as HTMLElement;
+                        // Lấy textContent và dọn dẹp khoảng trắng
+                        return td?.textContent?.trim().replace(/\s+/g, ' ') ?? 'N/A';
+                    }
+                }
+                return 'N/A';
+            };
+
+            // --- Trích xuất thông tin ---
+            // Mã vận đơn nằm ở card "Đơn hàng"
+            const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Đơn hàng'))?.closest('.ant-card');
+
+            // Các thông tin còn lại nằm ở card "Người nhận"
+            const receiverCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Người nhận'))?.closest('.ant-card');
+
+            if (!orderCard || !receiverCard) {
+                console.error("Không thể tìm thấy card thông tin đơn hàng hoặc người nhận.");
+                alert("Lỗi: Không thể trích xuất thông tin.");
+                return;
+            }
+
+
+            const maVanDon = getTextFromLabel(orderCard, 'Mã vận đơn');
+            const hoTen = getTextFromLabel(receiverCard, 'Họ và tên');
+            // Số điện thoại có thể có icon ẩn, lấy text là đủ
+            const soDienThoaiRaw = getTextFromLabel(receiverCard, 'Số điện thoại');
+            // Tách phần số điện thoại ra khỏi các text/icon thừa
+            const soDienThoai = soDienThoaiRaw.split(' ')[0] || 'N/A';
+            const diaChi = getTextFromLabel(receiverCard, 'Địa chỉ');
+
+            // 5. Định dạng chuỗi để copy, giống với ví dụ của bạn
+            const textToCopy = `${maVanDon}\n${hoTen}\n${soDienThoai}\n${diaChi}`;
+
+            // 6. Copy vào clipboard
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                console.log('Đã copy thông tin:', textToCopy);
+                const originalText = copyButton.textContent;
+                copyButton.textContent = 'Đã copy!';
+                copyButton.disabled = true;
+                setTimeout(() => {
+                    copyButton.textContent = originalText;
+                    copyButton.disabled = false;
+                }, 2000); // Reset lại nút sau 2 giây
+            }).catch(err => {
+                console.error('Lỗi khi copy: ', err);
+                alert('Không thể tự động copy. Vui lòng thử lại.');
+            });
+        };
+ //chờ 1s để chạy hàm dưới
+        var fullSDTView = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(2) > td > span > span") as HTMLElement;
+        fullSDTView.click();
+        // 7. Chèn nút mới vào sau nút "Đánh giá"
+        reviewButton.insertAdjacentElement('afterend', copyButton);
+        console.log('Đã thêm nút "Copy Thông tin".');
+
+        // --- BẮT ĐẦU PHẦN CODE MỚI ---
+        const existingComplaintButton = modalElement.querySelector('#custom-complaint-btn');
+        if (existingComplaintButton) {
+            return; // Đã có nút rồi, không làm gì cả
+        }
+
+        const copy1Button = modalElement.querySelector('#custom-copy-info-btn');
+        if (!copy1Button) {
+            // Chờ nút copy được tạo ở lần kiểm tra sau
+            return;
+        }
+
+        const complaintButton = document.createElement('button');
+        complaintButton.id = 'custom-complaint-btn';
+        complaintButton.textContent = 'Khiếu nại';
+        complaintButton.className = 'ant-btn ant-btn-default'; // Thay đổi class nếu muốn
+        complaintButton.style.marginLeft = '8px';
+
+        complaintButton.onclick = () => {
+            const modalBody = modalElement.querySelector('.ant-modal-body');
+            if (!modalBody) {
+                console.error("Không tìm thấy modal body!");
+                return;
+            }
+
+            // Hàm trợ giúp để lấy text Mã vận đơn
+            const getTextFromLabel = (container: Element, labelText: string): string => {
+                const allThs = container.querySelectorAll('th');
+                for (const th of allThs) {
+                    if (th.textContent?.trim().includes(labelText)) {
+                        return th.nextElementSibling?.textContent?.trim() ?? '';
+                    }
+                }
+                return '';
+            };
+
+            const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Đơn hàng'))?.closest('.ant-card');
+            if (!orderCard) {
+                alert('Lỗi: Không tìm thấy card thông tin đơn hàng.');
+                return;
+            }
+
+            const itemCode = getTextFromLabel(orderCard, 'Mã vận đơn');
+
+            if (!itemCode) {
+                alert('Lỗi: Không lấy được mã vận đơn.');
+                return;
+            }
+
+            console.log(`Bắt đầu quy trình Khiếu nại cho mã: ${itemCode}`);
+            complaintButton.textContent = 'Đang xử lý...';
+            complaintButton.disabled = true;
+            const token = localStorage.getItem('accessToken');
+
+            // Gửi message tới background script
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY", // Event mới để phân biệt
+                type: "CREATE_COMPLAINT",
+                payload: {
+                    itemCode: itemCode,
+                    token: token,
+                    type: 'complaint' // Thêm loại khiếu nại
+                }
+            }, (response) => {
+                // Xử lý phản hồi từ background
+                if (response && response.status === 'success') {
+                    complaintButton.textContent = 'Đã gửi yêu cầu!';
+                    setTimeout(() => {
+                        complaintButton.textContent = 'Khiếu nại';
+                        complaintButton.disabled = false;
+                    }, 3000);
+                } else {
+                    alert(`Lỗi: ${response?.error || 'Không rõ nguyên nhân'}`);
+                    complaintButton.textContent = 'Khiếu nại';
+                    complaintButton.disabled = false;
+                }
+            });
+        };
+
+        // Chèn nút "Khiếu nại" sau nút "Copy"
+        copy1Button.insertAdjacentElement('afterend', complaintButton);
+        console.log('Đã thêm nút "Khiếu nại".');
+        const complaintButton1 = document.createElement('button');
+        complaintButton1.id = 'custom-complaint-btn';
+        complaintButton1.textContent = 'Hỗ trợ';
+        complaintButton1.className = 'ant-btn ant-btn-default'; // Thay đổi class nếu muốn
+        complaintButton1.style.marginLeft = '8px';
+
+        complaintButton1.onclick = () => {
+            const modalBody = modalElement.querySelector('.ant-modal-body');
+            if (!modalBody) {
+                console.error("Không tìm thấy modal body!");
+                return;
+            }
+
+            // Hàm trợ giúp để lấy text Mã vận đơn
+            const getTextFromLabel = (container: Element, labelText: string): string => {
+                const allThs = container.querySelectorAll('th');
+                for (const th of allThs) {
+                    if (th.textContent?.trim().includes(labelText)) {
+                        return th.nextElementSibling?.textContent?.trim() ?? '';
+                    }
+                }
+                return '';
+            };
+
+            const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Đơn hàng'))?.closest('.ant-card');
+            if (!orderCard) {
+                alert('Lỗi: Không tìm thấy card thông tin đơn hàng.');
+                return;
+            }
+
+            const itemCode = getTextFromLabel(orderCard, 'Mã vận đơn');
+
+            if (!itemCode) {
+                alert('Lỗi: Không lấy được mã vận đơn.');
+                return;
+            }
+
+            console.log(`Bắt đầu quy trình Khiếu nại cho mã: ${itemCode}`);
+            complaintButton1.textContent = 'Đang xử lý...';
+            complaintButton1.disabled = true;
+            const token = localStorage.getItem('accessToken');
+
+            // Gửi message tới background script
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY", // Event mới để phân biệt
+                type: "CREATE_COMPLAINT",
+                payload: {
+                    itemCode: itemCode,
+                    token: token,
+                    type: 'support' // Thêm loại hỗ trợ
+                }
+            }, (response) => {
+                // Xử lý phản hồi từ background
+                if (response && response.status === 'success') {
+                    complaintButton1.textContent = 'Đã gửi yêu cầu!';
+                    setTimeout(() => {
+                        complaintButton1.textContent = 'Hỗ trợ';
+                        complaintButton1.disabled = false;
+                    }, 3000);
+                } else {
+                    alert(`Lỗi: ${response?.error || 'Không rõ nguyên nhân'}`);
+                    complaintButton1.textContent = 'Hỗ trợ';
+                    complaintButton1.disabled = false;
+                }
+            });
+        };
+
+        // Chèn nút "Khiếu nại" sau nút "Copy"
+        copy1Button.insertAdjacentElement('afterend', complaintButton1);
+        console.log('Đã thêm nút "Hỗ trợ".');
     };
 
-    let element = check();
-    if (element) {
-      resolve(element);
-      return;
-    }
 
-    const observer = createAndTrackObserver(() => { // Sử dụng hàm đã có
-      element = check();
-      if (element) {
-        observer.disconnect();
-        activeObservers = activeObservers.filter(o => o !== observer);
-        resolve(element);
-      }
+
+    const observer = createAndTrackObserver(() => {
+        const modalElement = document.querySelector('.ant-modal-wrap');
+        if (modalElement) {
+            processModal(modalElement);
+        }
     });
+
     observer.observe(document.body, { childList: true, subtree: true });
-  });
 }
