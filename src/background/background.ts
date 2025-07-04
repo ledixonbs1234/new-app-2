@@ -2849,7 +2849,7 @@ function broadcastUpdate(payload: SessionData) {
     }
   });
 }
-const save_order = (msg: any,sendResponse: (response: any) => void) => {
+const save_order = (msg: any, sendResponse: (response: any) => void) => {
   const dataToSave: SessionData = {
     orders: msg.payload.orders,
     currentIndex: 0
@@ -2862,7 +2862,7 @@ const save_order = (msg: any,sendResponse: (response: any) => void) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {
-    save_order(msg,sendResponse);
+    save_order(msg, sendResponse);
     return true; // Giữ kênh message mở cho response bất đồng bộ
   }
 
@@ -2876,11 +2876,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "SEND_AI_DATA") {
-    processWithGemini(msg.payload, null).then((response) => {
-      sendResponse({ status: 'ok', result: response });
+    chrome.action.setBadgeText({ text: 'AI...' });
+    chrome.action.setBadgeBackgroundColor({ color: '#FFA500' }); // Màu cam cho trạng thái chờ
+    (async () => {
+      try {
+       // 2. Gọi hàm xử lý AI và chờ kết quả
+        const jsonStringResult = await processWithGemini(msg.payload, null);
+        
+        // 3. Phân tích kết quả ngay tại background
+        const orders = JSON.parse(jsonStringResult);
+        if (!Array.isArray(orders)) {
+          throw new Error("AI không trả về dữ liệu JSON dạng mảng hợp lệ.");
+        }
+        // 4. TRỰC TIẾP LƯU DỮ LIỆU
+        // Gọi hàm save_order để lưu vào chrome.storage.session và phát đi thông báo cập nhật.
+        // Đây là bước mấu chốt: đảm bảo dữ liệu được lưu ngay cả khi popup đã đóng.
+        save_order({ payload: { orders: orders } }, () => {}); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
+        // Cập nhật badge thành công (màu xanh lá)
+        chrome.action.setBadgeText({ text: 'OK' });
+        chrome.action.setBadgeBackgroundColor({ color: '#28a745' });
+        // Xóa badge sau 3 giây
+        setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
 
-    })
+        // Gửi kết quả thành công về cho popup
+        sendResponse({ status: 'success', result: jsonStringResult });
+
+      } catch (error: any) {
+        // 4. Xử lý khi có lỗi
+        console.error("Lỗi khi xử lý với Gemini:", error);
+
+        // Cập nhật badge báo lỗi (màu đỏ)
+        chrome.action.setBadgeText({ text: 'LỖI' });
+        chrome.action.setBadgeBackgroundColor({ color: '#dc3545' });
+        // Giữ badge lỗi để người dùng thấy
+
+        // Gửi thông báo lỗi về cho popup
+        sendResponse({ status: 'error', error: error.message || "Lỗi không xác định từ Gemini" });
+      }
+    })();
+
+    // 5. Luôn trả về true để giữ kênh message mở cho đến khi sendResponse được gọi
     return true;
+
   }
 
   if (msg.type === "CLEAR_ORDERS") {
@@ -3054,7 +3091,9 @@ interface FileData {
   mimeType: string;
   base64Data: string;
 }
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+// const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite-preview-06-17:generateContent";
+// const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const GEMINI_API_KEY = "AIzaSyDi6U8u1FK-wLKejyzJ1dntVUHpiaHipIE"; // Thay thế bằng API key thực tế của bạn
 // Hàm gọi API đã được cập nhật
 async function processWithGemini(userPrompt: string, fileData: FileData | null): Promise<string> {
@@ -3140,6 +3179,9 @@ và đây là kết quả của tôi
       "topK": 1,
       "topP": 1,
       "maxOutputTokens": 65536,
+      "thinkingConfig": {
+          "thinkingBudget": -1
+    }
     }
   };
 

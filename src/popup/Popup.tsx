@@ -17,6 +17,7 @@ export default function Popup() {
   const [passwordPortal, setPasswordPortal] = useState<string>("");
   const [buuCuc, setBuuCuc] = useState<string>("593200");
   const [jsonInput, setJsonInput] = useState<string>("");
+  const [isAiLoading, setIsAiLoading] = useState(false);
   // Các màu gốc chúng ta cần tìm và đếm
 const baseColors: string[] = ["TRANG", "DO", "XANH"];
   useEffect(() => {
@@ -80,16 +81,38 @@ function handleUsingAI(): void {
       message.error("Vui lòng dán dữ liệu JSON.");
       return;
     }
+      setIsAiLoading(true);
+       message.loading({ content: "AI đang xử lý, vui lòng chờ...", key: 'ai_processing', duration: 0 });
     try {
+    
+
       chrome.runtime.sendMessage({ type: "SEND_AI_DATA",payload:jsonInput }, (response) => {
-        debugger
-        console.log("Response from AI:", response);
-        handleSaveJson(response.result);
+        // Hàm callback này sẽ được gọi khi background script gửi phản hồi
+        
+        // Luôn tắt trạng thái loading dù thành công hay thất bại
+        setIsAiLoading(false);
+
+        // Kiểm tra lỗi giao tiếp giữa popup và background
+        if (chrome.runtime.lastError) {
+          console.error("Lỗi giao tiếp:", chrome.runtime.lastError.message);
+          message.error({ content: `Lỗi: ${chrome.runtime.lastError.message}`, key: 'ai_processing' });
+          return;
+        }
+        if (response && response.status === 'success') {
+          // Thành công: cập nhật thông báo và xử lý dữ liệu
+          message.success({ content: "AI đã xử lý và lưu dữ liệu thành công!", key: 'ai_processing' });
+          setJsonInput(''); // Xóa nội dung đã nhập
+        } else {
+          // Thất bại: hiển thị lỗi trả về từ background
+          console.error("Lỗi từ background:", response.error);
+          message.error({ content: `AI xử lý thất bại: ${response.error || 'Lỗi không xác định'}`, key: 'ai_processing' });
+        }
     }); 
-      message.success(`Đang sử dụng AI để xử lý dữ liệu...`);
-      setJsonInput('');
     } catch (e: any) {
-      message.error("Lỗi JSON không hợp lệ: " + e.message);
+      // Bắt các lỗi đồng bộ (hiếm khi xảy ra với sendMessage)
+      setIsAiLoading(false);
+      message.error({ content: "Lỗi không mong muốn khi gửi yêu cầu.", key: 'ai_processing' });
+      console.error("Lỗi khi gửi yêu cầu AI:", e);
     }
 }
 
@@ -204,7 +227,13 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
             <Button type="primary" onClick={()=>{handleSaveJson(jsonInput)}} block>
               Lưu và Bắt đầu
             </Button>
-             <Button type="primary" onClick={handleUsingAI} block>
+             <Button
+              type="primary"
+              onClick={handleUsingAI}
+              block
+              loading={isAiLoading}
+              disabled={isAiLoading}
+            >
               Dùng AI
             </Button>
           </Space>
