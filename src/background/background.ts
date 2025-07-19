@@ -744,6 +744,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       // trong lúc chờ bấm "Tiếp tục".
       triggerProcessingCheck();
     },
+    "xacnhanportal": async (data: any) => await handleXacNhanPortal(data.DoiTuong,token),
 
     "preparePrintMaHieus": async (data: any) => await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
     "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
@@ -967,10 +968,12 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     let startMaBG: string | undefined = undefined; // Mã BG để bắt đầu (tùy chọn)
     let maKH: string;
     let options: any;
+    let isDeletePhone: boolean = false;
     try {
       parsedDoiTuong = JSON.parse(commandData.DoiTuong);
       maKH = parsedDoiTuong.maKH;
       options = parsedDoiTuong.options;
+      isDeletePhone = parsedDoiTuong.isDeletePhone;
       startMaBG = parsedDoiTuong.maBG; // Lấy maBG nếu có
       if (parsedDoiTuong.account && parsedDoiTuong.password) {
         accountPortal = parsedDoiTuong.account;
@@ -1073,6 +1076,7 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
             message: "PROCESS_SINGLE_ITEM",
             current: currentItem,
             makh: maKH, // maKH dùng chung từ lệnh
+            isDeletePhone:isDeletePhone,
             keyMessage: keyMessage,
             options: options // options dùng chung từ lệnh
           }, (res) => {
@@ -1637,11 +1641,21 @@ const handleGetPortal = async (time: string = "") => {
 const handleGetDataFromPortal = async (time: string) => {
   try {
     let toDayText = formatDateRight(new Date());
+    let maHieus = ""; // Default empty string for ttNumber
+
     if (time != "") {
-      toDayText = time;
-      console.log(time)
+      // Parse the time parameter to extract date and maHieus
+      // Format: "date|maHieus" where maHieus comes after the pipe separator
+      const parts = time.split("|");
+      if (parts[0].length != 0)
+        toDayText = parts[0]; // Date part
+      if (parts.length > 1) {
+        maHieus = parts[1]; // maHieus part after the pipe
+      }
+      console.log("Parsed date:", toDayText, "maHieus:", maHieus);
     }
-    const data: any = await getItemHdr(toDayText);
+
+    const data: any = await getItemHdr(toDayText, maHieus);
     if (data.status === 401) {
       return;
     }
@@ -2214,6 +2228,130 @@ const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
   return res.json();
 };
 
+const handleXacNhanPortal = async (ids: any, token: string) => {
+  try {
+    // Build the request body object properly
+    let parsedIds;
+    try {
+      // If ids is a string, try to parse it as JSON
+      parsedIds = typeof ids === 'string' ? JSON.parse(ids) : ids;
+    } catch (error) {
+      // If parsing fails, treat it as a single value
+      parsedIds = ids;
+    }
+
+    const requestBody = {
+      username: [accountPortal],
+      listId: Array.isArray(parsedIds) ? parsedIds : [parsedIds]
+    };
+
+    console.log("Sending request to Portal API with body:", JSON.stringify(requestBody));
+    updateToPhone("message", "Đang xác nhận Portal...");
+
+    const res = await fetch("https://api-portalkhl.vnpost.vn/khl/sendBccp/hdr", {
+      "headers": {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        "authorization": `Bearer ${token}`,
+        "capikey": "19001235",
+        "content-type": "application/json; charset=UTF-8",
+        "priority": "u=1, i",
+        "sec-ch-ua": "\"Not)A;Brand\";v=\"8\", \"Chromium\";v=\"138\", \"Google Chrome\";v=\"138\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site"
+      },
+      "referrer": "https://portalkhl.vnpost.vn/",
+      "body": JSON.stringify(requestBody),
+      "method": "POST",
+      "mode": "cors",
+      "credentials": "include"
+    });
+
+    // Parse the response body
+    let responseData;
+    try {
+      responseData = await res.json();
+    } catch (parseError) {
+      console.error("Failed to parse response JSON:", parseError);
+      updateToPhone("message", "Lỗi: Không thể đọc phản hồi từ server");
+      return;
+    }
+
+    console.log("Portal API response:", responseData);
+
+    // Check if the request was successful
+    if (res.ok) {
+      // Success case (status 200-299)
+      updateToPhone("message", "Xác nhận Portal thành công!");
+      console.log("Portal confirmation successful:", responseData);
+    } else {
+      // Error case (status 400, 401, 500, etc.)
+      let errorMessage = "Lỗi không xác định từ Portal API";
+
+      if (res.status === 400) {
+        // Handle 400 Bad Request - extract specific error message
+        if (responseData && typeof responseData === 'object') {
+          // Try different possible error message fields
+          errorMessage = responseData.message ||
+                       responseData.error ||
+                       responseData.errorMessage ||
+                       responseData.msg ||
+                       JSON.stringify(responseData);
+        } else if (typeof responseData === 'string') {
+          errorMessage = responseData;
+        }
+
+        console.error("Portal API 400 error:", errorMessage);
+        updateToPhone("message", `Lỗi xác nhận Portal: ${errorMessage}`);
+
+      } else if (res.status === 401) {
+        // Handle 401 Unauthorized
+        errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+        console.error("Portal API 401 error:", errorMessage);
+        updateToPhone("message", errorMessage);
+
+      } else if (res.status === 403) {
+        // Handle 403 Forbidden
+        errorMessage = "Không có quyền thực hiện thao tác này.";
+        console.error("Portal API 403 error:", errorMessage);
+        updateToPhone("message", errorMessage);
+
+      } else if (res.status >= 500) {
+        // Handle 500+ Server errors
+        errorMessage = "Lỗi server Portal. Vui lòng thử lại sau.";
+        console.error("Portal API server error:", res.status, responseData);
+        updateToPhone("message", errorMessage);
+
+      } else {
+        // Handle other HTTP error codes
+        errorMessage = `Lỗi HTTP ${res.status}: ${res.statusText}`;
+        console.error("Portal API error:", res.status, res.statusText, responseData);
+        updateToPhone("message", errorMessage);
+      }
+    }
+
+  } catch (networkError: any) {
+    // Handle network errors, timeout, etc.
+    console.error("Network error in handleXacNhanPortal:", networkError);
+
+    let errorMessage = "Lỗi kết nối mạng";
+    if (networkError.message) {
+      if (networkError.message.includes('fetch')) {
+        errorMessage = "Không thể kết nối đến Portal API";
+      } else if (networkError.message.includes('timeout')) {
+        errorMessage = "Kết nối bị timeout. Vui lòng thử lại.";
+      } else {
+        errorMessage = `Lỗi mạng: ${networkError.message}`;
+      }
+    }
+
+    updateToPhone("message", errorMessage);
+  }
+}
+
 const getMaHieusFromPortalId = async (ids: any, token: string): Promise<NguoiGuiDetailProp[] | null> => {
   console.log('IDS ', ids)
 
@@ -2244,7 +2382,21 @@ const getMaHieusFromPortalId = async (ids: any, token: string): Promise<NguoiGui
   if (res[0].status === 401 || res[0].status === 400) return null;
   return res as NguoiGuiDetailProp[];
 };
-const getItemHdr = async (toDayText: string): Promise<NguoiGuiProp[]> => {
+const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<NguoiGuiProp[]> => {
+  // Build the base JSON object
+  const requestBody = {
+    orgCode: buuCuc,
+    tuNgay: toDayText,
+    denNgay: toDayText,
+    sourceSystem: "KHL",
+    origin: ""
+  };
+
+  // Only add ttNumber if maHieus has a value
+  if (maHieus && maHieus.trim() !== "") {
+    (requestBody as any).ttNumber = maHieus;
+  }
+
   const res = await fetch(`${API_BASE_URL}/khl/getItemHdr`, {
     headers: {
       accept: "application/json, text/plain, */*",
@@ -2261,7 +2413,7 @@ const getItemHdr = async (toDayText: string): Promise<NguoiGuiProp[]> => {
     },
     referrer: "https://portalkhl.vnpost.vn/",
     referrerPolicy: "strict-origin-when-cross-origin",
-    body: `{"orgCode":"${buuCuc}","tuNgay":"${toDayText}","denNgay":"${toDayText}","sourceSystem":"KHL","origin":""}`,
+    body: JSON.stringify(requestBody),
     method: "POST",
     mode: "cors",
     credentials: "include",
@@ -2880,9 +3032,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.action.setBadgeBackgroundColor({ color: '#FFA500' }); // Màu cam cho trạng thái chờ
     (async () => {
       try {
-       // 2. Gọi hàm xử lý AI và chờ kết quả
+        // 2. Gọi hàm xử lý AI và chờ kết quả
         const jsonStringResult = await processWithGemini(msg.payload, null);
-        
+
         // 3. Phân tích kết quả ngay tại background
         const orders = JSON.parse(jsonStringResult);
         if (!Array.isArray(orders)) {
@@ -2891,7 +3043,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         // 4. TRỰC TIẾP LƯU DỮ LIỆU
         // Gọi hàm save_order để lưu vào chrome.storage.session và phát đi thông báo cập nhật.
         // Đây là bước mấu chốt: đảm bảo dữ liệu được lưu ngay cả khi popup đã đóng.
-        save_order({ payload: { orders: orders } }, () => {}); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
+        save_order({ payload: { orders: orders } }, () => { }); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
         // Cập nhật badge thành công (màu xanh lá)
         chrome.action.setBadgeText({ text: 'OK' });
         chrome.action.setBadgeBackgroundColor({ color: '#28a745' });
@@ -3180,8 +3332,8 @@ và đây là kết quả của tôi
       "topP": 1,
       "maxOutputTokens": 65536,
       "thinkingConfig": {
-          "thinkingBudget": -1
-    }
+        "thinkingBudget": -1
+      }
     }
   };
 

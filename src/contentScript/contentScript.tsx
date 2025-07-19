@@ -73,7 +73,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
           console.log("Processing single item:", msg.current.MaBuuGui);
           try {
             // Gọi hàm xử lý một item (có thể là hàm startSendCurrentCode đã sửa đổi)
-            const result = await processSinglePortalItem(msg.current, msg.makh, msg.keyMessage, msg.options);
+            const result = await processSinglePortalItem(msg.current, msg.makh, msg.keyMessage, msg.options, msg.isDeletePhone);
             console.log("Finished processing", msg.current.MaBuuGui, "Result:", result);
             callback({ status: "success", maBG: msg.current.MaBuuGui }); // Báo thành công
           } catch (error: any) {
@@ -415,7 +415,8 @@ async function processSinglePortalItem(
   buuGui: BuuGuiProps,
   maKH: any,
   keyMessage: string, // keyMessage có thể không cần ở content script nữa
-  options: any
+  options: any,
+  isDeletePhone: boolean
 ): Promise<void> { // Trả về Promise để background biết khi nào xong, throw error nếu lỗi
   console.log("Processing Portal item:", buuGui.MaBuuGui);
   try {
@@ -491,6 +492,21 @@ async function processSinglePortalItem(
     }
 
     await delay(500);
+    
+    //thực hiện việc xoá 4 số đầu điện thoại
+    if (isDeletePhone) {
+      const receiverPhoneInput = document.querySelector<HTMLInputElement>("#receiverPhone");
+      if (receiverPhoneInput) {
+        const currentPhone = receiverPhoneInput.value;
+        if (currentPhone.length >= 4) {
+          const newPhone = currentPhone.slice(4);
+          receiverPhoneInput.value = newPhone;
+          receiverPhoneInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+          receiverPhoneInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+          receiverPhoneInput.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+        }
+      }
+    }
     const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
     const weightNotDot = weightThucTe?.value.replace(".", "")
     if (weightThucTe) {
