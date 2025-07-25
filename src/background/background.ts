@@ -2479,7 +2479,38 @@ const loginDirect = async (account: string, password: string): Promise<string | 
 //   });
 // }
 
+function arrayBufferToBase64(buffer:string): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+        // Tạo một Blob từ ArrayBuffer
+        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+        const reader = new FileReader();
 
+        // Xử lý khi đọc thành công
+        reader.onload = function(event) {
+            // event.target.result sẽ là một Data URL (ví dụ: "data:application/octet-stream;base64,AAAA...")
+            // Chúng ta cần lấy phần base64 sau dấu phẩy
+            if (!event.target) {
+                reject(new Error('FileReader event target is null'));
+                return;
+            }
+            const dataUrl = event.target.result;
+            if (typeof dataUrl !== 'string' || !dataUrl) {
+                reject(new Error('FileReader result is not a valid string'));
+                return;
+            }
+            const base64 = dataUrl.split(',')[1];
+            resolve(base64);
+        };
+
+        // Xử lý khi có lỗi
+        reader.onerror = function(error) {
+            reject(error);
+        };
+
+        // Đọc Blob dưới dạng Data URL
+        reader.readAsDataURL(blob);
+    });
+}
 
 async function openAndExportExcel(res: any, request: any = null, ishcc: boolean = false) {
   let itemDetails = res[0].itemDetails;
@@ -2545,7 +2576,7 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
       type: "array"
     });
     // // Convert the array buffer to a base64 string
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(newWorkbookArrayBuffer)));
+    const base64 = await arrayBufferToBase64(newWorkbookArrayBuffer);
     await saveStorageExcel(base64);
     var tab = await createOrActiveTab(
       "https://example.com/",
@@ -2955,7 +2986,7 @@ chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
   if (details.url.includes("https://my.vnpost.vn/")) {
     console.log("Đã vào trang tạo đơn hàng MyVNPost");
     // Gửi thông báo đến tab hiện tại
-    chrome.tabs.sendMessage(details.tabId, { type: 'URL_CHANGED', url: details.url }, (res) => {
+    chrome.tabs.sendMessage(details.tabId, { type: 'URL_CHANGED', url: details.url }, (_res) => {
       if (chrome.runtime.lastError) {
         console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
       } else {
@@ -3012,7 +3043,7 @@ const save_order = (msg: any, sendResponse: (response: any) => void) => {
   });
 }
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {
     save_order(msg, sendResponse);
     return true; // Giữ kênh message mở cho response bất đồng bộ
