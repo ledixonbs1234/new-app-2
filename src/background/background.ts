@@ -5,7 +5,7 @@ import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
 import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
 import { delay, createOrActiveTab } from './util';
 // import firebase from 'firebase/compat/app';
-
+//day la ban moi
 // Khai báo biến toàn cục từ importScripts để TypeScript nhận diện
 declare var XLSX: any;
 declare var firebase: any; // Khai báo firebase
