@@ -1620,7 +1620,7 @@ const handleGetMaHieus = async (data: any) => {
   const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
   if (!res) return
   const maHieus = res
-    .map((m) => m.itemDetails.map((n) => ({
+    .map((m:NguoiGuiDetailProp) => m.itemDetails.map((n) => ({
       ID: m.id,
       Code: n.ttNumber,
       IDCODE: n.id,
@@ -1628,6 +1628,7 @@ const handleGetMaHieus = async (data: any) => {
       Address: n.receiverAddress,
       Name: n.receiverName,
       Date: n.createdDate,
+      ProvinceCode:n.receiverProvinceCode
     })))
     .flat();
   return maHieus

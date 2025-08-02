@@ -36,4 +36,5 @@ type ItemDetailProp = {
   createdDate:string;
   dispatchNumber:string;
   receiverAddress:string;
+  receiverProvinceCode:string
 };
