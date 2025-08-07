@@ -1718,23 +1718,58 @@ const printMaHieus = async (maHieus: string[]) => {
   chrome.action.setBadgeText({ text: 'In...' });
   chrome.action.setBadgeBackgroundColor({ color: '#0000FF' });
 
-  var blobs: Blob[] | null = await getBlobs(maHieus);
-  console.log('1')
-  if (blobs == null)
-    return;
-  var tab = await createOrActiveTab(
-    "https://example.com/",
-    "https://example.com/",
+  try {
+    // Lấy blobs từ mảng maHieus
+    var blobs: Blob[] | null = await getBlobs(maHieus);
+    console.log('Đã lấy blobs:', blobs?.length || 0);
+    
+    if (blobs == null || blobs.length === 0) {
+      console.error("Không lấy được blobs hoặc danh sách rỗng");
+      chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+      await delay(1000);
+      chrome.action.setBadgeText({ text: '' });
+      return;
+    }
 
-    false, false, true
-  );
-  var blob = await convertBlobsToBlob(blobs)
-  var base64String = await pdfBlobTo64(blob);
-  await saveStorage(base64String);
+    // Kiểm tra xem offscreen document đã tồn tại chưa
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
+    });
+
+    // Nếu chưa có, tạo mới
+    if (existingContexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+        justification: 'Print PDF files using DOM APIs'
+      });
+    }
+    
+    var blob = await convertBlobsToBlob(blobs);
+    var base64String = await pdfBlobTo64(blob);
+    
+    // Gửi message đến offscreen document để in
+    const response = await chrome.runtime.sendMessage({
+      type: "PRINT_PDF",
+      base64Data: base64String
+    });
+    
+    if (response && response.success) {
+      console.log("In PDF thành công");
+      chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
+    } else {
+      console.error("Lỗi khi in PDF:", response?.error);
+      chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+    }
+    
+  } catch (error: any) {
+    console.error("Lỗi khi tạo/sử dụng offscreen document:", error);
+    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+  }
+  
   //waiting 1 s
   await delay(1000);
-  chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
-  await chrome.tabs.sendMessage(tab!.id!, { message: "PRINTBLOB" });
+  chrome.action.setBadgeText({ text: '' });
 }
 
 

@@ -13,6 +13,7 @@ module.exports = {
         contentLoginPortal:path.resolve('./src/contentScript/contentLoginPortal.tsx'),
         contentCms:path.resolve('./src/contentScript/contentCms.tsx'),
         contentMy:path.resolve('./src/contentScript/contentMy.tsx'),
+        offscreen:path.resolve('./src/offscreen/offscreen.ts'),
         mainScript:path.resolve('./src/contentScript/mainScript.tsx'),
     },
     module:{
@@ -51,7 +52,7 @@ module.exports = {
           { from: path.resolve("src/static"), to: path.resolve("dist") },
         ],
       }),
-      ...getHtmlPlugins(['popup']),
+      ...getHtmlPlugins(['popup','offscreen']),
     ],
     output:{
         filename:'[name].js'
