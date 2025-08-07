@@ -498,7 +498,7 @@ async function processNextItemInBackground(): Promise<void> {
 
 
 // --- HÀM MỚI: Tìm Tab Portal ---
-async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
+async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): Promise<number | undefined> {
   await delay(500); // Đợi một chút để đảm bảo tab đã load xong
   console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...");
   let foundReadyTabId: number | null = null;
@@ -506,44 +506,52 @@ async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
 
   try {
     // 1. Tìm các tab Portal có URL khớp
-    const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/accept-api*" });
+    const portalTabs = await chrome.tabs.query({ url: "https://pre-portalkhl.vnpost.vn/*" });
     console.log(`handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`);
 
     // 2. Duyệt qua các tab và kiểm tra element
     for (const tab of portalTabs) {
       if (!tab.id) continue; // Bỏ qua nếu tab không có ID
-      console.log(`handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`);
-      try {
-        // *** ĐÁNH DẤU: Tiêm script để kiểm tra sự tồn tại của #ttNumberSearch ***
-        const injectionResults = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => !!document.querySelector("#ttNumberSearch") // Hàm kiểm tra trực tiếp
-        });
+      if (!hdrId) {
 
-        // executeScript trả về một mảng kết quả, kiểm tra phần tử đầu tiên
-        if (injectionResults && injectionResults[0] && injectionResults[0].result === true) {
-          console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
-          foundReadyTabId = tab.id;
-          readyTabInfo = tab; // Lưu lại thông tin tab
-          var currentMaKH = "";
-          if (maKH != "") {
-            currentMaKH = maKH
-          } else {
-            currentMaKH = await chromeStorageGet("currentMaKH")
-          }
-          window.postMessage({
-            type: "CONTENT",
-            message: "GETIDKH",
+        console.log(`handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`);
+        try {
+          // *** ĐÁNH DẤU: Tiêm script để kiểm tra sự tồn tại của #ttNumberSearch ***
+          const injectionResults = await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => !!document.querySelector("#ttNumberSearch") // Hàm kiểm tra trực tiếp
           });
-          break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
-        } else {
-          console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
+
+          // executeScript trả về một mảng kết quả, kiểm tra phần tử đầu tiên
+          if (injectionResults && injectionResults[0] && injectionResults[0].result === true) {
+            console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
+            foundReadyTabId = tab.id;
+            readyTabInfo = tab; // Lưu lại thông tin tab
+            var currentMaKH = "";
+            if (maKH != "") {
+              currentMaKH = maKH
+            } else {
+              currentMaKH = await chromeStorageGet("currentMaKH")
+            }
+            window.postMessage({
+              type: "CONTENT",
+              message: "GETIDKH",
+            });
+            break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
+          } else {
+            console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
+          }
+        } catch (injectionError: any) {
+          // Có thể tab đã đóng hoặc không có quyền tiêm script
+          console.warn(`handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`);
+          // Bỏ qua và tiếp tục với tab tiếp theo (nếu có)
         }
-      } catch (injectionError: any) {
-        // Có thể tab đã đóng hoặc không có quyền tiêm script
-        console.warn(`handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`);
-        // Bỏ qua và tiếp tục với tab tiếp theo (nếu có)
       }
+      else {
+        foundReadyTabId = tab.id;
+        readyTabInfo = tab; // Lưu lại thông tin tab
+      }
+
     }
 
     // 3. Xử lý dựa trên kết quả kiểm tra
@@ -552,10 +560,20 @@ async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
       console.log(`handleSendAutoToPortal: Đã tìm thấy tab Portal (ID: ${foundReadyTabId}). Kích hoạt và gửi trực tiếp...`);
       updateToPhone("message", `Portal OK. Đang gửi...`, keyMessage);
 
-      // *** Kích hoạt (đưa lên focus) tab đã tìm thấy ***
-      await chrome.tabs.update(foundReadyTabId, { active: true });
-      // Có thể cần chờ một chút để đảm bảo tab đã active hoàn toàn, mặc dù thường không cần
-      await delay(300);
+      if (!hdrId) {
+        // *** Kích hoạt (đưa lên focus) tab đã tìm thấy ***
+        await chrome.tabs.update(foundReadyTabId, { active: true });
+        // Có thể cần chờ một chút để đảm bảo tab đã active hoàn toàn, mặc dù thường không cần
+      } else {
+        //this is url https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1054056772
+        // --- Sử dụng hàm ensurePortalLogin ---
+        const loginResult = await ensurePortalLogin(foundReadyTabId);
+
+        // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
+        await chrome.tabs.update(foundReadyTabId, { active: true, url: `https://pre-portalkhl.vnpost.vn/accept-api-dtl?hdrId=${hdrId}` });
+        await waitForTabToLoad(foundReadyTabId)
+      }
+      await delay(500);
 
       // *** Gọi trực tiếp handleSendToPortal ***
       // Hàm này sẽ tự động lấy tab đang active (chính là tab vừa được kích hoạt)
@@ -577,12 +595,16 @@ async function findPortalTabId(maKH: string = ""): Promise<number | undefined> {
 
       const snapshot = await db!.ref("PORTAL/HopDongs/" + currentMaKH).get();
       const hopDong = snapshot.val();
-      // Gọi hàm khởi tạo (đã được sửa để trả về boolean)
-      const isKhoiTaoOK: boolean = await khoiTaoPortal(hopDong); // Giả sử handleKhoiTao trả về boolean
+      // Gọi hàm khởi tạo (trả về hdrId hoặc null)
+      const hdrId: string | null = await khoiTaoPortal(hopDong);
 
-      if (isKhoiTaoOK) {
-        console.log("handleSendAutoToPortal: Khởi tạo thành công. Đang gửi dữ liệu...");
-        updateToPhone("message", "Khởi tạo thành công. Đang gửi dữ liệu...", keyMessage);
+      if (hdrId) {
+        console.log("handleSendAutoToPortal: Khởi tạo thành công. Mã hợp đồng:", hdrId);
+        await updateToPhone("message", `Khởi tạo thành công. Mã hợp đồng: ${hdrId}. Đang gửi dữ liệu...`, keyMessage);
+        //thực hiện gửi hdrId và currentMaKH với lệnh sendhdr dùng updatetophone để phone cập nhật thông tin
+        // Gửi hdrId và currentMaKH về điện thoại với lệnh "sendhdr"
+        await updateToPhone("sendhdr", JSON.stringify({ hdrId, maKH: currentMaKH }), keyMessage);
+
         // Sau khi khởi tạo thành công, tab đích đã sẵn sàng và active, gọi gửi dữ liệu
         // Thêm await nếu handleSendToPortal là async
         //get tabid Active
@@ -744,7 +766,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       // trong lúc chờ bấm "Tiếp tục".
       triggerProcessingCheck();
     },
-    "xacnhanportal": async (data: any) => await handleXacNhanPortal(data.DoiTuong,token),
+    "xacnhanportal": async (data: any) => await handleXacNhanPortal(data.DoiTuong, token),
 
     "preparePrintMaHieus": async (data: any) => await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
     "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
@@ -967,11 +989,13 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     let parsedDoiTuong: any;
     let startMaBG: string | undefined = undefined; // Mã BG để bắt đầu (tùy chọn)
     let maKH: string;
+    let hdrId: string | undefined = undefined; // Mã hợp đồng nếu có
     let options: any;
     let isDeletePhone: boolean = false;
     try {
       parsedDoiTuong = JSON.parse(commandData.DoiTuong);
       maKH = parsedDoiTuong.maKH;
+      hdrId = parsedDoiTuong.hdrId; // Lấy mã hợp đồng nếu có
       options = parsedDoiTuong.options;
       isDeletePhone = parsedDoiTuong.isDeletePhone;
       startMaBG = parsedDoiTuong.maBG; // Lấy maBG nếu có
@@ -992,7 +1016,7 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     console.log(`${logPrefix} Parsed command - maKH: ${maKH}, startMaBG: ${startMaBG}, options:`, options);
     // --- Bước 2: Tìm hoặc Khởi tạo Tab Portal (CHỈ MỘT LẦN) ---
     console.log(`${logPrefix} Finding or Initializing Portal tab ONCE...`);
-    targetTabId = await findPortalTabId(maKH); // Gọi hàm tìm/khởi tạo
+    targetTabId = await findPortalTabId(maKH, hdrId); // Gọi hàm tìm/khởi tạo
     if (!targetTabId) {
       // findPortalTabId đã log lỗi và gửi message nếu cần
       console.error(`${logPrefix} Initial Portal tab setup failed. Aborting.`);
@@ -1076,7 +1100,7 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
             message: "PROCESS_SINGLE_ITEM",
             current: currentItem,
             makh: maKH, // maKH dùng chung từ lệnh
-            isDeletePhone:isDeletePhone,
+            isDeletePhone: isDeletePhone,
             keyMessage: keyMessage,
             options: options // options dùng chung từ lệnh
           }, (res) => {
@@ -1620,7 +1644,7 @@ const handleGetMaHieus = async (data: any) => {
   const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
   if (!res) return
   const maHieus = res
-    .map((m:NguoiGuiDetailProp) => m.itemDetails.map((n) => ({
+    .map((m: NguoiGuiDetailProp) => m.itemDetails.map((n) => ({
       ID: m.id,
       Code: n.ttNumber,
       IDCODE: n.id,
@@ -1628,7 +1652,7 @@ const handleGetMaHieus = async (data: any) => {
       Address: n.receiverAddress,
       Name: n.receiverName,
       Date: n.createdDate,
-      ProvinceCode:n.receiverProvinceCode
+      ProvinceCode: n.receiverProvinceCode
     })))
     .flat();
   return maHieus
@@ -1979,21 +2003,37 @@ async function ensurePortalLogin(tabId: number): Promise<{ success: boolean; loa
 }
 // --- KẾT THÚC HÀM MỚI ---
 
-const khoiTaoPortal = async (data: any): Promise<boolean> => {
+// Biến global để lưu hdrId sau khi khởi tạo thành công
+let currentHdrId: string | null = null;
+
+// Hàm helper để lấy hdrId hiện tại
+const getCurrentHdrId = (): string | null => {
+  return currentHdrId;
+};
+
+// Hàm helper để reset hdrId
+const resetCurrentHdrId = (): void => {
+  currentHdrId = null;
+};
+
+const khoiTaoPortal = async (data: any): Promise<string | null> => {
   try {
     console.log("Bắt đầu khởi tạo Portal...", data);
+    // Reset hdrId khi bắt đầu khởi tạo mới
+    currentHdrId = null;
+
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
     var initialTab = await createOrActiveTab(
-      "https://portalkhl.vnpost.vn/accept-api",
-      "portalkhl.vnpost.vn",
+      "https://pre-portalkhl.vnpost.vn/accept-api",
+      "pre-portalkhl.vnpost.vn",
       true
     );
 
     if (!initialTab || !initialTab.id) {
       console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
       updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
-      return false;
+      return null;
     }
     const tabId = initialTab.id;
 
@@ -2019,17 +2059,41 @@ const khoiTaoPortal = async (data: any): Promise<boolean> => {
       console.log("Phản hồi từ content script KHOITAOPORTAL:", response);
       // Xử lý phản hồi từ content script
       if (response && response.data === "ok") {
-        updateToPhone("message", "Khởi tạo thành công.");
-        return true; // *** ĐÁNH DẤU: Điểm thành công duy nhất ***
+        // Lấy URL hiện tại của tab để trích xuất hdrId
+        try {
+          const currentTab = await chrome.tabs.get(loadedTab.id);
+          const currentUrl = currentTab.url;
+          console.log("URL hiện tại sau khi khởi tạo:", currentUrl);
+
+          // Trích xuất hdrId từ URL (ví dụ: https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1054055351)
+          const urlParams = new URLSearchParams(currentUrl?.split('?')[1]);
+          const hdrId = urlParams.get('hdrId');
+
+          if (hdrId) {
+            console.log("Đã lấy được hdrId:", hdrId);
+            currentHdrId = hdrId; // Lưu vào biến global
+            updateToPhone("message", `Khởi tạo thành công. Mã hợp đồng: ${hdrId}`);
+          } else {
+            console.warn("Không tìm thấy hdrId trong URL");
+            currentHdrId = null;
+            updateToPhone("message", "Khởi tạo thành công.");
+          }
+        } catch (urlError: any) {
+          console.error("Lỗi khi lấy URL:", urlError);
+          currentHdrId = null;
+          updateToPhone("message", "Khởi tạo thành công.");
+        }
+        return currentHdrId; // Trả về hdrId nếu thành công (có thể là string hoặc null)
       } else {
         const errorMsg = (response && response.data) ? response.data : "Phản hồi không hợp lệ từ content script.";
         console.error("Lỗi từ content script KHOITAOPORTAL:", errorMsg);
         updateToPhone("message", `Lỗi khởi tạo: ${errorMsg}`);
-        return false; // *** ĐÁNH DẤU: Điểm thất bại 3 (Phản hồi không đúng) ***
+        currentHdrId = null; // Reset hdrId khi thất bại
+        return null; // *** ĐÁNH DẤU: Điểm thất bại 3 (Phản hồi không đúng) ***
       }
     } else if (!loginSuccess) {
       console.log("Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.");
-      return false;
+      return null;
       // Tin nhắn lỗi đã được gửi ở trên nếu đăng nhập thất bại
     }
 
@@ -2037,11 +2101,11 @@ const khoiTaoPortal = async (data: any): Promise<boolean> => {
   } catch (error: any) {
     console.error("Lỗi trong hàm khoiTaoPortal:", error);
     updateToPhone("message", `Lỗi nghiêm trọng: ${error.message || "Lỗi không xác định khi khởi tạo."}`);
-    return false
+    return null
     // Gửi trạng thái lỗi nghiêm trọng về điện thoại
   }
   console.warn("khoiTaoPortal chạy đến cuối mà không return tường minh.");
-  return false;
+  return null;
 };
 const handleKhoiTao = async (data: any): Promise<boolean> => {
   updateToPhone("message", "Đã nhận lệnh khởi tạo");
@@ -2056,7 +2120,8 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
 
   const snapshot = await db!.ref("PORTAL/HopDongs/" + temp.maKH).get();
   const hopDong = snapshot.val();
-  return await khoiTaoPortal(hopDong);
+  const hdrId = await khoiTaoPortal(hopDong);
+  return hdrId !== null; // Trả về true nếu có hdrId, false nếu null
 };
 const handleGetDataFromPNS = async (dayLast: any): Promise<KhachHangProps[]> => {
   // var cookie = await getCookieFromWeb("packnsend.vnpost.vn");
@@ -2297,10 +2362,10 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
         if (responseData && typeof responseData === 'object') {
           // Try different possible error message fields
           errorMessage = responseData.message ||
-                       responseData.error ||
-                       responseData.errorMessage ||
-                       responseData.msg ||
-                       JSON.stringify(responseData);
+            responseData.error ||
+            responseData.errorMessage ||
+            responseData.msg ||
+            JSON.stringify(responseData);
         } else if (typeof responseData === 'string') {
           errorMessage = responseData;
         }
@@ -2480,37 +2545,37 @@ const loginDirect = async (account: string, password: string): Promise<string | 
 //   });
 // }
 
-function arrayBufferToBase64(buffer:string): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-        // Tạo một Blob từ ArrayBuffer
-        const blob = new Blob([buffer], { type: 'application/octet-stream' });
-        const reader = new FileReader();
+function arrayBufferToBase64(buffer: string): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    // Tạo một Blob từ ArrayBuffer
+    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    const reader = new FileReader();
 
-        // Xử lý khi đọc thành công
-        reader.onload = function(event) {
-            // event.target.result sẽ là một Data URL (ví dụ: "data:application/octet-stream;base64,AAAA...")
-            // Chúng ta cần lấy phần base64 sau dấu phẩy
-            if (!event.target) {
-                reject(new Error('FileReader event target is null'));
-                return;
-            }
-            const dataUrl = event.target.result;
-            if (typeof dataUrl !== 'string' || !dataUrl) {
-                reject(new Error('FileReader result is not a valid string'));
-                return;
-            }
-            const base64 = dataUrl.split(',')[1];
-            resolve(base64);
-        };
+    // Xử lý khi đọc thành công
+    reader.onload = function (event) {
+      // event.target.result sẽ là một Data URL (ví dụ: "data:application/octet-stream;base64,AAAA...")
+      // Chúng ta cần lấy phần base64 sau dấu phẩy
+      if (!event.target) {
+        reject(new Error('FileReader event target is null'));
+        return;
+      }
+      const dataUrl = event.target.result;
+      if (typeof dataUrl !== 'string' || !dataUrl) {
+        reject(new Error('FileReader result is not a valid string'));
+        return;
+      }
+      const base64 = dataUrl.split(',')[1];
+      resolve(base64);
+    };
 
-        // Xử lý khi có lỗi
-        reader.onerror = function(error) {
-            reject(error);
-        };
+    // Xử lý khi có lỗi
+    reader.onerror = function (error) {
+      reject(error);
+    };
 
-        // Đọc Blob dưới dạng Data URL
-        reader.readAsDataURL(blob);
-    });
+    // Đọc Blob dưới dạng Data URL
+    reader.readAsDataURL(blob);
+  });
 }
 
 async function openAndExportExcel(res: any, request: any = null, ishcc: boolean = false) {

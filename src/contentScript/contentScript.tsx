@@ -52,9 +52,9 @@ type BuuGuiProps = {
 window.onload = () => {
   console.log("CONTENT SCRIPT");
 
-  if (window.location.href.startsWith("https://portalkhl.vnpost.vn/itemhdr/?id=")) {
+  if (window.location.href.startsWith("https://pre-portalkhl.vnpost.vn/itemhdr/?id=")) {
     handlePortalPage();
-  } else if (window.location.href.startsWith("https://portalkhl.vnpost.vn/public-service?id=")) {
+  } else if (window.location.href.startsWith("https://pre-portalkhl.vnpost.vn/public-service?id=")) {
     handlePortalHCCPage();
 
   }
