@@ -717,11 +717,17 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   }
 
   const commandHandlers: { [key: string]: (data: any) => Promise<void> } = {
+    "getmahieutontoweb": async (data: any) => {
+      await handleMaHieuFromPC(data);
+    },
     "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
     "xoabg": async (data: any) => await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
     "xoanhieubg": async (data: any) => {
       await handleXoaNhieuBuuGui(data.DoiTuong);
 
+    },
+    "checkportal": async (data: any) => {
+      await handleCheckPortal();
     },
     "laylan": async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
@@ -974,6 +980,234 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 });
 const preParePrintMaHieus = async (maHieus: string[]) => {
   await prepareBlobs(maHieus);
+}
+async function handleCheckPortal(){
+  try {
+    updateToPhone("message", "Đang gửi yêu cầu lấy danh sách mã hiệu tồn...");
+    
+    // 1. Gửi lệnh "getmahieuton" lên PC
+    await updateToPC("getmahieuton", "");
+    
+    // 2. Chờ nhận phản hồi từ PC thông qua Firebase
+    updateToPhone("message", "Đã gửi lệnh lên PC, đang chờ danh sách mã hiệu...");
+    
+    // Thiết lập Promise để chờ phản hồi từ PC
+    const codesData = await waitForMaHieuListFromPC();
+    
+    console.log("Received codes data in handleCheckPortal:", codesData);
+    
+    // 3. Xử lý portal dựa trên danh sách mã hiệu
+    await processPortalWithMaHieuList(codesData);
+    
+  } catch (error: any) {
+    console.error("Lỗi trong handleCheckPortal:", error);
+    updateToPhone("error", `Lỗi kiểm tra portal: ${error.message}`);
+  }
+}
+
+// Biến toàn cục để lưu trữ response từ PC
+let pendingMaHieuResponse: {
+  resolve: (value: { allCodes: string[], unprocessedCodes: string[] }) => void;
+  reject: (reason: any) => void;
+} | null = null;
+
+/**
+ * Xử lý response mã hiệu từ PC
+ */
+async function handleMaHieuFromPC(data: any): Promise<void> {
+  try {
+    console.log("Received mã hiệu response from PC:", data);
+    
+    if (!pendingMaHieuResponse) {
+      console.log("No pending request for mã hiệu response");
+      return;
+    }
+
+    const responseData = JSON.parse(data.DoiTuong);
+    
+    // Kiểm tra nếu responseData là mảng HangHoaItem
+    if (Array.isArray(responseData)) {
+      // Lấy tất cả mã hiệu từ PC
+      const allCodes = responseData
+        .map((item: any) => item.SoHieu || item.MaHieu)
+        .filter((code: string) => code && code.trim() !== "");
+      
+      // Lọc các item có State = 0 (chưa đóng đi)
+      const unprocessedCodes = responseData
+        .filter((item: any) => item.State === 0)
+        .map((item: any) => item.SoHieu || item.MaHieu)
+        .filter((code: string) => code && code.trim() !== "");
+      
+      console.log("All codes from PC:", allCodes);
+      console.log("Unprocessed codes from PC:", unprocessedCodes);
+      updateToPhone("message", `Nhận được ${responseData.length} mã hiệu từ PC, trong đó ${unprocessedCodes.length} mã chưa đóng đi`);
+      
+      const result = { allCodes, unprocessedCodes };
+      console.log("About to resolve pendingMaHieuResponse with result:", result);
+      pendingMaHieuResponse.resolve(result);
+      console.log("Resolved pendingMaHieuResponse successfully");
+    } else {
+      console.error("Invalid response format from PC");
+      pendingMaHieuResponse.reject(new Error("Invalid response format"));
+    }
+    
+    pendingMaHieuResponse = null;
+  } catch (error) {
+    console.error("Error handling mã hiệu from PC:", error);
+    if (pendingMaHieuResponse) {
+      pendingMaHieuResponse.reject(error);
+      pendingMaHieuResponse = null;
+    }
+  }
+}
+
+/**
+ * Chờ nhận danh sách mã hiệu từ PC thông qua Firebase
+ */
+async function waitForMaHieuListFromPC(): Promise<{ allCodes: string[], unprocessedCodes: string[] }> {
+  console.log("waitForMaHieuListFromPC called");
+  return new Promise((resolve, reject) => {
+    console.log("pendingMaHieuResponse set up");
+    // Lưu trữ resolve/reject để sử dụng trong handleMaHieuFromPC
+    pendingMaHieuResponse = { resolve, reject };
+    
+    // Timeout sau 30 giây
+    setTimeout(() => {
+      if (pendingMaHieuResponse) {
+        pendingMaHieuResponse.reject(new Error("Timeout waiting for mã hiệu list from PC"));
+        pendingMaHieuResponse = null;
+      }
+    }, 30000);
+  });
+}
+
+/**
+ * Xử lý portal dựa trên danh sách mã hiệu từ PC
+ */
+async function processPortalWithMaHieuList(codesData: { allCodes: string[], unprocessedCodes: string[] }): Promise<void> {
+  try {
+    console.log("processPortalWithMaHieuList called with codes data:", codesData);
+    const { allCodes, unprocessedCodes } = codesData;
+    
+    updateToPhone("message", "Đang kiểm tra trạng thái portal...");
+    console.log(`Started processing portal with ${allCodes.length} total codes and ${unprocessedCodes.length} unprocessed codes`);
+    
+    // Chuyển đổi thành Set để tra cứu nhanh hơn
+    const allCodesSet = new Set(allCodes);
+    const unprocessedCodesSet = new Set(unprocessedCodes);
+    
+    // Lấy danh sách portal đã đánh dấu hoàn thành từ Firebase
+    // console.log("Fetching processed portals from Firebase...");
+    const processedPortalsSnapshot = await db!.ref("PORTAL/PROCESSED_PORTALS").get();
+    if (!processedPortalsSnapshot.exists()) {
+      console.log("No processed portals found, initializing empty set.");
+    } else {
+      console.log("Found processed portals in Firebase:", processedPortalsSnapshot.val());
+    }
+    const processedPortals = new Set(processedPortalsSnapshot.val() || []);
+    
+    // Lấy dữ liệu portal từ API
+    let toDayText = formatDateRight(new Date());
+    let maHieus = "";
+    
+    const portalData: any = await getItemHdr(toDayText, maHieus);
+    if (portalData.status === 401) {
+      updateToPhone("error", "Lỗi xác thực khi lấy dữ liệu portal");
+      return;
+    }
+    
+    // Lọc các portal có trạng thái "chấp nhận" và chưa được đánh dấu
+    const acceptedPortals = portalData.filter((portal: any) => 
+      portal.status === "3" && !processedPortals.has(portal.id)
+    );
+    
+    updateToPhone("message", `Tìm thấy ${acceptedPortals.length} portal cần kiểm tra với ${unprocessedCodes.length} mã hiệu chưa đóng đi`);
+    
+    // Lấy cache mã hiệu portal từ Firebase (theo ngày)
+    const todayKey = formatDateRight(new Date()).replace(/\//g, '-'); // VD: "08-08-2025"
+    const portalCodesCache = await getPortalCodesCache(todayKey);
+    
+    // Kiểm tra từng portal
+    let newlyProcessedPortals: string[] = [];
+    let totalChecked = 0;
+    
+    for (const portal of acceptedPortals) {
+      totalChecked++;
+      
+      try {
+        // Lấy danh sách mã hiệu của portal này (có cache)
+        const maHieusData = await getCachedMaHieusFromPortalId(portal.id, token, portalCodesCache, todayKey);
+        
+        if (!maHieusData || maHieusData.length === 0) {
+          console.warn(`Portal ${portal.id} không có mã hiệu`);
+          continue;
+        }
+        
+        // Trích xuất tất cả mã hiệu từ portal
+        const portalCodes = maHieusData
+          .flatMap((m: any) => m.itemDetails.map((item: any) => item.ttNumber))
+          .filter((code: any) => code); // Loại bỏ giá trị null/undefined
+        
+        // Kiểm tra xem TẤT CẢ mã hiệu của portal có trong danh sách từ PC không
+        const portalCodesNotInPC = portalCodes.filter((code: any) => !allCodesSet.has(code));
+        
+        if (portalCodesNotInPC.length > 0) {
+          // console.log(`Portal ${portal.id} (${portal.name}) có ${portalCodesNotInPC.length} mã hiệu không có trong PC - không thể xác định trạng thái:`, portalCodesNotInPC);
+          continue; // Bỏ qua portal này vì không thể xác định trạng thái hoàn toàn
+        }
+        
+        // Tất cả mã hiệu đều có trong PC, kiểm tra xem có mã nào chưa đóng đi không
+        const hasUnprocessedCodes = portalCodes.some((code: any) => unprocessedCodesSet.has(code));
+        
+        if (!hasUnprocessedCodes) {
+          // Portal không có mã hiệu nào chưa đóng đi → đánh dấu hoàn thành
+          newlyProcessedPortals.push(portal.id);
+          processedPortals.add(portal.id);
+        } 
+        // else {
+        //   const unprocessedInPortal = portalCodes.filter((code: any) => unprocessedCodesSet.has(code));
+        //   console.log(`Portal ${portal.id} (${portal.name}) vẫn còn ${unprocessedInPortal.length}/${portalCodes.length} mã hiệu chưa đóng đi:`, unprocessedInPortal);
+        // }
+        
+      } catch (error: any) {
+        console.error(`Lỗi khi kiểm tra portal ${portal.id}:`, error);
+        updateToPhone("message", `Lỗi kiểm tra portal ${portal.name}: ${error.message}`);
+      }
+    }
+    
+    // Cập nhật danh sách portal đã xử lý lên Firebase
+    if (newlyProcessedPortals.length > 0) {
+      await db!.ref("PORTAL/PROCESSED_PORTALS").set(Array.from(processedPortals));
+      updateToPhone("message", `Đã đánh dấu ${newlyProcessedPortals.length} portal `);
+    }
+    
+    // Cập nhật dữ liệu portal (loại bỏ những portal đã hoàn thành)
+    const updatedPortalData = portalData.filter((portal: any) => 
+      !processedPortals.has(portal.id)
+    );
+
+    // Loại bỏ các portal có trạng thái = 2 và số lượng = 0
+    const filteredPortalData = updatedPortalData.filter((m: any) => !(m.status === "2" && Number(m.amount) === 0));
+
+    const newItems = filteredPortalData.map((m: any) => ({
+      Id: m.id,
+      Name: m.name,
+      MaKH: m.code,
+      TrangThai: m.status,
+      SoLuong: m.amount,
+      NguoiNhap: m.username,
+    }));
+    
+    // Cập nhật Firebase
+    await db!.ref("PORTAL/MAINPAGE/").remove();
+    await db!.ref("PORTAL/MAINPAGE/").set(newItems);
+    
+    updateToPhone("message", `Hoàn thành kiểm tra ${newItems.length} portal chưa xử lý`);
+    
+  } catch (error: any) {
+    console.error("Lỗi trong processPortalWithMaHieuList:", error);
+    updateToPhone("error", `Lỗi kiểm tra trạng thái portal: ${error.message}`);
+  }
 }
 
 async function handleSendAutoToPortal(commandData: any): Promise<void> {
@@ -3511,6 +3745,50 @@ và đây là kết quả của tôi
 
   } catch (error) {
     console.error("Lỗi khi gọi Gemini API:", error);
+    throw error;
+  }
+}
+
+/**
+ * Lấy cache mã hiệu portal từ Firebase theo ngày
+ */
+async function getPortalCodesCache(dateKey: string): Promise<{[portalId: string]: any}> {
+  try {
+    const cacheSnapshot = await db!.ref(`PORTAL/CODES_CACHE/${dateKey}`).get();
+    return cacheSnapshot.val() || {};
+  } catch (error) {
+    console.error("Error getting portal codes cache:", error);
+    return {};
+  }
+}
+
+/**
+ * Lấy mã hiệu từ portal với cache
+ */
+async function getCachedMaHieusFromPortalId(
+  portalId: string, 
+  token: string, 
+  cache: {[portalId: string]: any}, 
+  dateKey: string
+): Promise<any> {
+  try {
+    // Kiểm tra cache trước
+    if (cache[portalId]) {
+      return cache[portalId];
+    }
+    
+    // Nếu không có cache, gọi API và lưu cache
+    const maHieusData = await getMaHieusFromPortalId([portalId], token);
+    
+    // Delay để tránh spam API
+    await delay(200);
+    
+    // Lưu vào cache
+    await db!.ref(`PORTAL/CODES_CACHE/${dateKey}/${portalId}`).set(maHieusData);
+    
+    return maHieusData;
+  } catch (error) {
+    console.error(`Error getting cached data for portal ${portalId}:`, error);
     throw error;
   }
 }
