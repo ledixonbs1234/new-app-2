@@ -695,7 +695,6 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
-  console.log("Data changed:", JSON.stringify(data));
   if (data.Lenh != "getmypostdata") {
     const isOk: boolean = await checkToken();
     if (!isOk) {
@@ -720,6 +719,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
     "getmahieutontoweb": async (data: any) => {
       await handleMaHieuFromPC(data);
     },
+    "guiAiLe": async (data: any) => await handleGuiAiLe(data.DoiTuong),
     "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
     "xoabg": async (data: any) => await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
     "xoanhieubg": async (data: any) => {
@@ -994,7 +994,6 @@ async function handleCheckPortal(){
     // Thiết lập Promise để chờ phản hồi từ PC
     const codesData = await waitForMaHieuListFromPC();
     
-    console.log("Received codes data in handleCheckPortal:", codesData);
     
     // 3. Xử lý portal dựa trên danh sách mã hiệu
     await processPortalWithMaHieuList(codesData);
@@ -1029,23 +1028,18 @@ async function handleMaHieuFromPC(data: any): Promise<void> {
     if (Array.isArray(responseData)) {
       // Lấy tất cả mã hiệu từ PC
       const allCodes = responseData
-        .map((item: any) => item.SoHieu || item.MaHieu)
+        .map((item: any) => item.SH )
         .filter((code: string) => code && code.trim() !== "");
       
       // Lọc các item có State = 0 (chưa đóng đi)
       const unprocessedCodes = responseData
-        .filter((item: any) => item.State === 0)
-        .map((item: any) => item.SoHieu || item.MaHieu)
+        .filter((item: any) => item.ST === 0)
+        .map((item: any) => item.SH)
         .filter((code: string) => code && code.trim() !== "");
       
-      console.log("All codes from PC:", allCodes);
-      console.log("Unprocessed codes from PC:", unprocessedCodes);
-      updateToPhone("message", `Nhận được ${responseData.length} mã hiệu từ PC, trong đó ${unprocessedCodes.length} mã chưa đóng đi`);
       
       const result = { allCodes, unprocessedCodes };
-      console.log("About to resolve pendingMaHieuResponse with result:", result);
       pendingMaHieuResponse.resolve(result);
-      console.log("Resolved pendingMaHieuResponse successfully");
     } else {
       console.error("Invalid response format from PC");
       pendingMaHieuResponse.reject(new Error("Invalid response format"));
@@ -1086,11 +1080,8 @@ async function waitForMaHieuListFromPC(): Promise<{ allCodes: string[], unproces
  */
 async function processPortalWithMaHieuList(codesData: { allCodes: string[], unprocessedCodes: string[] }): Promise<void> {
   try {
-    console.log("processPortalWithMaHieuList called with codes data:", codesData);
     const { allCodes, unprocessedCodes } = codesData;
     
-    updateToPhone("message", "Đang kiểm tra trạng thái portal...");
-    console.log(`Started processing portal with ${allCodes.length} total codes and ${unprocessedCodes.length} unprocessed codes`);
     
     // Chuyển đổi thành Set để tra cứu nhanh hơn
     const allCodesSet = new Set(allCodes);
@@ -1102,7 +1093,6 @@ async function processPortalWithMaHieuList(codesData: { allCodes: string[], unpr
     if (!processedPortalsSnapshot.exists()) {
       console.log("No processed portals found, initializing empty set.");
     } else {
-      console.log("Found processed portals in Firebase:", processedPortalsSnapshot.val());
     }
     const processedPortals = new Set(processedPortalsSnapshot.val() || []);
     
@@ -3750,14 +3740,26 @@ và đây là kết quả của tôi
 }
 
 /**
- * Lấy cache mã hiệu portal từ Firebase theo ngày
+ * Lấy cache mã hiệu portal theo ngày từ chrome.storage.local
+ * Cấu trúc lưu: { PORTAL_CODES_CACHE: { dateKey: string, data: { [portalId]: any } } }
+ * Nếu dateKey khác ngày hiện tại, cache sẽ được reset (xóa dữ liệu cũ)
  */
-async function getPortalCodesCache(dateKey: string): Promise<{[portalId: string]: any}> {
+async function getPortalCodesCache(dateKey: string): Promise<{ [portalId: string]: any }> {
   try {
-    const cacheSnapshot = await db!.ref(`PORTAL/CODES_CACHE/${dateKey}`).get();
-    return cacheSnapshot.val() || {};
+    const STORAGE_KEY = "PORTAL_CODES_CACHE";
+    const stored = await chrome.storage.local.get([STORAGE_KEY]);
+    const cacheObj = stored[STORAGE_KEY] as { dateKey: string; data: { [portalId: string]: any } } | undefined;
+
+    if (!cacheObj || cacheObj.dateKey !== dateKey) {
+      // Reset cache cho ngày mới
+      const newObj = { dateKey, data: {} as { [portalId: string]: any } };
+      await chrome.storage.local.set({ [STORAGE_KEY]: newObj });
+      return {};
+    }
+
+    return cacheObj.data || {};
   } catch (error) {
-    console.error("Error getting portal codes cache:", error);
+    console.error("Error getting portal codes cache (local storage):", error);
     return {};
   }
 }
@@ -3766,32 +3768,48 @@ async function getPortalCodesCache(dateKey: string): Promise<{[portalId: string]
  * Lấy mã hiệu từ portal với cache
  */
 async function getCachedMaHieusFromPortalId(
-  portalId: string, 
-  token: string, 
-  cache: {[portalId: string]: any}, 
+  portalId: string,
+  token: string,
+  cache: { [portalId: string]: any },
   dateKey: string
 ): Promise<any> {
   try {
-    // Kiểm tra cache trước
+    const STORAGE_KEY = "PORTAL_CODES_CACHE";
+
+    // Kiểm tra cache trong bộ nhớ hiện tại
     if (cache[portalId]) {
       return cache[portalId];
     }
-    
-    // Nếu không có cache, gọi API và lưu cache
+
+    // Không có cache -> gọi API
     const maHieusData = await getMaHieusFromPortalId([portalId], token);
-    
-    // Delay để tránh spam API
+
+    // Delay tránh spam API
     await delay(200);
-    
-    // Lưu vào cache
-    await db!.ref(`PORTAL/CODES_CACHE/${dateKey}/${portalId}`).set(maHieusData);
-    
+
+    // Cập nhật cache trong chrome.storage.local
+    const stored = await chrome.storage.local.get([STORAGE_KEY]);
+    const cacheObj = (stored[STORAGE_KEY] as { dateKey: string; data: { [id: string]: any } }) || { dateKey, data: {} };
+    if (cacheObj.dateKey !== dateKey) {
+      cacheObj.dateKey = dateKey;
+      cacheObj.data = {};
+    }
+    cacheObj.data[portalId] = maHieusData;
+    await chrome.storage.local.set({ [STORAGE_KEY]: cacheObj });
+
+    // Cập nhật cả cache truyền vào để vòng lặp sau dùng lại không cần đọc storage
+    cache[portalId] = maHieusData;
+
     return maHieusData;
   } catch (error) {
-    console.error(`Error getting cached data for portal ${portalId}:`, error);
+    console.error(`Error getting cached data for portal ${portalId} (local storage):`, error);
     throw error;
   }
 }
 
 
+
+function handleGuiAiLe(DoiTuong: any): void | PromiseLike<void> {
+  //gửi 
+}
 // END: ================== MY VNPOST ==================
