@@ -52,9 +52,9 @@ type BuuGuiProps = {
 window.onload = () => {
   console.log("CONTENT SCRIPT");
 
-  if (window.location.href.startsWith("https://pre-portalkhl.vnpost.vn/itemhdr/?id=")) {
+  if (window.location.href.startsWith("https://portalkhl.vnpost.vn/itemhdr/?id=")) {
     handlePortalPage();
-  } else if (window.location.href.startsWith("https://pre-portalkhl.vnpost.vn/public-service?id=")) {
+  } else if (window.location.href.startsWith("https://portalkhl.vnpost.vn/public-service?id=")) {
     handlePortalHCCPage();
 
   }
@@ -66,7 +66,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
       if (msg) {
         console.log("LISTENER CONTENT SCRIPT", msg);
 
-       
+
         // END: Thêm listener mới cho MyPost
 
         if (msg.message === "PROCESS_SINGLE_ITEM") {
@@ -81,6 +81,35 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             // --- BÁO LỖI VỀ BACKGROUND ---
             callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
           }
+        }
+        else if (msg.message === "FILL_PORTAL_DATA_FROM_AI") {
+          console.log("Received AI extracted data:", msg.extractedData);
+          try {
+            await fillPortalFormWithAIData(msg.extractedData);
+            callback({ status: "success", message: "Đã điền thông tin thành công" });
+          } catch (error: any) {
+            console.error("Error filling portal form with AI data:", error);
+            callback({ status: "error", message: error.message || "Lỗi khi điền thông tin" });
+          }
+        }
+        else if (msg.message === "SEND_SUBMIT") {
+          // Chờ form xuất hiện
+          const form = await waitForElm("#content > div > div > div.sub-content.multiple-item-no-footer > form", 5000);
+          if (!form) {
+            throw new Error("Không tìm thấy form portal để điền thông tin");
+          } // Xử lý nút tìm kiếm
+          const findAndSearchBtn = await waitForElm(
+            "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
+          );
+          if (!findAndSearchBtn) return;
+
+          (findAndSearchBtn as HTMLElement).click();
+
+
+
+
+          callback({ status: "success", message: "Đã điền thông tin thành công" });
+
         }
         else if (msg.message === "CHANGEKL") {
           changeKL(msg.kl);
@@ -200,7 +229,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             } catch (error) { }
 
           }
-           else if (msg.message === "KHOITAOPORTAL") {
+          else if (msg.message === "KHOITAOPORTAL") {
             console.log("Content Đang chạy KHOITAOPORTAL ", msg);
 
             //kiêmr tra xem có form không
@@ -492,7 +521,7 @@ async function processSinglePortalItem(
     }
 
     await delay(500);
-    
+
     //thực hiện việc xoá 4 số đầu điện thoại
     if (isDeletePhone) {
       const receiverPhoneInput = document.querySelector<HTMLInputElement>("#receiverPhone");
@@ -923,5 +952,106 @@ async function changeKL(kl: any) {
     sharedState.isRunning = false;
   }
 
+}
+
+// Interface để match với ExtractedData class từ Flutter
+interface ExtractedData {
+  maHieu?: string;
+  tenNguoiNhan?: string;
+  diaChi?: string;
+  soDienThoai?: string;
+}
+
+/**
+ * Hàm điền thông tin từ AI vào form portal
+ * @param extractedData Dữ liệu được trích xuất từ AI (Flutter)
+ */
+async function fillPortalFormWithAIData(extractedData: ExtractedData): Promise<void> {
+  console.log("Starting to fill portal form with AI data:", extractedData);
+
+  try {
+    // Chờ form xuất hiện
+    const form = await waitForElm("#content > div > div > div.sub-content.multiple-item-no-footer > form", 5000);
+    if (!form) {
+      throw new Error("Không tìm thấy form portal để điền thông tin");
+    }
+
+    // Tạo event để trigger các thay đổi
+    const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+    const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+
+    // Điền mã hiệu (tracking number)
+    if (extractedData.maHieu) {
+      const maHieuInput: HTMLInputElement | null = document.querySelector("#ttNumber");
+      if (maHieuInput) {
+        maHieuInput.value = extractedData.maHieu;
+        maHieuInput.dispatchEvent(inputEvent);
+        maHieuInput.dispatchEvent(changeEvent);
+        console.log("Đã điền mã hiệu:", extractedData.maHieu);
+      }
+    }
+
+    // Điền tên người nhận
+    if (extractedData.tenNguoiNhan) {
+      const receiverNameInput: HTMLInputElement | null = document.querySelector("#receiverName");
+      if (receiverNameInput) {
+        receiverNameInput.value = extractedData.tenNguoiNhan;
+        receiverNameInput.dispatchEvent(inputEvent);
+        receiverNameInput.dispatchEvent(changeEvent);
+        console.log("Đã điền tên người nhận:", extractedData.tenNguoiNhan);
+      }
+    }
+
+    // Điền địa chỉ người nhận
+    if (extractedData.diaChi) {
+      const receiverAddressInput: HTMLInputElement | null = document.querySelector("#receiverAddress");
+      if (receiverAddressInput) {
+
+        // Kiểm tra nếu địa chỉ có chứa "BÌNH ĐỊNH" thì chuyển sang địa bàn cũ
+        if (extractedData.diaChi.toUpperCase().includes("BÌNH ĐỊNH")) {
+          console.log("Phát hiện địa chỉ Bình Định, chuyển sang địa bàn cũ");
+
+          // Tìm và click vào radio button "Địa bàn cũ" bằng selector cụ thể
+          const radioDiaBanCu: HTMLInputElement | null = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(4) > div:nth-child(2) > label > input");
+          if (radioDiaBanCu) {
+            radioDiaBanCu.checked = true;
+            radioDiaBanCu.click();
+            radioDiaBanCu.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+            console.log("Đã chuyển sang địa bàn cũ");
+          }
+        }
+        receiverAddressInput.value = extractedData.diaChi;
+        receiverAddressInput.dispatchEvent(inputEvent);
+        receiverAddressInput.dispatchEvent(changeEvent);
+        console.log("Đã điền địa chỉ:", extractedData.diaChi);
+
+
+        var button = document.querySelector<HTMLElement>("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div.MuiGrid-root.MuiGrid-container.MuiGrid-item.MuiGrid-grid-xs-8 > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(3)")
+        if (button) {
+          button.click()
+        }
+      }
+    }
+
+    // Điền số điện thoại người nhận
+    if (extractedData.soDienThoai) {
+      const receiverPhoneInput: HTMLInputElement | null = document.querySelector("#receiverPhone");
+      if (receiverPhoneInput) {
+        receiverPhoneInput.value = extractedData.soDienThoai;
+        receiverPhoneInput.dispatchEvent(inputEvent);
+        receiverPhoneInput.dispatchEvent(changeEvent);
+        console.log("Đã điền số điện thoại:", extractedData.soDienThoai);
+      }
+    }
+
+    // Delay nhỏ để đảm bảo các thay đổi được áp dụng
+    await delay(300);
+
+    console.log("Hoàn thành điền thông tin từ AI vào form portal");
+
+  } catch (error) {
+    console.error("Lỗi khi điền thông tin vào form portal:", error);
+    throw error;
+  }
 }
 

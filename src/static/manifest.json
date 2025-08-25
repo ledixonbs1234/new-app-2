@@ -62,7 +62,6 @@
         {
             "matches": [
                 "https://portalkhl.vnpost.vn/*",
-                 "https://pre-portalkhl.vnpost.vn/*",
                 "https://example.com/",
                 "https://packnsend.vnpost.vn/*"
             ],
@@ -72,8 +71,7 @@
         },
         {
             "matches": [
-                "https://portalkhl.vnpost.vn/login*",
-                 "https://pre-portalkhl.vnpost.vn/*"
+                "https://portalkhl.vnpost.vn/login*"
             ],
             "js": [
                 "contentLoginPortal.js"
@@ -89,8 +87,7 @@
         },
         {
             "matches": [
-                "https://portalkhl.vnpost.vn/*",
-                 "https://pre-portalkhl.vnpost.vn/*"
+                "https://portalkhl.vnpost.vn/*"
             ],
             "js": [
                 "mainScript.js"

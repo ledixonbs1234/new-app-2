@@ -506,7 +506,7 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
 
   try {
     // 1. Tìm các tab Portal có URL khớp
-    const portalTabs = await chrome.tabs.query({ url: "https://pre-portalkhl.vnpost.vn/*" });
+    const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
     console.log(`handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`);
 
     // 2. Duyệt qua các tab và kiểm tra element
@@ -570,7 +570,7 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
         const loginResult = await ensurePortalLogin(foundReadyTabId);
 
         // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
-        await chrome.tabs.update(foundReadyTabId, { active: true, url: `https://pre-portalkhl.vnpost.vn/accept-api-dtl?hdrId=${hdrId}` });
+        await chrome.tabs.update(foundReadyTabId, { active: true, url: `https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=${hdrId}` });
         await waitForTabToLoad(foundReadyTabId)
       }
       await delay(500);
@@ -695,7 +695,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
-  if (data.Lenh != "getmypostdata") {
+  if (data.Lenh != "getmypostdata" || data.Lenh != 'getpns') {
     const isOk: boolean = await checkToken();
     if (!isOk) {
       const tokenTemp = await loginDirect(accountPortal, passwordPortal);
@@ -720,6 +720,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
       await handleMaHieuFromPC(data);
     },
     "guiAiLe": async (data: any) => await handleGuiAiLe(data.DoiTuong),
+    "sendSubmit": async () => await handleSendSubmit(),
     "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
     "xoabg": async (data: any) => await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
     "xoanhieubg": async (data: any) => {
@@ -1177,7 +1178,7 @@ async function processPortalWithMaHieuList(codesData: { allCodes: string[], unpr
     );
 
     // Loại bỏ các portal có trạng thái = 2 và số lượng = 0
-    const filteredPortalData = updatedPortalData.filter((m: any) => !(m.status === "2" && Number(m.amount) === 0));
+    const filteredPortalData = updatedPortalData.filter((m: any) => !((m.status === "2" || m.status==="1") && Number(m.amount) === 0));
 
     const newItems = filteredPortalData.map((m: any) => ({
       Id: m.id,
@@ -2284,8 +2285,8 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
     var initialTab = await createOrActiveTab(
-      "https://pre-portalkhl.vnpost.vn/accept-api",
-      "pre-portalkhl.vnpost.vn",
+      "https://portalkhl.vnpost.vn/accept-api",
+      "portalkhl.vnpost.vn",
       true
     );
 
@@ -3809,7 +3810,77 @@ async function getCachedMaHieusFromPortalId(
 
 
 
-function handleGuiAiLe(DoiTuong: any): void | PromiseLike<void> {
-  //gửi 
+// Interface để match với ExtractedData class từ Flutter
+interface ExtractedData {
+  maHieu?: string;
+  tenNguoiNhan?: string;
+  diaChi?: string;
+  soDienThoai?: string;
+}
+
+async function handleGuiAiLe(DoiTuong: any): Promise<void> {
+  try {
+    console.log('handleGuiAiLe received:', DoiTuong);
+    
+    // Parse dữ liệu từ Flutter (đã được JSON.stringify)
+    let extractedData: ExtractedData;
+    if (typeof DoiTuong === 'string') {
+      extractedData = JSON.parse(DoiTuong);
+    } else {
+      extractedData = DoiTuong;
+    }
+    
+    console.log('Parsed ExtractedData:', extractedData);
+    
+    // Lấy tab đang active hiện tại
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (tabs.length === 0 || !tabs[0].id) {
+      console.error('Không tìm thấy tab đang active');
+      return;
+    }
+    
+    const activeTabId = tabs[0].id;
+    console.log('Sending data to active tab:', activeTabId);
+    
+    // Gửi dữ liệu đến content script của tab đang active
+    chrome.tabs.sendMessage(activeTabId, {
+      message: "FILL_PORTAL_DATA_FROM_AI",
+      extractedData: extractedData
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Error sending message to content script:', chrome.runtime.lastError);
+      } else {
+        console.log('Data sent successfully to content script:', response);
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in handleGuiAiLe:', error);
+  }
+}
+
+async function handleSendSubmit(): Promise<void | PromiseLike<void>> {
+   // Lấy tab đang active hiện tại
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (tabs.length === 0 || !tabs[0].id) {
+      console.error('Không tìm thấy tab đang active');
+      return;
+    }
+    
+    const activeTabId = tabs[0].id;
+    console.log('Sending data to active tab:', activeTabId);
+    
+    // Gửi dữ liệu đến content script của tab đang active
+    chrome.tabs.sendMessage(activeTabId, {
+      message: "SEND_SUBMIT",
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.error('Error sending message to content script:', chrome.runtime.lastError);
+      } else {
+        console.log('Data sent successfully to content script:', response);
+      }
+    });
 }
 // END: ================== MY VNPOST ==================
