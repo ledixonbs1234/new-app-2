@@ -683,6 +683,8 @@ function objectArraysAreEqual(a: BuuGuiProps[], b: BuuGuiProps[]): boolean {
 // - handleGetPNS, handleAddPNS,... : Giữ lại nếu là tính năng riêng
 // - khoiTaoPortal: Logic khởi tạo ban đầu có thể vẫn cần
 // - Các hàm liên quan đến PNS nếu không thuộc luồng chính này
+// Các lệnh không cần kiểm tra token
+const commandsNoTokenRequired = ["getmypostdata", "getpns",'guiAiLe','sendSubmit','sendtoportal','sendautotoportal','khoitao','loginpns','loginpnsgd'];
 
 async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promise<void> {
 
@@ -695,7 +697,7 @@ async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
-  if (data.Lenh != "getmypostdata" || data.Lenh != 'getpns') {
+if (!commandsNoTokenRequired.includes(data.Lenh)) {
     const isOk: boolean = await checkToken();
     if (!isOk) {
       const tokenTemp = await loginDirect(accountPortal, passwordPortal);
@@ -942,14 +944,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
           return;
         }
 
-        if (!request.token) {
-          console.error("Missing token for REQUEST_EXCEL");
-          sendResponse({ status: "error", error: "Missing token" });
-          return;
-        }
 
         try {
-          const res = await getMaHieusFromPortalId(idsToFetch, request.token);
+          const res = await getMaHieusFromPortalId(idsToFetch, token);
           if (!res) {
             updateToPhone("message", "Không lấy được dữ liệu từ Portal để xuất Excel");
             sendResponse({ status: "error", error: "Failed to fetch data from Portal" });

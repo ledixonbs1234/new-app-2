@@ -487,7 +487,7 @@ async function processSinglePortalItem(
     }
 
     // Chờ ô tìm kiếm biến mất (nghĩa là đã tìm thấy và load form)
-    const notNumberSearch = await waitForNotElm("#ttNumberSearch", 15); // Tăng timeout
+    const notNumberSearch = await waitForNotElm("#ttNumberSearch", 30); // Tăng timeout
     if (notNumberSearch !== "ok") {
       // Nếu ô tìm kiếm không biến mất -> Lỗi tìm kiếm
       const alertBoxAfterTimeout = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
@@ -756,7 +756,7 @@ const startSendCurrentCode = async (
       if (textShow.includes("Bưu gửi đã được xử lý")) return (sharedState.isRunning = false);
     }
 
-    const notNumberSearch = await waitForNotElm("#ttNumberSearch", 10);
+    const notNumberSearch = await waitForNotElm("#ttNumberSearch", 30);
     if (notNumberSearch !== "ok") {
       console.log("notNumberSearch");
       return (sharedState.isRunning = false);
@@ -876,7 +876,7 @@ const startSendCurrentCode = async (
     // Xử lý nút tìm kiếm
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
-    );
+    , 30);
     if (!findAndSearchBtn) return (sharedState.isRunning = false);
     if (!sharedState.isRunning) return;
 
@@ -940,7 +940,7 @@ async function changeKL(kl: any) {
     // Xử lý nút tìm kiếm
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
-    );
+    ,30);
 
     (findAndSearchBtn as HTMLElement).click();
     await delay(500);
