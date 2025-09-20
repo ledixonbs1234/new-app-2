@@ -998,7 +998,7 @@ async function handleCheckPortal(){
     
   } catch (error: any) {
     console.error("Lỗi trong handleCheckPortal:", error);
-    updateToPhone("error", `Lỗi kiểm tra portal: ${error.message}`);
+    updateToPhone("message", `Lỗi kiểm tra portal: ${error.message}`);
   }
 }
 
