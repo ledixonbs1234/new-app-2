@@ -1,5 +1,6 @@
 importScripts('firebase-app-compat.js', 'firebase-database-compat.js');
 importScripts("xlsxtool.js")
+import { debug } from 'util';
 import { BuuGuiProps, DataSnapshotProps, KhachHangProps } from '../states/states';
 import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
 import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
@@ -97,6 +98,35 @@ let isStoppedOnError: boolean = false;
 let isFinalProcessingTriggered: boolean = false;
 const BUFFER_SIZE = 5;
 // --- KẾT THÚC TRẠNG THÁI CỤC BỘ MỚI ---
+
+// Helper function for safe JSON parsing from fetch responses
+const safeFetch = async (url: string, options?: RequestInit): Promise<any> => {
+  try {
+    const response = await fetch(url, options);
+    
+    // Check if response is ok
+    if (!response.ok) {
+      console.error(`Fetch error for ${url}:`, response.status, response.statusText);
+      const textResponse = await response.text();
+      console.error('Error response:', textResponse.substring(0, 200) + '...');
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    // Check content type
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error(`Invalid content type for ${url}:`, contentType);
+      const textResponse = await response.text();
+      console.error('Response text:', textResponse.substring(0, 200) + '...');
+      throw new Error('Invalid response format - expected JSON but received HTML/text');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error(`Error in safeFetch for ${url}:`, error);
+    throw error;
+  }
+};
 
 type Snapshot = {
   TimeStamp?: string;
@@ -1846,8 +1876,88 @@ const handlePrintPageSort = async (data: any) => {
 }
 
 const checkToken = async (): Promise<boolean> => {
-  const res = await getMaHieusFromPortalId(["1034814510"], token);
-  return res ? true : false;
+  try {
+   
+
+    console.log('checkToken: Testing token validity with test ID...');
+    
+    // Sử dụng một ID test để kiểm tra token
+    // ID "1061399653" là một ID test cố định
+    const res = await getMaHieusFromPortalId(["1061399653"], token);
+    
+    // Kiểm tra kết quả trả về
+    if (!res) {
+      console.log('checkToken: No response from API - token likely invalid or network error');
+      return false;
+    }
+
+    // Kiểm tra xem có phải là array không
+    if (!Array.isArray(res)) {
+      console.log('checkToken: Response is not an array');
+      return false;
+    }
+
+    // Kiểm tra xem có phải là error response không (có thể có status field khi lỗi)
+    if (res.length > 0 && (res[0] as any).status) {
+      const status = (res[0] as any).status;
+      console.log(`checkToken: API returned status ${status}`);
+      
+      if (status === 401) {
+        console.log('checkToken: Token expired or unauthorized (401)');
+        return false;
+      } else if (status === 403) {
+        console.log('checkToken: Token access forbidden (403)');
+        return false;
+      } else if (status === 400) {
+        console.log('checkToken: Bad request (400) - token may be invalid format');
+        return false;
+      } else if (status >= 500) {
+        console.log('checkToken: Server error (500+) - cannot verify token');
+        return false;
+      }
+      
+      // Status khác có thể vẫn valid, tiếp tục kiểm tra
+    }
+
+    // Kiểm tra xem response có structure hợp lệ không
+    if (res.length > 0) {
+      const firstItem = res[0];
+      
+      // Kiểm tra có phải là valid NguoiGuiDetailProp không
+      if ((firstItem as NguoiGuiDetailProp).id !== undefined) {
+        console.log('checkToken: Valid token - received proper response structure');
+        return true;
+      }
+      
+      // Nếu không có structure mong đợi nhưng có data, vẫn coi là valid
+      console.log('checkToken: Response received but structure unclear - assuming valid');
+      return true;
+    }
+
+    // Nếu array rỗng, có thể token valid nhưng không tìm thấy data cho ID test
+    console.log('checkToken: Empty response - token appears valid but no data for test ID');
+    return true;
+
+  } catch (error) {
+    console.error('checkToken: Error checking token validity:', error);
+    
+    // Kiểm tra loại lỗi để đưa ra quyết định chính xác hơn
+    if (error instanceof Error) {
+      const errorMsg = error.message.toLowerCase();
+      if (errorMsg.includes('401') || errorMsg.includes('unauthorized')) {
+        console.log('checkToken: Token is invalid (unauthorized)');
+        return false;
+      } else if (errorMsg.includes('403') || errorMsg.includes('forbidden')) {
+        console.log('checkToken: Token access forbidden');
+        return false;
+      } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
+        console.log('checkToken: Network error - cannot verify token');
+        return false;
+      }
+    }
+    
+    return false;
+  }
 };
 
 
@@ -2535,10 +2645,10 @@ const handlePrintPage = async (data: any) => {
 
 
 
-const API_BASE_URL = "https://api-portalkhl.vnpost.vn";
+const API_BASE_URL = "https://api-pre-portalkhl.vnpost.vn";
 const PNS_BASE_URL = "https://packnsend.vnpost.vn";
 const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
-  const res = await fetch(`${API_BASE_URL}/khl2024/khl/jasper/printByTTNumber`, {
+  const res = await fetch(`${API_BASE_URL}/khl-api/khl/jasper/printByTTNumber`, {
     method: "POST",
     headers: {
       accept: "application/json, text/plain, */*",
@@ -2571,7 +2681,7 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
     console.log("Sending request to Portal API with body:", JSON.stringify(requestBody));
     updateToPhone("message", "Đang xác nhận Portal...");
 
-    const res = await fetch("https://api-portalkhl.vnpost.vn/khl/sendBccp/hdr", {
+    const responseData = await safeFetch(API_BASE_URL+ "/khl-api/khl/sendBccp/hdr", {
       "headers": {
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9,vi;q=0.8",
@@ -2593,68 +2703,9 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
       "credentials": "include"
     });
 
-    // Parse the response body
-    let responseData;
-    try {
-      responseData = await res.json();
-    } catch (parseError) {
-      console.error("Failed to parse response JSON:", parseError);
-      updateToPhone("message", "Lỗi: Không thể đọc phản hồi từ server");
-      return;
-    }
-
     console.log("Portal API response:", responseData);
-
-    // Check if the request was successful
-    if (res.ok) {
-      // Success case (status 200-299)
-      updateToPhone("message", "Xác nhận Portal thành công!");
-      console.log("Portal confirmation successful:", responseData);
-    } else {
-      // Error case (status 400, 401, 500, etc.)
-      let errorMessage = "Lỗi không xác định từ Portal API";
-
-      if (res.status === 400) {
-        // Handle 400 Bad Request - extract specific error message
-        if (responseData && typeof responseData === 'object') {
-          // Try different possible error message fields
-          errorMessage = responseData.message ||
-            responseData.error ||
-            responseData.errorMessage ||
-            responseData.msg ||
-            JSON.stringify(responseData);
-        } else if (typeof responseData === 'string') {
-          errorMessage = responseData;
-        }
-
-        console.error("Portal API 400 error:", errorMessage);
-        updateToPhone("message", `Lỗi xác nhận Portal: ${errorMessage}`);
-
-      } else if (res.status === 401) {
-        // Handle 401 Unauthorized
-        errorMessage = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
-        console.error("Portal API 401 error:", errorMessage);
-        updateToPhone("message", errorMessage);
-
-      } else if (res.status === 403) {
-        // Handle 403 Forbidden
-        errorMessage = "Không có quyền thực hiện thao tác này.";
-        console.error("Portal API 403 error:", errorMessage);
-        updateToPhone("message", errorMessage);
-
-      } else if (res.status >= 500) {
-        // Handle 500+ Server errors
-        errorMessage = "Lỗi server Portal. Vui lòng thử lại sau.";
-        console.error("Portal API server error:", res.status, responseData);
-        updateToPhone("message", errorMessage);
-
-      } else {
-        // Handle other HTTP error codes
-        errorMessage = `Lỗi HTTP ${res.status}: ${res.statusText}`;
-        console.error("Portal API error:", res.status, res.statusText, responseData);
-        updateToPhone("message", errorMessage);
-      }
-    }
+    updateToPhone("message", "Xác nhận Portal thành công!");
+    console.log("Portal confirmation successful:", responseData);
 
   } catch (networkError: any) {
     // Handle network errors, timeout, etc.
@@ -2678,114 +2729,170 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
 const getMaHieusFromPortalId = async (ids: any, token: string): Promise<NguoiGuiDetailProp[] | null> => {
   console.log('IDS ', ids)
 
-  const res = await Promise.all(
-    ids.map((id: string) =>
-      fetch(`${API_BASE_URL}/khl/portalItem/getItemHdr`, {
-        headers: {
-          accept: "application/json, text/plain, */*",
-          "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json; charset=UTF-8",
-          "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-          "sec-ch-ua-mobile": "?0",
-          "sec-ch-ua-platform": '"Windows"',
-          "sec-fetch-dest": "empty",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "same-site",
-        },
-        referrer: "https://portalkhl.vnpost.vn/",
-        referrerPolicy: "strict-origin-when-cross-origin",
-        body: `${id}`, // Assuming body is just the id
-        method: "POST",
-        mode: "cors",
-        credentials: "include",
-      }).then((res) => res.json())
-    )
-  );
-  if (res[0].status === 401 || res[0].status === 400) return null;
-  return res as NguoiGuiDetailProp[];
+  try {
+    const res = await Promise.all(
+      ids.map(async (id: string) => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/khl-api/khl/portalItem/getItemHdr`, {
+            headers: {
+              accept: "application/json, text/plain, */*",
+              "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json; charset=UTF-8",
+              "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+              "sec-ch-ua-mobile": "?0",
+              "sec-ch-ua-platform": '"Windows"',
+              "sec-fetch-dest": "empty",
+              "sec-fetch-mode": "cors",
+              "sec-fetch-site": "same-site",
+            },
+            referrer: "https://portalkhl.vnpost.vn/",
+            referrerPolicy: "strict-origin-when-cross-origin",
+            body: `${id}`, // Assuming body is just the id
+            method: "POST",
+            mode: "cors",
+            credentials: "include",
+          });
+
+          // Check if response is ok before parsing
+          if (!response.ok) {
+            console.error(`API error for ID ${id}:`, response.status, response.statusText);
+            return { status: response.status, error: response.statusText };
+          }
+
+          // Check content type to ensure it's JSON
+          const contentType = response.headers.get('content-type');
+          if (!contentType || !contentType.includes('application/json')) {
+            console.error(`Invalid content type for ID ${id}:`, contentType);
+            const textResponse = await response.text();
+            console.error('Response text:', textResponse.substring(0, 200) + '...');
+            return { status: 400, error: 'Invalid response format' };
+          }
+
+          return await response.json();
+        } catch (error) {
+          console.error(`Error processing ID ${id}:`, error);
+          return { status: 500, error: error instanceof Error ? error.message : 'Unknown error' };
+        }
+      })
+    );
+
+    // Check if first response has error status
+    if (res[0] && (res[0].status === 401 || res[0].status === 400 || res[0].status === 500)) {
+      console.error('API returned error status:', res[0]);
+      return null;
+    }
+
+    return res as NguoiGuiDetailProp[];
+  } catch (error) {
+    console.error('Error in getMaHieusFromPortalId:', error);
+    return null;
+  }
 };
 const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<NguoiGuiProp[]> => {
-  // Build the base JSON object
-  const requestBody = {
-    orgCode: buuCuc,
-    tuNgay: toDayText,
-    denNgay: toDayText,
-    sourceSystem: "KHL",
-    origin: ""
-  };
+  try {
+    // Build the base JSON object
+    const requestBody = {
+      orgCode: buuCuc,
+      tuNgay: toDayText,
+      denNgay: toDayText,
+      sourceSystem: "KHL",
+      origin: ""
+    };
 
-  // Only add ttNumber if maHieus has a value
-  if (maHieus && maHieus.trim() !== "") {
-    (requestBody as any).ttNumber = maHieus;
+    // Only add ttNumber if maHieus has a value
+    if (maHieus && maHieus.trim() !== "") {
+      (requestBody as any).ttNumber = maHieus;
+    }
+
+    const res = await fetch(`${API_BASE_URL}/khl-api/khl/getItemHdr`, {
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: `Bearer ${token}`,
+        capikey: "19001235",
+        "content-type": "application/json; charset=UTF-8",
+        "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+      },
+      referrer: "https://portalkhl.vnpost.vn/",
+      referrerPolicy: "strict-origin-when-cross-origin",
+      body: JSON.stringify(requestBody),
+      method: "POST",
+      mode: "cors",
+      credentials: "include",
+    });
+
+    // Check if response is ok
+    if (!res.ok) {
+      console.error('getItemHdr API error:', res.status, res.statusText);
+      const textResponse = await res.text();
+      console.error('Error response:', textResponse.substring(0, 200) + '...');
+      return [];
+    }
+
+    // Check content type
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.error('getItemHdr Invalid content type:', contentType);
+      const textResponse = await res.text();
+      console.error('Response text:', textResponse.substring(0, 200) + '...');
+      return [];
+    }
+
+    return await res.json();
+  } catch (error) {
+    console.error('Error in getItemHdr:', error);
+    return [];
   }
-
-  const res = await fetch(`${API_BASE_URL}/khl/getItemHdr`, {
-    headers: {
-      accept: "application/json, text/plain, */*",
-      "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-      authorization: `Bearer ${token}`,
-      capikey: "19001235",
-      "content-type": "application/json; charset=UTF-8",
-      "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"Windows"',
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-site",
-    },
-    referrer: "https://portalkhl.vnpost.vn/",
-    referrerPolicy: "strict-origin-when-cross-origin",
-    body: JSON.stringify(requestBody),
-    method: "POST",
-    mode: "cors",
-    credentials: "include",
-  });
-  return res.json();
 };
 
 const getDataFromPNS = async (dayLast: string): Promise<any> => {
-  const res = await fetch(`${PNS_BASE_URL}/Order/Home/ExportExcellOrderManage`, {
-    headers: {
-      accept: "*/*",
-      "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-      "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"Windows"',
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-origin",
-      "x-requested-with": "XMLHttpRequest",
-      cookie: "_ga=GA1.1.1252308094.1682309904; tctbdvn-_zldp=yr040hnCEdI2kxlbdwBeQuILj7FFHTSRALXKDo17bUf5oxEi8nvo1%2FHkNiXB4tD3VVj9liGvi%2BU%3D; _ga_PX3P5JLJ7K=GS1.1.1692945085.4.0.1692945085.0.0.0; _ga_TDJH6SEKEF=GS1.1.1703234131.4.1.1703234170.0.0.0; __SRVNAME=pns7; ASP.NET_SessionId=1tl4k4fo4bu5vhqwn53coee3; .ASPXAUTH=9E1633939FA3B00F904E422CCCB86B402F1B1A92F702B251189551D02FEB874EC894F1B04112D0BC9C69BFF93094451F2651D82616FEB484B469B41DDF924CC365801E490B1E3C2D21E993FBAB7EDCCB4716418487A4F9F4D87BC8C3F2A1F8175F2B8048EFC2B4FFABF23E7F62887AB9; panelIdCookie=userid=593280_xonld",
-      Referer: "https://packnsend.vnpost.vn/tin/quan-ly-tin.html?startDate=11%2F02%2F2024&endDate=11%2F02%2F2024",
-      "Referrer-Policy": "strict-origin-when-cross-origin",
-    },
-    body: `Id=0&FromDate=${toDateString(dayLast)}+&ToDate=+${toDateString(0)}&Code=&CustomerCode=&Status=&ContactPhone=&TrackingCode=&Page=0&Channel=&senderDistrictId=0&senderWardId=0&flagConfig=&orderNumber=&serviceCodeMPITS=`,
-    method: "POST",
-  });
-  let data: any = null;
   try {
-
-    data = await res.json()
-  } catch {
-    data = null
-
+    return await safeFetch(`${PNS_BASE_URL}/Order/Home/ExportExcellOrderManage`, {
+      headers: {
+        accept: "*/*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "x-requested-with": "XMLHttpRequest",
+        cookie: "_ga=GA1.1.1252308094.1682309904; tctbdvn-_zldp=yr040hnCEdI2kxlbdwBeQuILj7FFHTSRALXKDo17bUf5oxEi8nvo1%2FHkNiXB4tD3VVj9liGvi%2BU%3D; _ga_PX3P5JLJ7K=GS1.1.1692945085.4.0.1692945085.0.0.0; _ga_TDJH6SEKEF=GS1.1.1703234131.4.1.1703234170.0.0.0; __SRVNAME=pns7; ASP.NET_SessionId=1tl4k4fo4bu5vhqwn53coee3; .ASPXAUTH=9E1633939FA3B00F904E422CCCB86B402F1B1A92F702B251189551D02FEB874EC894F1B04112D0BC9C69BFF93094451F2651D82616FEB484B469B41DDF924CC365801E490B1E3C2D21E993FBAB7EDCCB4716418487A4F9F4D87BC8C3F2A1F8175F2B8048EFC2B4FFABF23E7F62887AB9; panelIdCookie=userid=593280_xonld",
+        Referer: "https://packnsend.vnpost.vn/tin/quan-ly-tin.html?startDate=11%2F02%2F2024&endDate=11%2F02%2F2024",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+      },
+      body: `Id=0&FromDate=${toDateString(dayLast)}+&ToDate=+${toDateString(0)}&Code=&CustomerCode=&Status=&ContactPhone=&TrackingCode=&Page=0&Channel=&senderDistrictId=0&senderWardId=0&flagConfig=&orderNumber=&serviceCodeMPITS=`,
+      method: "POST",
+    });
+  } catch (error) {
+    console.error('Error in getDataFromPNS:', error);
+    return null;
   }
-  return data;
 };
 const loginDirect = async (account: string, password: string): Promise<string | null> => {
-  const res = await fetch(`${API_BASE_URL}/api/auth/signinKhl`, {
-    method: "POST",
-    headers: {
-      accept: "application/json, text/plain, */*",
-      "content-type": "application/json; charset=UTF-8",
-      capikey: "19001235"
-    },
-    body: JSON.stringify({ username: account, password: password, ip: "", random: Math.random() })
-  });
-  const data = await res.json();
-  return data.tokenFe || null;
+  try {
+    const data = await safeFetch(`${API_BASE_URL}/khl-api/api/auth/signinKhl`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json; charset=UTF-8",
+        capikey: "19001235"
+      },
+      body: JSON.stringify({ username: account, password: password, ip: "", random: Math.random() })
+    });
+    return data.body.tokenFe || null;
+  } catch (error) {
+    console.error('Error in loginDirect:', error);
+    return null;
+  }
 };
 
 // function sendPong() {
@@ -2962,7 +3069,7 @@ async function handleAddPNS(dayLast: any) {
 async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
   console.log(id)
 
-  var res = await fetch("https://api-portalkhl.vnpost.vn/khl/portalItem/deleteItemDetail", {
+  var res = await fetch("https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
     "headers": {
       "accept": "application/json, text/plain, */*",
       "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
@@ -2989,7 +3096,7 @@ async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
 async function handleXoaNhieuBuuGui(id: any): Promise<void | PromiseLike<void>> {
   console.log(id)
 
-  var res = await fetch("https://api-portalkhl.vnpost.vn/khl/portalItem/deleteItemDetail", {
+  var res = await fetch("https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
     "headers": {
       "accept": "application/json, text/plain, */*",
       "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
@@ -3203,7 +3310,7 @@ async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderP
   const toDateFromDate = [formatMyPostDate(past), formatMyPostDate(now)];
 
   try {
-    const res = await fetch("https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParam?page=0&size=1000", {
+    const data = await safeFetch("https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParam?page=0&size=1000", {
       headers: {
         "accept": "*/*",
         "accept-language": "vi,en-US;q=0.9,en;q=0.8",
@@ -3220,15 +3327,6 @@ async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderP
       }),
       method: "POST",
     });
-
-    if (!res.ok) {
-      console.error(`Lỗi API MyPost: ${res.status} ${res.statusText}`);
-      const errorText = await res.text();
-      console.error(`Nội dung lỗi: ${errorText}`);
-      updateToPhone("error", `Lỗi lấy dữ liệu MyPost: ${res.statusText}`);
-      return null;
-    }
-    const data = await res.json();
     return data || [];
   } catch (error: any) {
     console.error("Lỗi fetch dữ liệu MyPost:", error);
@@ -3529,13 +3627,11 @@ async function handleCreateComplaint(payload: { itemCode: string, token: string 
 
     // 2. Fetch lần 1 để lấy orderHdrId
     console.log(`[BG] Fetching orderHdrId for ${itemCode}...`);
-    const searchRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`, {
+    const searchData = await safeFetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`, {
       headers: commonHeaders,
       method: "POST",
     });
-
-    if (!searchRes.ok) throw new Error(`API search lỗi: ${searchRes.status} ${searchRes.statusText}`);
-    const searchData = await searchRes.json();
+    
     if (!searchData || !searchData.orderHdrId) throw new Error("API không trả về orderHdrId.");
 
     const orderHdrId = searchData.orderHdrId;
@@ -3543,13 +3639,11 @@ async function handleCreateComplaint(payload: { itemCode: string, token: string 
 
     // 3. Fetch lần 2 để lấy chi tiết đơn hàng
     console.log(`[BG] Fetching order details for ${orderHdrId}...`);
-    const detailRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${orderHdrId}`, {
+    const detailData = await safeFetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${orderHdrId}`, {
       headers: commonHeaders,
       method: "GET",
     });
-
-    if (!detailRes.ok) throw new Error(`API detail lỗi: ${detailRes.status} ${detailRes.statusText}`);
-    const detailData = await detailRes.json();
+    
     if (!detailData) throw new Error("API không trả về chi tiết đơn hàng.");
 
     const complaintData = {

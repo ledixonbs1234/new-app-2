@@ -380,7 +380,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               (document.getElementById("userid") as HTMLInputElement).value =
                 !isGD ? "593280_phuhv" : "59A652";
               (document.getElementById("password") as HTMLInputElement).value =
-                "Abc@123456";
+                "Phu1234@";
 
               var btnLogin = document.querySelector(
                 "body > div.content > div.row > div > div > div > form > fieldset > div:nth-child(4) > div:nth-child(4) > div.form-group > button"
