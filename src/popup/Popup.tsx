@@ -7,6 +7,7 @@ import { setOrders, clearOrders, Order, setCurrentIndex } from "./popup.slice";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./store";
 import TextArea from "antd/es/input/TextArea";
+import BatchAddTab from "./components/BatchAddTab";
 
 export default function Popup() {
   // Lấy dữ liệu từ Redux store
@@ -239,6 +240,11 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
           </Space>
         </Card>
       ),
+    },
+    {
+      key: '3',
+      label: 'Thêm danh sách',
+      children: <BatchAddTab />,
     },
   ];
 

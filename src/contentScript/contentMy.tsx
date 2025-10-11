@@ -5,6 +5,130 @@ function forceChange(e: HTMLInputElement) {
     e.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
     e.dispatchEvent(new Event("blur"));
 }
+
+/**
+ * Handle adding batch rows to the table
+ */
+async function handleAddBatchRows(payload: { rowCount: number; content: string; weight: string }) {
+    try {
+        const { rowCount, content, weight } = payload;
+        
+        // Force focus on the page to ensure events are properly captured
+        window.focus();
+        document.body.focus();
+        
+        // Simulate a click on document to restore focus (this mimics user clicking on page)
+        const clickEvent = new MouseEvent('mousedown', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+        });
+        document.body.dispatchEvent(clickEvent);
+        
+        // Small delay to ensure focus is restored
+        await delay(200);
+        
+        // Function to find the "Add" button based on button text "Thêm bưu gửi vào lô"
+        const getAddButton = (): HTMLButtonElement | null => {
+            // Find all buttons in the page
+            const buttons = document.querySelectorAll('button');
+            
+            // Look for button with text "Thêm bưu gửi vào lô"
+            for (const button of buttons) {
+                if (button.textContent?.trim() === "Thêm bưu gửi vào lô") {
+                    return button as HTMLButtonElement;
+                }
+            }
+            
+            return null;
+        };
+        
+        // Find the "Add" button initially
+        const addButton = getAddButton();
+        if (!addButton) {
+            return { success: false, error: "Không tìm thấy nút thêm dòng" };
+        }
+        // Add rows
+        for (let i = 0; i < rowCount; i++) {
+            // Get the button again in case position changed after adding row
+            const currentAddButton = getAddButton();
+            if (!currentAddButton) {
+                return { success: false, error: `Không tìm thấy nút thêm dòng ở lần lặp ${i + 1}` };
+            }
+            
+            // Click add button to create new row
+            currentAddButton.click();
+            
+            // Wait for the row to be added
+            await delay(400);
+            
+            // Find all rows in tbody
+            const tbody = document.querySelector("#form-create-order > div.ant-row > div > div > div > div.ant-collapse-content.ant-collapse-content-active > div > div.ant-table-wrapper > div > div > div > div > div > table > tbody");
+            
+            if (!tbody) {
+                return { success: false, error: "Không tìm thấy tbody" };
+            }
+            
+            const rows = tbody.querySelectorAll("tr.ant-table-row");
+            const lastRow = rows[rows.length - 1];
+            
+            if (!lastRow) {
+                return { success: false, error: "Không tìm thấy dòng vừa thêm" };
+            }
+            
+            // Fill content (4th column - index 3) - Click to activate edit mode
+            const contentCell = lastRow.querySelectorAll("td")[3];
+            if (contentCell) {
+                const contentDiv = contentCell.querySelector(".editable-cell-value-wrap") as HTMLDivElement;
+                if (contentDiv) {
+                    // Click to activate edit mode
+                    contentDiv.click();
+                    await delay(150);
+                    
+                    // Find and fill input field
+                    const contentInput = contentCell.querySelector("input") as HTMLInputElement;
+                    if (contentInput) {
+                        contentInput.value = content;
+                        forceChange(contentInput);
+                        // Trigger blur to save
+                        contentInput.blur();
+                        await delay(100);
+                    }
+                }
+            }
+            
+            // Fill weight (5th column - index 4) - Click to activate edit mode
+            const weightCell = lastRow.querySelectorAll("td")[4];
+            if (weightCell) {
+                const weightDiv = weightCell.querySelector(".editable-cell-value-wrap") as HTMLDivElement;
+                if (weightDiv) {
+                    // Click to activate edit mode
+                    weightDiv.click();
+                    await delay(150);
+                    
+                    // Find and fill input field
+                    const weightInput = weightCell.querySelector("input") as HTMLInputElement;
+                    if (weightInput) {
+                        weightInput.value = weight;
+                        forceChange(weightInput);
+                        // Trigger blur to save
+                        weightInput.blur();
+                        await delay(100);
+                    }
+                }
+            }
+            
+            // Small delay before next iteration
+            await delay(200);
+        }
+        
+        return { success: true };
+    } catch (error: any) {
+        console.error("Error in handleAddBatchRows:", error);
+        return { success: false, error: error.message };
+    }
+}
+
 var listDichVu = ["Tiêu chuẩn TMĐT ĐG", "Nhanh - TMĐT ĐG"]
 var tinhKien = ['kon tum', 'gia lai', 'dak lak', 'binh dinh', 'phu yen', 'khanh hoa', 'quang nam', 'quang ngai', 'da nang']
 // <<< THAY ĐỔI 1: Quản lý trạng thái toàn cục >>>
@@ -192,7 +316,7 @@ async function runMainLogic() {
  * Lắng nghe tin nhắn từ background script và các phần khác của extension.
  * Trình lắng nghe này chỉ được đăng ký MỘT LẦN.
  */
-chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
     if (message.type === "URL_CHANGED") {
         if (message.url.includes("domestic/create")) {
 
@@ -213,12 +337,22 @@ chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
             updateUI();
         }
         return true;
-    } else
-        if (message.type === "GET_MYPOST_TOKEN") {
-            const token = localStorage.getItem('accessToken');
-            sendResponse({ token: token || null });
-            return true; // Giữ kênh mở cho phản hồi bất đồng bộ
-        }
+    } else if (message.type === "GET_MYPOST_TOKEN") {
+        const token = localStorage.getItem('accessToken');
+        sendResponse({ token: token || null });
+        return true; // Giữ kênh mở cho phản hồi bất đồng bộ
+    } else if (message.type === "ADD_BATCH_ROWS") {
+        // Handle adding batch rows
+        (async () => {
+            try {
+                const result = await handleAddBatchRows(message.payload);
+                sendResponse(result);
+            } catch (error: any) {
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true; // Keep channel open for async response
+    }
 })
 
 
