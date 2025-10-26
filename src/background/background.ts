@@ -3069,7 +3069,7 @@ async function handleAddPNS(dayLast: any) {
 async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
   console.log(id)
 
-  var res = await fetch("https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
+  var res = await fetch("https://api-pre-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
     "headers": {
       "accept": "application/json, text/plain, */*",
       "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
