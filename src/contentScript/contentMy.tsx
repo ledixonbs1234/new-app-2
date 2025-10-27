@@ -581,23 +581,584 @@ async function initialize(): Promise<void> {
 function runOrderLogic() {
     console.log("Order Logic is running. Waiting for order detail modal...");
 
-    // Hàm để xử lý khi modal xuất hiện
-    const processModal = (modalElement: Element) => {
-       
-        // 1. Kiểm tra xem nút của chúng ta đã được thêm vào chưa
-        const existingButton = modalElement.querySelector('#custom-copy-info-btn');
-        if (existingButton) {
-            return; // Đã có nút rồi, không làm gì cả
+    // Hàm xử lý ẩn/hiện cột và thay đổi nội dung "Thông Tin Thêm"
+    const processOrderTable = () => {
+        const tableContent = document.querySelector('.ant-table-content');
+        if (!tableContent) {
+            console.log("Table content not found yet...");
+            return;
         }
 
-        // 2. Tìm nút "Đánh giá" để làm điểm neo
+        // Tìm thead để xử lý header
+        const thead = tableContent.querySelector('thead');
+        if (!thead) {
+            console.log("Table thead not found yet...");
+            return;
+        }
+
+        // Tìm các header "Mã đơn hàng" và "Lô vận đơn"
+        const headers = thead.querySelectorAll('th');
+        let maDonHangIndex = -1;
+        let loVanDonIndex = -1;
+        let maVanDonIndex = -1;
+
+        headers.forEach((th, index) => {
+            const text = th.textContent?.trim();
+            if (text === 'Mã đơn hàng') {
+                maDonHangIndex = index;
+                // Đổi tên header thành "Thông Tin Thêm"
+                th.textContent = 'Thông Tin Thêm';
+                // Đặt độ rộng cố định cho cột
+                th.style.width = '200px';
+                th.style.minWidth = '200px';
+                th.style.maxWidth = '200px';
+            }
+            if (text === 'Lô vận đơn') loVanDonIndex = index;
+            if (text === 'Mã vận đơn') maVanDonIndex = index;
+            // Giữ nguyên nếu đã đổi tên rồi
+            if (text === 'Thông Tin Thêm') {
+                maDonHangIndex = index;
+                // Đảm bảo độ rộng được set
+                th.style.width = '200px';
+                th.style.minWidth = '200px';
+                th.style.maxWidth = '200px';
+            }
+        });
+
+        if (maDonHangIndex === -1 || loVanDonIndex === -1 || maVanDonIndex === -1) {
+            console.log("Required columns not found yet...");
+            return;
+        }
+
+        // Ẩn cột "Lô vận đơn"
+        headers[loVanDonIndex].style.display = 'none';
+
+        // Xử lý tbody
+        const tbody = tableContent.querySelector('tbody.ant-table-tbody');
+        if (!tbody) {
+            console.log("Table tbody not found yet...");
+            return;
+        }
+
+        const rows = tbody.querySelectorAll('tr.ant-table-row');
+        if (rows.length === 0) {
+            console.log("No rows found yet...");
+            return;
+        }
+
+        console.log(`Processing ${rows.length} rows...`);
+        
+        rows.forEach((row) => {
+            const cells = row.querySelectorAll('td');
+            
+            // Lấy mã vận đơn làm key (lấy từ thẻ <a> bên trong cell)
+            const maVanDonCell = cells[maVanDonIndex];
+            const maVanDonLink = maVanDonCell?.querySelector('a');
+            const maVanDon = maVanDonLink?.textContent?.trim() || '';
+
+            if (!maVanDon) {
+                console.log("Mã vận đơn not found in row");
+                return;
+            }
+
+            // Ẩn cột "Lô vận đơn"
+            if (cells[loVanDonIndex]) cells[loVanDonIndex].style.display = 'none';
+
+            // Xử lý cell "Mã đơn hàng" -> chuyển thành "Thông Tin Thêm"
+            const infoCell = cells[maDonHangIndex];
+            if (!infoCell) return;
+
+            // Đặt độ rộng cho cell
+            infoCell.style.width = '200px';
+            infoCell.style.minWidth = '200px';
+            infoCell.style.maxWidth = '200px';
+            infoCell.style.padding = '8px';
+
+            // Kiểm tra đã xử lý chưa
+            if (infoCell.querySelector('.info-edit-container')) {
+                console.log(`Row with ${maVanDon} already processed`);
+                return;
+            }
+
+            console.log(`Processing row with mã vận đơn: ${maVanDon}`);
+
+            // Xóa nội dung cũ
+            infoCell.innerHTML = '';
+
+            // Container cho nội dung và nút - LAYOUT DỌC
+            const container = document.createElement('div');
+            container.className = 'info-edit-container';
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column'; // Dọc thay vì ngang
+            container.style.gap = '6px';
+            container.style.width = '100%';
+
+            // Text hiển thị log (ở trên)
+            const textSpan = document.createElement('div');
+            textSpan.className = 'info-text';
+            textSpan.style.fontSize = '12px';
+            textSpan.style.wordBreak = 'break-word';
+            textSpan.style.lineHeight = '1.4';
+            textSpan.style.whiteSpace = 'pre-wrap';
+            textSpan.style.maxHeight = '150px';
+            textSpan.style.overflowY = 'auto';
+            textSpan.style.padding = '6px';
+            textSpan.style.border = '1px solid #d9d9d9';
+            textSpan.style.borderRadius = '4px';
+            textSpan.style.backgroundColor = '#fafafa';
+
+            // Input section (ở dưới)
+            const inputSection = document.createElement('div');
+            inputSection.style.display = 'flex';
+            inputSection.style.flexDirection = 'column';
+            inputSection.style.gap = '4px';
+
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.className = 'ant-input';
+            textInput.placeholder = 'Nhập nội dung cập nhật...';
+            textInput.style.fontSize = '12px';
+
+            // Nút cập nhật
+            const updateButton = document.createElement('button');
+            updateButton.className = 'ant-btn ant-btn-sm ant-btn-primary';
+            updateButton.textContent = 'Cập nhật';
+            updateButton.style.width = '100%';
+            updateButton.style.fontSize = '12px';
+            updateButton.style.padding = '4px 8px';
+            updateButton.style.height = 'auto';
+
+            // Load dữ liệu từ Chrome Storage
+            chrome.storage.local.get([`info_${maVanDon}`], (result) => {
+                const savedInfo = result[`info_${maVanDon}`] || '';
+                textSpan.textContent = savedInfo || '(Chưa có thông tin)';
+            });
+
+            // Xử lý sự kiện click nút cập nhật
+            updateButton.onclick = () => {
+                const inputValue = textInput.value.trim();
+                if (!inputValue) {
+                    alert('Vui lòng nhập nội dung!');
+                    return;
+                }
+
+                // Tạo timestamp
+                const now = new Date();
+                const day = String(now.getDate()).padStart(2, '0');
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const year = now.getFullYear();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
+
+                // Tạo log entry mới
+                const newLogEntry = `${timestamp} ${inputValue}`;
+
+                // Lấy log cũ và thêm log mới
+                chrome.storage.local.get([`info_${maVanDon}`], (result) => {
+                    const oldLog = result[`info_${maVanDon}`] || '';
+                    const updatedLog = oldLog ? `${oldLog}\n${newLogEntry}` : newLogEntry;
+
+                    // Cập nhật UI
+                    textSpan.textContent = updatedLog;
+
+                    // Lưu vào Chrome Storage
+                    chrome.storage.local.set({ [`info_${maVanDon}`]: updatedLog }, () => {
+                        console.log(`Đã cập nhật thông tin cho ${maVanDon}:`, updatedLog);
+                        // Clear input
+                        textInput.value = '';
+                        // Scroll to bottom
+                        textSpan.scrollTop = textSpan.scrollHeight;
+                    });
+                });
+            };
+
+            // Xử lý Enter trong input
+            textInput.onkeydown = (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    updateButton.click();
+                }
+            };
+
+            inputSection.appendChild(textInput);
+            inputSection.appendChild(updateButton);
+
+            container.appendChild(textSpan);
+            container.appendChild(inputSection);
+            infoCell.appendChild(container);
+        });
+        
+        console.log("Table processing completed!");
+    };
+
+    // CHỜ WEB LOADING XONG
+    const initTableProcessing = () => {
+        console.log("Waiting for page to fully load...");
+        
+        // Đợi 3 giây sau khi trang load
+        setTimeout(() => {
+            console.log("Starting table processing after delay...");
+            processOrderTable();
+            
+            // Sau đó mới setup observer
+            setupObserver();
+        }, 3000);
+    };
+
+    // Setup observer
+    const setupObserver = () => {
+        console.log("Setting up mutation observer...");
+        
+        // Observer cho table - CHỈ quan sát thay đổi từ React, KHÔNG quan sát thay đổi của chúng ta
+        const tableObserver = createAndTrackObserver((mutations) => {
+            if (!window.location.href.includes('order-manager')) return;
+            
+            // Lọc bỏ những thay đổi do extension gây ra
+            const hasRealTableChange = mutations.some(mutation => {
+                const target = mutation.target as HTMLElement;
+                
+                // Bỏ qua nếu thay đổi xảy ra bên trong container của chúng ta
+                if (target.closest?.('.info-edit-container')) {
+                    return false;
+                }
+                
+                // Bỏ qua nếu là thay đổi text trong cell đã xử lý
+                if (target.classList?.contains('info-text') || 
+                    target.classList?.contains('info-input')) {
+                    return false;
+                }
+                
+                // Chỉ quan tâm đến thay đổi trong tbody NHƯNG không phải do chúng ta
+                if (mutation.type === 'childList') {
+                    // Kiểm tra xem có node mới được thêm vào tbody không
+                    const addedNodes = Array.from(mutation.addedNodes);
+                    const hasNewRows = addedNodes.some(node => {
+                        return (node as HTMLElement).classList?.contains('ant-table-row');
+                    });
+                    
+                    if (hasNewRows) {
+                        console.log("New rows detected from React");
+                        return true;
+                    }
+                }
+                
+                return false;
+            });
+            
+            if (hasRealTableChange) {
+                // Debounce để tránh chạy quá nhiều lần
+                clearTimeout((window as any).__tableProcessTimeout);
+                (window as any).__tableProcessTimeout = setTimeout(() => {
+                    console.log("Real table change detected, re-processing...");
+                    processOrderTable();
+                }, 500);
+            }
+        });
+
+        // CHỈ quan sát tbody, không quan sát toàn bộ body
+        const tbody = document.querySelector('.ant-table-tbody');
+        if (tbody) {
+            tableObserver.observe(tbody, { 
+                childList: true,
+                subtree: false // Không quan sát subtree để tránh bắt thay đổi bên trong cell
+            });
+            console.log("Observer attached to tbody");
+        } else {
+            console.log("Tbody not found, observer not attached");
+        }
+    };
+
+    // Bắt đầu quá trình
+    initTableProcessing();
+
+    // Hàm thêm "Thông tin thêm" vào dialog chi tiết
+    const addExtraInfoToDialog = (modalElement: Element) => {
+        const modalBody = modalElement.querySelector('.ant-modal-body');
+        if (!modalBody) return;
+
+        // Hàm helper để lấy text từ label
+        const getTextFromLabel = (container: Element, labelText: string): string => {
+            const allThs = container.querySelectorAll('th');
+            for (const th of allThs) {
+                if (th.textContent?.trim().includes(labelText)) {
+                    return th.nextElementSibling?.textContent?.trim() ?? '';
+                }
+            }
+            return '';
+        };
+
+        // Hàm để cập nhật thông tin dựa vào mã vận đơn hiện tại
+        const updateExtraInfo = () => {
+            // Lấy modal body mới nhất
+            const currentModalBody = modalElement.querySelector('.ant-modal-body');
+            if (!currentModalBody) return null;
+            
+            // Lấy mã vận đơn
+            const orderCard = Array.from(currentModalBody.querySelectorAll('.ant-card-head-title'))
+                .find(el => el.textContent?.includes('Đơn hàng'))
+                ?.closest('.ant-card');
+            
+            if (!orderCard) {
+                console.log('Không tìm thấy card Đơn hàng');
+                return null;
+            }
+
+            const maVanDon = getTextFromLabel(orderCard, 'Mã vận đơn');
+            if (!maVanDon) {
+                console.log('Không tìm thấy mã vận đơn');
+                return null;
+            }
+
+            return maVanDon;
+        };
+
+        // Tìm table custom-table-orderhdr-sender
+        const orderTable = modalBody.querySelector('#custom-table-orderhdr-sender') as HTMLTableElement;
+        
+        if (!orderTable) {
+            console.log('Không tìm thấy table custom-table-orderhdr-sender');
+            return;
+        }
+
+        // Xóa row cũ nếu có (để cập nhật lại thông tin mới)
+        const existingRow = orderTable.querySelector('#custom-extra-info-row');
+        if (existingRow) {
+            existingRow.remove();
+        }
+
+        // Tạo row mới để chứa "Thông tin thêm"
+        const newRow = document.createElement('tr');
+        newRow.id = 'custom-extra-info-row';
+
+        // Tạo cell với colspan để chiếm toàn bộ width
+        const cell = document.createElement('td');
+        cell.colSpan = 3; // Để chiếm hết các cột
+        cell.style.padding = '12px';
+        cell.style.borderTop = '1px solid #f0f0f0';
+
+        // Tạo container cho "Thông tin thêm"
+        const container = document.createElement('div');
+        container.id = 'custom-extra-info-container';
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '8px';
+
+        // Label "Thông tin thêm"
+        const label = document.createElement('div');
+        label.style.fontWeight = '600';
+        label.style.fontSize = '14px';
+        label.style.color = '#262626';
+        label.textContent = 'Thông tin thêm:';
+
+        // Text hiển thị log (ở trên)
+        const textSpan = document.createElement('div');
+        textSpan.className = 'info-text-dialog';
+        textSpan.style.fontSize = '13px';
+        textSpan.style.wordBreak = 'break-word';
+        textSpan.style.lineHeight = '1.5';
+        textSpan.style.color = '#595959';
+        textSpan.style.whiteSpace = 'pre-wrap';
+        textSpan.style.maxHeight = '200px';
+        textSpan.style.overflowY = 'auto';
+        textSpan.style.padding = '8px';
+        textSpan.style.border = '1px solid #d9d9d9';
+        textSpan.style.borderRadius = '4px';
+        textSpan.style.backgroundColor = '#fafafa';
+        textSpan.style.marginBottom = '8px';
+
+        // Input section (ở dưới)
+        const inputSection = document.createElement('div');
+        inputSection.style.display = 'flex';
+        inputSection.style.flexDirection = 'column';
+        inputSection.style.gap = '6px';
+
+        const textInput = document.createElement('input');
+        textInput.type = 'text';
+        textInput.className = 'ant-input';
+        textInput.placeholder = 'Nhập nội dung cập nhật...';
+        textInput.style.fontSize = '13px';
+
+        // Nút cập nhật
+        const updateButton = document.createElement('button');
+        updateButton.className = 'ant-btn ant-btn-sm ant-btn-primary';
+        updateButton.textContent = 'Cập nhật';
+        updateButton.style.width = '100%';
+        updateButton.style.fontSize = '13px';
+        updateButton.style.padding = '6px 12px';
+        updateButton.style.height = 'auto';
+
+        // Biến để lưu mã vận đơn hiện tại
+        let currentMaVanDon = '';
+
+        // Hàm load dữ liệu từ Chrome Storage
+        const loadExtraInfo = (maVanDon: string) => {
+            if (!maVanDon) return;
+            
+            currentMaVanDon = maVanDon;
+            chrome.storage.local.get([`info_${maVanDon}`], (result) => {
+                const savedInfo = result[`info_${maVanDon}`] || '';
+                textSpan.textContent = savedInfo || '(Chưa có thông tin)';
+                // Clear input
+                textInput.value = '';
+                // Scroll to bottom
+                setTimeout(() => {
+                    textSpan.scrollTop = textSpan.scrollHeight;
+                }, 100);
+            });
+            console.log(`Đã load thông tin cho mã vận đơn: ${maVanDon}`);
+        };
+
+        // Hàm check và update mã vận đơn với polling
+        let checkCount = 0;
+        const maxChecks = 10; // Check tối đa 10 lần
+        
+        const checkAndUpdateMaVanDon = () => {
+            checkCount++;
+            console.log(`[Polling] Lần ${checkCount}: Đang check mã vận đơn...`);
+            
+            const newMaVanDon = updateExtraInfo();
+            
+            if (newMaVanDon) {
+                if (newMaVanDon !== currentMaVanDon) {
+                    console.log(`[Polling] Tìm thấy mã vận đơn mới: "${newMaVanDon}" (cũ: "${currentMaVanDon}")`);
+                    loadExtraInfo(newMaVanDon);
+                    return true; // Đã tìm thấy, dừng check
+                } else {
+                    console.log(`[Polling] Mã vận đơn không đổi: "${newMaVanDon}"`);
+                    return true; // Đã có mã vận đơn, dừng check
+                }
+            }
+            
+            if (checkCount < maxChecks) {
+                // Tiếp tục check sau 300ms nếu chưa tìm thấy
+                console.log(`[Polling] Chưa tìm thấy, sẽ check lại sau 300ms...`);
+                setTimeout(checkAndUpdateMaVanDon, 300);
+            } else {
+                console.log(`[Polling] Đã check ${maxChecks} lần, dừng polling.`);
+            }
+            
+            return false;
+        };
+
+        // Bắt đầu check
+        console.log('[Polling] Bắt đầu polling mã vận đơn...');
+        checkAndUpdateMaVanDon();
+
+        // Xử lý sự kiện click nút cập nhật
+        updateButton.onclick = () => {
+            const inputValue = textInput.value.trim();
+            if (!inputValue) {
+                alert('Vui lòng nhập nội dung!');
+                return;
+            }
+
+            if (!currentMaVanDon) {
+                alert('Chưa xác định được mã vận đơn!');
+                return;
+            }
+
+            // Tạo timestamp
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = now.getFullYear();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
+
+            // Tạo log entry mới
+            const newLogEntry = `${timestamp} ${inputValue}`;
+
+            // Lấy log cũ và thêm log mới
+            chrome.storage.local.get([`info_${currentMaVanDon}`], (result) => {
+                const oldLog = result[`info_${currentMaVanDon}`] || '';
+                const updatedLog = oldLog ? `${oldLog}\n${newLogEntry}` : newLogEntry;
+
+                // Cập nhật UI
+                textSpan.textContent = updatedLog;
+
+                // Lưu vào Chrome Storage
+                chrome.storage.local.set({ [`info_${currentMaVanDon}`]: updatedLog }, () => {
+                    console.log(`Đã cập nhật thông tin cho ${currentMaVanDon} trong dialog:`, updatedLog);
+                    
+                    // Clear input
+                    textInput.value = '';
+                    
+                    // Scroll to bottom
+                    textSpan.scrollTop = textSpan.scrollHeight;
+                    
+                    // Cập nhật lại cột "Thông Tin Thêm" trong bảng nếu có
+                    const tableRows = document.querySelectorAll('tr.ant-table-row');
+                    tableRows.forEach(row => {
+                        const maVanDonLink = row.querySelector('a');
+                        if (maVanDonLink?.textContent?.trim() === currentMaVanDon) {
+                            const infoTextSpan = row.querySelector('.info-text');
+                            if (infoTextSpan) {
+                                infoTextSpan.textContent = updatedLog;
+                                // Scroll to bottom in table cell too
+                                (infoTextSpan as HTMLElement).scrollTop = (infoTextSpan as HTMLElement).scrollHeight;
+                            }
+                        }
+                    });
+                });
+            });
+        };
+
+        // Xử lý Enter trong input
+        textInput.onkeydown = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                updateButton.click();
+            }
+        };
+
+        inputSection.appendChild(textInput);
+        inputSection.appendChild(updateButton);
+
+        container.appendChild(label);
+        container.appendChild(textSpan);
+        container.appendChild(inputSection);
+        
+        // Thêm container vào cell
+        cell.appendChild(container);
+        
+        // Thêm cell vào row
+        newRow.appendChild(cell);
+        
+        // Thêm row vào cuối table (tbody nếu có, hoặc trực tiếp vào table)
+        const tbody = orderTable.querySelector('tbody');
+        if (tbody) {
+            tbody.appendChild(newRow);
+        } else {
+            orderTable.appendChild(newRow);
+        }
+
+        console.log(`Đã thêm "Thông tin thêm" vào cuối table #custom-table-orderhdr-sender`);
+    };
+
+    // Hàm để xử lý khi modal xuất hiện
+    const processModal = (modalElement: Element) => {
+        // 1. Tìm nút "Đánh giá" để làm điểm neo
         const reviewButton = modalElement.querySelector('button[title="Đánh giá"]');
         if (!reviewButton) {
             // Đôi khi nút chưa render kịp, chúng ta sẽ chờ ở lần kiểm tra sau
             return;
         }
 
-        // 3. Tạo nút mới
+        // 2. Luôn thêm "Thông tin thêm" vào dialog (hàm sẽ tự xóa cũ nếu có)
+        addExtraInfoToDialog(modalElement);
+
+        // 3. Kiểm tra xem nút của chúng ta đã được thêm vào chưa
+        const existingButton = modalElement.querySelector('#custom-copy-info-btn');
+        if (existingButton) {
+            console.log('Các nút đã tồn tại, chỉ cập nhật thông tin thêm');
+            return; // Đã có nút rồi, không cần thêm nút copy/khiếu nại nữa
+        }
+
+        console.log('Đang thêm các nút Copy/Khiếu nại/Hỗ trợ...');
+        
+        // 4. Tạo nút mới
         const copyButton = document.createElement('button');
         copyButton.id = 'custom-copy-info-btn';
         copyButton.textContent = 'Copy Thông tin';
@@ -669,9 +1230,15 @@ function runOrderLogic() {
                 alert('Không thể tự động copy. Vui lòng thử lại.');
             });
         };
- //chờ 1s để chạy hàm dưới
-        var fullSDTView = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(2) > td > span > span") as HTMLElement;
-        fullSDTView.click();
+        
+        // Chờ 1s để chạy hàm dưới (click để expand số điện thoại)
+        const fullSDTView = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(2) > td > span > span") as HTMLElement;
+        if (fullSDTView) {
+            fullSDTView.click();
+        } else {
+            console.warn('Không tìm thấy element fullSDTView để click');
+        }
+        
         // 7. Chèn nút mới vào sau nút "Đánh giá"
         reviewButton.insertAdjacentElement('afterend', copyButton);
         console.log('Đã thêm nút "Copy Thông tin".');
@@ -832,12 +1399,73 @@ function runOrderLogic() {
 
 
 
-    const observer = createAndTrackObserver(() => {
-        const modalElement = document.querySelector('.ant-modal-wrap');
-        if (modalElement) {
+    // Đơn giản hóa: Check modal định kỳ thay vì dùng observer phức tạp
+    let lastProcessedMaVanDon = '';
+    // @ts-ignore - checkInterval is used to store the interval reference
+    let checkInterval: number | null = null;
+
+    const checkAndProcessModal = () => {
+        const modalElement = document.querySelector('div[role="dialog"]') as HTMLElement;
+        
+        // Nếu không có modal hoặc modal bị ẩn
+        if (!modalElement || modalElement.style.display === 'none' || !modalElement.offsetParent) {
+            // Modal đã đóng, reset
+            if (lastProcessedMaVanDon) {
+                console.log('[Modal Check] Modal đã đóng, reset tracking');
+                lastProcessedMaVanDon = '';
+            }
+            return;
+        }
+
+        // Modal đang mở, check mã vận đơn
+        const modalBody = modalElement.querySelector('.ant-modal-body');
+        if (!modalBody) return;
+
+        const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
+            .find(el => el.textContent?.includes('Đơn hàng'))
+            ?.closest('.ant-card');
+        
+        if (!orderCard) return;
+
+        // Lấy mã vận đơn
+        const allThs = orderCard.querySelectorAll('th');
+        let currentMaVanDon = '';
+        for (const th of allThs) {
+            if (th.textContent?.trim().includes('Mã vận đơn')) {
+                currentMaVanDon = th.nextElementSibling?.textContent?.trim() ?? '';
+                break;
+            }
+        }
+
+        if (!currentMaVanDon) return;
+
+        // Nếu mã vận đơn thay đổi
+        if (currentMaVanDon !== lastProcessedMaVanDon) {
+            console.log(`[Modal Check] Phát hiện mã vận đơn mới: "${currentMaVanDon}" (cũ: "${lastProcessedMaVanDon}")`);
+            lastProcessedMaVanDon = currentMaVanDon;
+            
+            // Xóa container "Thông tin thêm" cũ
+            const oldContainer = modalElement.querySelector('#custom-extra-info-container');
+            if (oldContainer) {
+                console.log('[Modal Check] Xóa container thông tin thêm cũ');
+                oldContainer.remove();
+            }
+            
+            // Xóa các nút cũ để tạo lại
+            const oldCopyBtn = modalElement.querySelector('#custom-copy-info-btn');
+            const oldComplaintBtn = modalElement.querySelector('#custom-complaint-btn');
+            const oldSupportBtn = modalElement.querySelector('#custom-support-btn');
+            
+            if (oldCopyBtn) oldCopyBtn.remove();
+            if (oldComplaintBtn) oldComplaintBtn.remove();
+            if (oldSupportBtn) oldSupportBtn.remove();
+            
+            // Xử lý lại modal
             processModal(modalElement);
         }
-    });
+    };
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Check modal mỗi 500ms
+    checkInterval = window.setInterval(checkAndProcessModal, 500);
+    console.log('[Modal Check] Đã bắt đầu check modal định kỳ mỗi 500ms');
 }
