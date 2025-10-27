@@ -8,10 +8,11 @@ import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "./store";
 import TextArea from "antd/es/input/TextArea";
 import BatchAddTab from "./components/BatchAddTab";
+import GoogleFormTab from "./components/GoogleFormTab";
 
 export default function Popup() {
   // Lấy dữ liệu từ Redux store
-  const { orderData, currentIndex } = useSelector((state: RootState) => state.popup);
+  // const { orderData, currentIndex } = useSelector((state: RootState) => state.popup);
   const dispatch = useDispatch();
   const [keyMessageInput, setKeyMessageInput] = useState<string>("");
   const [accountPortal, setAccountPortal] = useState<string>("");
@@ -184,34 +185,8 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
   const items: TabsProps['items'] = [
     {
       key: '1',
-      label: `Danh sách (${currentIndex}/${orderData.length})`,
-      children: (
-        <Card title="Danh sách đơn hàng" extra={<Button onClick={handleClearData} danger>Xóa dữ liệu</Button>}>
-        <text className="info-text " style={{ color: "blue", fontWeight: "bold" }} >Tổng {Array.from(demTongHopMau(orderData, baseColors)).map(([color, count]) => `${count} ${color}`).join(', ')}</text>
-          <List
-            style={{ maxHeight: 400, overflowY: 'auto' }}
-            dataSource={orderData}
-            renderItem={(item: Order, index: number) => {
-              let className = 'order-item';
-              if (index < currentIndex) className += ' completed';
-              if (index === currentIndex) className += ' current';
-              return (
-                <List.Item className={className}>
-                  <List.Item.Meta
-                    avatar={
-                      <span className="status-icon">
-                        {index < currentIndex ? '✓' : index === currentIndex ? '→' : '•'}
-                      </span>
-                    }
-                    title={`${index + 1}. ${item.NGUOINHAN} - ${item.SDT} - ${item.MAUSAC}`}
-                    description={item.DIACHI + ' ||| ' + item.GOC}
-                  />
-                </List.Item>
-              );
-            }}
-          />
-        </Card>
-      ),
+      label: 'Google Form',
+      children: <GoogleFormTab />,
     },
     {
       key: '2',

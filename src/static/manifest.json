@@ -87,6 +87,15 @@
         },
         {
             "matches": [
+                "https://docs.google.com/forms/*"
+            ],
+            "js": [
+                "contentGoogleForm.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
                 "https://portalkhl.vnpost.vn/*"
             ],
             "js": [
