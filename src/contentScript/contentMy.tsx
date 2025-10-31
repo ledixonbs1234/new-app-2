@@ -235,6 +235,19 @@ chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
             updateUI();
         }
         return true;
+    } else if (message.type === "UPDATE_ORDER_INFO") {
+        // ===== THÊM MỚI: Xử lý update từ Firebase =====
+        const { maVanDon, fullLog } = message;
+        console.log(`[Content] Received UPDATE_ORDER_INFO for ${maVanDon}`);
+        
+        // Cập nhật vào bảng danh sách
+        updateOrderInfoInTable(maVanDon, fullLog);
+        
+        // Cập nhật vào modal nếu đang mở
+        updateOrderInfoInModal(maVanDon, fullLog);
+        
+        sendResponse({ status: 'updated' });
+        return true;
     } else if (message.type === "GET_MYPOST_TOKEN") {
         const token = localStorage.getItem('accessToken');
         sendResponse({ token: token || null });
@@ -252,6 +265,74 @@ chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
         return true; // Keep channel open for async response
     }
 })
+
+// ===== HÀM MỚI: Cập nhật thông tin trong bảng =====
+function updateOrderInfoInTable(maVanDon: string, fullLog: string) {
+    const tableRows = document.querySelectorAll('tr.ant-table-row');
+    let updated = false;
+    
+    tableRows.forEach(row => {
+        const maVanDonLink = row.querySelector('a');
+        if (maVanDonLink?.textContent?.trim() === maVanDon) {
+            const infoTextSpan = row.querySelector('.info-text') as HTMLElement;
+            const deleteBtn = row.querySelector('.info-delete-btn') as HTMLElement;
+            
+            if (infoTextSpan) {
+                // Clear và render với màu sắc
+                infoTextSpan.innerHTML = '';
+                const formattedContent = formatLogWithColors(fullLog);
+                infoTextSpan.appendChild(formattedContent);
+                
+                infoTextSpan.scrollTop = infoTextSpan.scrollHeight;
+                
+                // Cập nhật hiển thị nút xóa
+                if (deleteBtn) {
+                    deleteBtn.style.display = (fullLog && fullLog.trim() !== '') ? 'block' : 'none';
+                }
+                
+                updated = true;
+                console.log(`[Table] Updated info for ${maVanDon}`);
+            }
+        }
+    });
+    
+    if (!updated) {
+        console.log(`[Table] Could not find row for ${maVanDon}`);
+    }
+}
+
+// ===== HÀM MỚI: Cập nhật thông tin trong modal =====
+function updateOrderInfoInModal(maVanDon: string, fullLog: string) {
+    const modalBody = document.querySelector('.ant-modal-body');
+    if (!modalBody) return;
+    
+    const textSpan = modalBody.querySelector('.info-text-dialog') as HTMLElement;
+    if (!textSpan) return;
+    
+    // Kiểm tra xem modal đang hiển thị mã vận đơn này không
+    const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
+        .find(el => el.textContent?.includes('Đơn hàng'))
+        ?.closest('.ant-card');
+    
+    if (!orderCard) return;
+    
+    const allThs = orderCard.querySelectorAll('th');
+    for (const th of allThs) {
+        if (th.textContent?.trim().includes('Mã vận đơn')) {
+            const currentMaVanDon = th.nextElementSibling?.textContent?.trim();
+            if (currentMaVanDon === maVanDon) {
+                // Clear và render với màu sắc
+                textSpan.innerHTML = '';
+                const formattedContent = formatLogWithColors(fullLog);
+                textSpan.appendChild(formattedContent);
+                
+                textSpan.scrollTop = textSpan.scrollHeight;
+                console.log(`[Modal] Updated info for ${maVanDon}`);
+            }
+            break;
+        }
+    }
+}
 
 
 /**
@@ -437,6 +518,68 @@ function waitForElement(selector: string): Promise<HTMLElement> {
     });
 }
 console.log("My Scriptsss");
+
+/**
+ * Format log với màu sắc cho thời gian và nội dung
+ */
+function formatLogWithColors(logText: string): HTMLElement {
+    const container = document.createElement('div');
+    
+    if (!logText || logText.trim() === '') {
+        const emptySpan = document.createElement('span');
+        emptySpan.textContent = '(Chưa có thông tin)';
+        emptySpan.style.color = '#999';
+        emptySpan.style.fontStyle = 'italic';
+        container.appendChild(emptySpan);
+        return container;
+    }
+    
+    // Tách các dòng
+    const lines = logText.split('\n');
+    
+    lines.forEach((line, index) => {
+        if (line.trim() === '') return;
+        
+        // Regex để tách timestamp (DD-MM-YYYY HH:MM) và nội dung
+        // Format: "31-10-2025 14:30 Nội dung text"
+        const timestampRegex = /^(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2})\s+(.*)$/;
+        const match = line.match(timestampRegex);
+        
+        const lineDiv = document.createElement('div');
+        lineDiv.style.marginBottom = index < lines.length - 1 ? '4px' : '0';
+        
+        if (match) {
+            // Có timestamp
+            const timestamp = match[1];
+            const content = match[2];
+            
+            // Span cho timestamp
+            const timeSpan = document.createElement('span');
+            timeSpan.textContent = `[${timestamp}]`;
+            timeSpan.style.color = '#1890ff';
+            timeSpan.style.fontWeight = '600';
+            timeSpan.style.marginRight = '8px';
+            
+            // Span cho nội dung
+            const contentSpan = document.createElement('span');
+            contentSpan.textContent = content;
+            contentSpan.style.color = '#262626';
+            
+            lineDiv.appendChild(timeSpan);
+            lineDiv.appendChild(contentSpan);
+        } else {
+            // Không có timestamp, hiển thị nguyên dòng
+            const plainSpan = document.createElement('span');
+            plainSpan.textContent = line;
+            plainSpan.style.color = '#595959';
+            lineDiv.appendChild(plainSpan);
+        }
+        
+        container.appendChild(lineDiv);
+    });
+    
+    return container;
+}
 
 /**
  * Theo dõi một phần tử trong DOM và thực thi một callback sau một khoảng trễ
@@ -696,16 +839,18 @@ function runOrderLogic() {
             // Text hiển thị log (ở trên)
             const textSpan = document.createElement('div');
             textSpan.className = 'info-text';
-            textSpan.style.fontSize = '12px';
+            textSpan.style.fontSize = '13px';
             textSpan.style.wordBreak = 'break-word';
-            textSpan.style.lineHeight = '1.4';
-            textSpan.style.whiteSpace = 'pre-wrap';
-            textSpan.style.maxHeight = '150px';
+            textSpan.style.lineHeight = '1.6';
+            textSpan.style.whiteSpace = 'normal';
+            textSpan.style.maxHeight = '180px';
             textSpan.style.overflowY = 'auto';
-            textSpan.style.padding = '6px';
-            textSpan.style.border = '1px solid #d9d9d9';
-            textSpan.style.borderRadius = '4px';
-            textSpan.style.backgroundColor = '#fafafa';
+            textSpan.style.padding = '10px';
+            textSpan.style.border = '1px solid #1890ff';
+            textSpan.style.borderRadius = '6px';
+            textSpan.style.backgroundColor = '#f0f5ff';
+            textSpan.style.color = '#262626';
+            textSpan.style.fontFamily = 'monospace';
 
             // Input section (ở dưới)
             const inputSection = document.createElement('div');
@@ -717,21 +862,60 @@ function runOrderLogic() {
             textInput.type = 'text';
             textInput.className = 'ant-input';
             textInput.placeholder = 'Nhập nội dung cập nhật...';
-            textInput.style.fontSize = '12px';
+            textInput.style.fontSize = '13px';
+            textInput.style.padding = '6px 10px';
+            textInput.style.borderColor = '#1890ff';
 
-            // Nút cập nhật
+            // Container cho các nút (Update và Delete)
+            const buttonContainer = document.createElement('div');
+            buttonContainer.style.display = 'flex';
+            buttonContainer.style.gap = '4px';
+            buttonContainer.style.width = '100%';
+
+            // Nút cập nhật (chiếm 3/4)
             const updateButton = document.createElement('button');
             updateButton.className = 'ant-btn ant-btn-sm ant-btn-primary';
             updateButton.textContent = 'Cập nhật';
-            updateButton.style.width = '100%';
-            updateButton.style.fontSize = '12px';
-            updateButton.style.padding = '4px 8px';
+            updateButton.style.flex = '3';
+            updateButton.style.fontSize = '13px';
+            updateButton.style.padding = '6px 12px';
             updateButton.style.height = 'auto';
+            updateButton.style.fontWeight = '500';
 
-            // Load dữ liệu từ Chrome Storage
-            chrome.storage.local.get([`info_${maVanDon}`], (result) => {
-                const savedInfo = result[`info_${maVanDon}`] || '';
-                textSpan.textContent = savedInfo || '(Chưa có thông tin)';
+            // Nút xóa (chiếm 1/4) - Ẩn mặc định
+            const deleteButton = document.createElement('button');
+            deleteButton.className = 'ant-btn ant-btn-sm ant-btn-danger info-delete-btn';
+            deleteButton.textContent = 'Xóa';
+            deleteButton.style.flex = '1';
+            deleteButton.style.fontSize = '13px';
+            deleteButton.style.padding = '6px 12px';
+            deleteButton.style.height = 'auto';
+            deleteButton.style.display = 'none'; // Ẩn mặc định
+            deleteButton.style.fontWeight = '500';
+
+            // Load dữ liệu từ Firebase qua background
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY",
+                type: "GET_EXTRA_INFO",
+                payload: { maVanDon: maVanDon }
+            }, (response) => {
+                if (response && response.status === 'success') {
+                    const savedInfo = response.data || '';
+                    
+                    // Clear và render với màu sắc
+                    textSpan.innerHTML = '';
+                    const formattedContent = formatLogWithColors(savedInfo);
+                    textSpan.appendChild(formattedContent);
+                    
+                    // Hiện nút xóa nếu có dữ liệu
+                    if (savedInfo && savedInfo.trim() !== '') {
+                        deleteButton.style.display = 'block';
+                    }
+                    
+                    setTimeout(() => {
+                        textSpan.scrollTop = textSpan.scrollHeight;
+                    }, 100);
+                }
             });
 
             // Xử lý sự kiện click nút cập nhật
@@ -742,34 +926,81 @@ function runOrderLogic() {
                     return;
                 }
 
-                // Tạo timestamp
-                const now = new Date();
-                const day = String(now.getDate()).padStart(2, '0');
-                const month = String(now.getMonth() + 1).padStart(2, '0');
-                const year = now.getFullYear();
-                const hours = String(now.getHours()).padStart(2, '0');
-                const minutes = String(now.getMinutes()).padStart(2, '0');
-                const timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
-
-                // Tạo log entry mới
-                const newLogEntry = `${timestamp} ${inputValue}`;
-
-                // Lấy log cũ và thêm log mới
-                chrome.storage.local.get([`info_${maVanDon}`], (result) => {
-                    const oldLog = result[`info_${maVanDon}`] || '';
-                    const updatedLog = oldLog ? `${oldLog}\n${newLogEntry}` : newLogEntry;
-
-                    // Cập nhật UI
-                    textSpan.textContent = updatedLog;
-
-                    // Lưu vào Chrome Storage
-                    chrome.storage.local.set({ [`info_${maVanDon}`]: updatedLog }, () => {
-                        console.log(`Đã cập nhật thông tin cho ${maVanDon}:`, updatedLog);
-                        // Clear input
+                // Gửi update lên Firebase qua background script
+                chrome.runtime.sendMessage({
+                    event: "CONTENTMY",
+                    type: "UPDATE_EXTRA_INFO",
+                    payload: {
+                        maVanDon: maVanDon,
+                        content: inputValue
+                    }
+                }, (response) => {
+                    if (response && response.status === 'success') {
+                        // Cập nhật UI sau khi lưu Firebase thành công
+                        const updatedLog = response.updatedLog;
+                        
+                        // Clear và render với màu sắc
+                        textSpan.innerHTML = '';
+                        const formattedContent = formatLogWithColors(updatedLog);
+                        textSpan.appendChild(formattedContent);
+                        
                         textInput.value = '';
-                        // Scroll to bottom
                         textSpan.scrollTop = textSpan.scrollHeight;
-                    });
+                        
+                        // Hiện nút xóa vì đã có dữ liệu
+                        deleteButton.style.display = 'block';
+                        
+                        // ===== QUAN TRỌNG: Cập nhật luôn table rows để tránh portal re-render =====
+                        updateOrderInfoInTable(maVanDon, updatedLog);
+                        
+                        console.log(`Đã cập nhật thông tin cho ${maVanDon} qua Firebase`);
+                    } else {
+                        alert(`Lỗi: ${response?.error || 'Không thể cập nhật'}`);
+                    }
+                });
+            };
+
+            // Xử lý sự kiện click nút xóa - CHỈ XÓA DÒNG CUỐI
+            deleteButton.onclick = () => {
+                if (!confirm(`Bạn có chắc chắn muốn xóa dòng cuối cùng của mã ${maVanDon}?`)) {
+                    return;
+                }
+
+                console.log(`[Delete] Đang xóa dòng cuối của ${maVanDon}...`);
+
+                // Gửi lệnh xóa dòng cuối lên Firebase qua background script
+                chrome.runtime.sendMessage({
+                    event: "CONTENTMY",
+                    type: "DELETE_LAST_LINE_EXTRA_INFO",
+                    payload: {
+                        maVanDon: maVanDon
+                    }
+                }, (response) => {
+                    console.log(`[Delete] Response:`, response);
+                    
+                    if (response && response.status === 'success') {
+                        // Cập nhật UI sau khi xóa thành công
+                        const updatedLog = response.updatedLog || '';
+                        
+                        // Clear và render với màu sắc
+                        textSpan.innerHTML = '';
+                        const formattedContent = formatLogWithColors(updatedLog);
+                        textSpan.appendChild(formattedContent);
+                        
+                        textInput.value = '';
+                        
+                        // Ẩn nút xóa nếu không còn dữ liệu
+                        if (!updatedLog || updatedLog.trim() === '') {
+                            deleteButton.style.display = 'none';
+                        }
+                        
+                        // ===== QUAN TRỌNG: Cập nhật luôn table rows để tránh portal re-render =====
+                        updateOrderInfoInTable(maVanDon, updatedLog);
+                        
+                        console.log(`[Delete] Đã xóa dòng cuối cho ${maVanDon} trên Firebase`);
+                    } else {
+                        alert(`Lỗi: ${response?.error || 'Không thể xóa'}`);
+                    }
                 });
             };
 
@@ -781,8 +1012,10 @@ function runOrderLogic() {
                 }
             };
 
-            inputSection.appendChild(textInput);
-            inputSection.appendChild(updateButton);
+            // inputSection.appendChild(textInput);
+            // buttonContainer.appendChild(updateButton);
+            // buttonContainer.appendChild(deleteButton);
+            // inputSection.appendChild(buttonContainer);
 
             container.appendChild(textSpan);
             container.appendChild(inputSection);
@@ -792,18 +1025,63 @@ function runOrderLogic() {
         console.log("Table processing completed!");
     };
 
-    // CHỜ WEB LOADING XONG
+    // CHỜ WEB LOADING XONG - CÁCH TIẾP CẬN CHO REACTJS SPA
     const initTableProcessing = () => {
-        console.log("Waiting for page to fully load...");
+        console.log("Waiting for React table to render...");
         
-        // Đợi 3 giây sau khi trang load
-        setTimeout(() => {
-            console.log("Starting table processing after delay...");
-            processOrderTable();
+        // Kiểm tra xem table đã có chưa
+        const checkTableExists = () => {
+            const tableContent = document.querySelector('.ant-table-content');
+            const tbody = tableContent?.querySelector('tbody.ant-table-tbody');
+            const rows = tbody?.querySelectorAll('tr.ant-table-row');
             
-            // Sau đó mới setup observer
-            setupObserver();
-        }, 3000);
+            return tableContent && tbody && rows && rows.length > 0;
+        };
+        
+        // Nếu table đã có sẵn (trang đã load trước khi script chạy)
+        if (checkTableExists()) {
+            console.log("Table already exists, processing after short delay...");
+            setTimeout(() => {
+                console.log("Starting table processing...");
+                processOrderTable();
+                setupObserver();
+            }, 1000); // Delay 1s để đảm bảo React đã render xong
+            return;
+        }
+        
+        // Nếu table chưa có, chờ nó xuất hiện
+        console.log("Table not found, waiting for React to render...");
+        const tableWaitObserver = createAndTrackObserver(() => {
+            if (checkTableExists()) {
+                console.log("Table detected! Processing after delay...");
+                
+                // Disconnect observer này
+                tableWaitObserver.disconnect();
+                activeObservers = activeObservers.filter(o => o !== tableWaitObserver);
+                
+                // Delay một chút để React render xong hết các rows
+                setTimeout(() => {
+                    console.log("Starting table processing after React render...");
+                    processOrderTable();
+                    setupObserver();
+                }, 1000); // Delay 1.5s để chắc chắn
+            }
+        });
+        
+        // Quan sát toàn bộ body để bắt khi table được thêm vào
+        tableWaitObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
+        // Timeout fallback: Nếu sau 10s vẫn không thấy table
+        setTimeout(() => {
+            if (!checkTableExists()) {
+                console.warn("Table not found after 10 seconds, giving up...");
+                tableWaitObserver.disconnect();
+                activeObservers = activeObservers.filter(o => o !== tableWaitObserver);
+            }
+        }, 10000);
     };
 
     // Setup observer
@@ -954,18 +1232,20 @@ function runOrderLogic() {
         // Text hiển thị log (ở trên)
         const textSpan = document.createElement('div');
         textSpan.className = 'info-text-dialog';
-        textSpan.style.fontSize = '13px';
+        textSpan.style.fontSize = '14px';
         textSpan.style.wordBreak = 'break-word';
-        textSpan.style.lineHeight = '1.5';
-        textSpan.style.color = '#595959';
+        textSpan.style.lineHeight = '1.6';
+        textSpan.style.color = '#262626';
         textSpan.style.whiteSpace = 'pre-wrap';
-        textSpan.style.maxHeight = '200px';
+        textSpan.style.maxHeight = '220px';
         textSpan.style.overflowY = 'auto';
-        textSpan.style.padding = '8px';
-        textSpan.style.border = '1px solid #d9d9d9';
-        textSpan.style.borderRadius = '4px';
-        textSpan.style.backgroundColor = '#fafafa';
-        textSpan.style.marginBottom = '8px';
+        textSpan.style.padding = '12px';
+        textSpan.style.border = '2px solid #1890ff';
+        textSpan.style.borderRadius = '8px';
+        textSpan.style.backgroundColor = '#e6f7ff';
+        textSpan.style.marginBottom = '12px';
+        textSpan.style.fontFamily = 'monospace';
+        textSpan.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
 
         // Input section (ở dưới)
         const inputSection = document.createElement('div');
@@ -977,36 +1257,77 @@ function runOrderLogic() {
         textInput.type = 'text';
         textInput.className = 'ant-input';
         textInput.placeholder = 'Nhập nội dung cập nhật...';
-        textInput.style.fontSize = '13px';
+        textInput.style.fontSize = '14px';
+        textInput.style.padding = '8px 12px';
+        textInput.style.borderColor = '#1890ff';
+        textInput.style.borderWidth = '2px';
 
-        // Nút cập nhật
+        // Container cho các nút (Update và Delete)
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.display = 'flex';
+        buttonContainer.style.gap = '6px';
+        buttonContainer.style.width = '100%';
+
+        // Nút cập nhật (chiếm 3/4)
         const updateButton = document.createElement('button');
         updateButton.className = 'ant-btn ant-btn-sm ant-btn-primary';
         updateButton.textContent = 'Cập nhật';
-        updateButton.style.width = '100%';
-        updateButton.style.fontSize = '13px';
-        updateButton.style.padding = '6px 12px';
+        updateButton.style.flex = '3';
+        updateButton.style.fontSize = '14px';
+        updateButton.style.padding = '8px 16px';
         updateButton.style.height = 'auto';
+        updateButton.style.fontWeight = '600';
+
+        // Nút xóa (chiếm 1/4) - Ẩn mặc định
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'ant-btn ant-btn-sm ant-btn-danger';
+        deleteButton.textContent = 'Xóa';
+        deleteButton.style.flex = '1';
+        deleteButton.style.fontSize = '14px';
+        deleteButton.style.padding = '8px 16px';
+        deleteButton.style.height = 'auto';
+        deleteButton.style.display = 'none'; // Ẩn mặc định
+        deleteButton.style.fontWeight = '600';
 
         // Biến để lưu mã vận đơn hiện tại
         let currentMaVanDon = '';
 
-        // Hàm load dữ liệu từ Chrome Storage
+        // Hàm load dữ liệu từ Firebase qua background
         const loadExtraInfo = (maVanDon: string) => {
             if (!maVanDon) return;
             
             currentMaVanDon = maVanDon;
-            chrome.storage.local.get([`info_${maVanDon}`], (result) => {
-                const savedInfo = result[`info_${maVanDon}`] || '';
-                textSpan.textContent = savedInfo || '(Chưa có thông tin)';
-                // Clear input
-                textInput.value = '';
-                // Scroll to bottom
-                setTimeout(() => {
-                    textSpan.scrollTop = textSpan.scrollHeight;
-                }, 100);
+            
+            // GỬI REQUEST ĐẾN BACKGROUND ĐỂ LẤY DỮ LIỆU TỪ FIREBASE
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY",
+                type: "GET_EXTRA_INFO",
+                payload: { maVanDon: maVanDon }
+            }, (response) => {
+                if (response && response.status === 'success') {
+                    const savedInfo = response.data || '';
+                    
+                    // Clear và render với màu sắc
+                    textSpan.innerHTML = '';
+                    const formattedContent = formatLogWithColors(savedInfo);
+                    textSpan.appendChild(formattedContent);
+                    
+                    textInput.value = '';
+                    
+                    // Hiện nút xóa nếu có dữ liệu
+                    if (savedInfo && savedInfo.trim() !== '') {
+                        deleteButton.style.display = 'block';
+                    } else {
+                        deleteButton.style.display = 'none';
+                    }
+                    
+                    setTimeout(() => {
+                        textSpan.scrollTop = textSpan.scrollHeight;
+                    }, 100);
+                }
             });
-            console.log(`Đã load thông tin cho mã vận đơn: ${maVanDon}`);
+            
+            console.log(`Đang load thông tin cho mã vận đơn: ${maVanDon}`);
         };
 
         // Hàm check và update mã vận đơn với polling
@@ -1058,50 +1379,82 @@ function runOrderLogic() {
                 return;
             }
 
-            // Tạo timestamp
-            const now = new Date();
-            const day = String(now.getDate()).padStart(2, '0');
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const year = now.getFullYear();
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
-
-            // Tạo log entry mới
-            const newLogEntry = `${timestamp} ${inputValue}`;
-
-            // Lấy log cũ và thêm log mới
-            chrome.storage.local.get([`info_${currentMaVanDon}`], (result) => {
-                const oldLog = result[`info_${currentMaVanDon}`] || '';
-                const updatedLog = oldLog ? `${oldLog}\n${newLogEntry}` : newLogEntry;
-
-                // Cập nhật UI
-                textSpan.textContent = updatedLog;
-
-                // Lưu vào Chrome Storage
-                chrome.storage.local.set({ [`info_${currentMaVanDon}`]: updatedLog }, () => {
-                    console.log(`Đã cập nhật thông tin cho ${currentMaVanDon} trong dialog:`, updatedLog);
+            // GỬI MESSAGE ĐẾN BACKGROUND SCRIPT ĐỂ CẬP NHẬT FIREBASE
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY",
+                type: "UPDATE_EXTRA_INFO",
+                payload: {
+                    maVanDon: currentMaVanDon,
+                    content: inputValue
+                }
+            }, (response) => {
+                if (response && response.status === 'success') {
+                    // Cập nhật UI sau khi lưu Firebase thành công
+                    const updatedLog = response.updatedLog;
                     
-                    // Clear input
+                    // Clear và render với màu sắc
+                    textSpan.innerHTML = '';
+                    const formattedContent = formatLogWithColors(updatedLog);
+                    textSpan.appendChild(formattedContent);
+                    
+                    textInput.value = '';
+                    textSpan.scrollTop = textSpan.scrollHeight;
+
+                    // Hiện nút xóa vì đã có dữ liệu
+                    deleteButton.style.display = 'block';
+
+                    // Cập nhật cột trong bảng
+                    updateOrderInfoInTable(currentMaVanDon, updatedLog);
+                    
+                    console.log(`Đã cập nhật thông tin cho ${currentMaVanDon} trong dialog qua Firebase`);
+                } else {
+                    alert(`Lỗi: ${response?.error || 'Không thể cập nhật'}`);
+                }
+            });
+        };
+
+        // Xử lý sự kiện click nút xóa - CHỈ XÓA DÒNG CUỐI
+        deleteButton.onclick = () => {
+            if (!currentMaVanDon) {
+                alert('Chưa xác định được mã vận đơn!');
+                return;
+            }
+
+            if (!confirm(`Bạn có chắc chắn muốn xóa dòng cuối cùng của mã ${currentMaVanDon}?`)) {
+                return;
+            }
+
+            // Gửi lệnh xóa dòng cuối lên Firebase qua background script
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY",
+                type: "DELETE_LAST_LINE_EXTRA_INFO",
+                payload: {
+                    maVanDon: currentMaVanDon
+                }
+            }, (response) => {
+                if (response && response.status === 'success') {
+                    // Cập nhật UI sau khi xóa thành công
+                    const updatedLog = response.updatedLog || '';
+                    
+                    // Clear và render với màu sắc
+                    textSpan.innerHTML = '';
+                    const formattedContent = formatLogWithColors(updatedLog);
+                    textSpan.appendChild(formattedContent);
+                    
                     textInput.value = '';
                     
-                    // Scroll to bottom
-                    textSpan.scrollTop = textSpan.scrollHeight;
+                    // Ẩn nút xóa nếu không còn dữ liệu
+                    if (!updatedLog || updatedLog.trim() === '') {
+                        deleteButton.style.display = 'none';
+                    }
+
+                    // Cập nhật cột trong bảng
+                    updateOrderInfoInTable(currentMaVanDon, updatedLog);
                     
-                    // Cập nhật lại cột "Thông Tin Thêm" trong bảng nếu có
-                    const tableRows = document.querySelectorAll('tr.ant-table-row');
-                    tableRows.forEach(row => {
-                        const maVanDonLink = row.querySelector('a');
-                        if (maVanDonLink?.textContent?.trim() === currentMaVanDon) {
-                            const infoTextSpan = row.querySelector('.info-text');
-                            if (infoTextSpan) {
-                                infoTextSpan.textContent = updatedLog;
-                                // Scroll to bottom in table cell too
-                                (infoTextSpan as HTMLElement).scrollTop = (infoTextSpan as HTMLElement).scrollHeight;
-                            }
-                        }
-                    });
-                });
+                    console.log(`Đã xóa dòng cuối cho ${currentMaVanDon} trong dialog trên Firebase`);
+                } else {
+                    alert(`Lỗi: ${response?.error || 'Không thể xóa'}`);
+                }
             });
         };
 
@@ -1114,7 +1467,9 @@ function runOrderLogic() {
         };
 
         inputSection.appendChild(textInput);
-        inputSection.appendChild(updateButton);
+        buttonContainer.appendChild(updateButton);
+        buttonContainer.appendChild(deleteButton);
+        inputSection.appendChild(buttonContainer);
 
         container.appendChild(label);
         container.appendChild(textSpan);

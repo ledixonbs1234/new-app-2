@@ -1,15 +1,31 @@
-importScripts('firebase-app-compat.js', 'firebase-database-compat.js');
-importScripts("xlsxtool.js")
-import { debug } from 'util';
-import { BuuGuiProps, DataSnapshotProps, KhachHangProps } from '../states/states';
-import { NguoiGuiDetailProp, NguoiGuiProp } from './PopupInfo';
-import { base64ToBlob, chromeStorageGet, convertBlobsToBlob, customSort, formatDateRight, pdfBlobTo64, saveBlob, toDateString, waitForTabLoadAfterAction } from './util';
-import { delay, createOrActiveTab } from './util';
+importScripts("firebase-app-compat.js", "firebase-database-compat.js");
+importScripts("xlsxtool.js");
+
+import { debug } from "util";
+import {
+  BuuGuiProps,
+  DataSnapshotProps,
+  KhachHangProps,
+} from "../states/states";
+import { NguoiGuiDetailProp, NguoiGuiProp } from "./PopupInfo";
+import {
+  base64ToBlob,
+  chromeStorageGet,
+  convertBlobsToBlob,
+  customSort,
+  formatDateRight,
+  pdfBlobTo64,
+  saveBlob,
+  toDateString,
+  waitForTabLoadAfterAction,
+} from "./util";
+import { delay, createOrActiveTab } from "./util";
 // import firebase from 'firebase/compat/app';
 //day la ban moi nhat
 // Khai báo biến toàn cục từ importScripts để TypeScript nhận diện
 declare var XLSX: any;
 declare var firebase: any; // Khai báo firebase
+
 
 type FirebaseConfig = {
   apiKey: string;
@@ -24,7 +40,8 @@ type FirebaseConfig = {
 const firebaseConfig: FirebaseConfig = {
   apiKey: "AIzaSyAs9RtsXMRPeD5vpORJcWLDb1lEJZ3nUWI",
   authDomain: "xonapp.firebaseapp.com",
-  databaseURL: "https://xonapp-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL:
+    "https://xonapp-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "xonapp",
   storageBucket: "xonapp.appspot.com",
   messagingSenderId: "892472148061",
@@ -39,10 +56,10 @@ let db: firebase.database.Database | null = null;
 let keyMessage: string = "maychu";
 let TimeStampTemp: string = "";
 let token: string = "";
-let accountPortal: string = ""
-let passwordPortal: string = ""
-let buuCuc = ""
-console.log('Background script is running');
+let accountPortal: string = "";
+let passwordPortal: string = "";
+let buuCuc = "";
+console.log("Background script is running");
 
 // --- TRẠNG THÁI CỤC BỘ (Sử dụng type BuuGuiProps đã import) ---
 /**
@@ -103,22 +120,28 @@ const BUFFER_SIZE = 5;
 const safeFetch = async (url: string, options?: RequestInit): Promise<any> => {
   try {
     const response = await fetch(url, options);
-    
+
     // Check if response is ok
     if (!response.ok) {
-      console.error(`Fetch error for ${url}:`, response.status, response.statusText);
+      console.error(
+        `Fetch error for ${url}:`,
+        response.status,
+        response.statusText,
+      );
       const textResponse = await response.text();
-      console.error('Error response:', textResponse.substring(0, 200) + '...');
+      console.error("Error response:", textResponse.substring(0, 200) + "...");
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
     // Check content type
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
       console.error(`Invalid content type for ${url}:`, contentType);
       const textResponse = await response.text();
-      console.error('Response text:', textResponse.substring(0, 200) + '...');
-      throw new Error('Invalid response format - expected JSON but received HTML/text');
+      console.error("Response text:", textResponse.substring(0, 200) + "...");
+      throw new Error(
+        "Invalid response format - expected JSON but received HTML/text",
+      );
     }
 
     return await response.json();
@@ -133,9 +156,9 @@ type Snapshot = {
   [key: string]: any;
 };
 function setUpAlarm(): void {
-  chrome.alarms.create('keep-alive', { periodInMinutes: 0.083 });
+  chrome.alarms.create("keep-alive", { periodInMinutes: 0.083 });
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === 'keep-alive') {
+    if (alarm.name === "keep-alive") {
       if (!ref) initFirebase();
     }
   });
@@ -146,7 +169,7 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "makePhoneCall",
     title: "Gọi với App của tôi",
-    contexts: ["selection"] // Chỉ hiện khi có bôi đen văn bản
+    contexts: ["selection"], // Chỉ hiện khi có bôi đen văn bản
   });
 });
 
@@ -160,47 +183,49 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 async function initFirebase(): Promise<void> {
-
-  token = await chromeStorageGet('token')
-  accountPortal = await chromeStorageGet('accountPortal')
-  passwordPortal = await chromeStorageGet('passwordPortal')
-  keyMessage = await chromeStorageGet('keyMessage')
-  buuCuc = await chromeStorageGet('buuCuc')
+  token = await chromeStorageGet("token");
+  accountPortal = await chromeStorageGet("accountPortal");
+  passwordPortal = await chromeStorageGet("passwordPortal");
+  keyMessage = await chromeStorageGet("keyMessage");
+  buuCuc = await chromeStorageGet("buuCuc");
   if (!keyMessage) {
     console.error("Chưa cấu hình keyMessage!");
     // Có thể thông báo lỗi hoặc dừng lại
     return;
   }
   if (firebase.apps.length === 0) {
-    console.log('Initialize Firebase');
+    console.log("Initialize Firebase");
     firebase.initializeApp(firebaseConfig);
   }
   db = firebase.database();
   if (db === null) {
-    return
+    return;
   }
-
 
   ref = db.ref(`PORTAL/CHILD/${keyMessage}/message/topc`);
   refPing = db.ref(`PORTAL/STATUS/topc`);
-  ref.on('value', handleDataChange);
-  refPing.on('value', handlePingChange);
+  ref.on("value", handleDataChange);
+  refPing.on("value", handlePingChange);
 
   // --- Listener MỚI ---
   refScannedItems = db.ref(`PORTAL/CHILD/${keyMessage}/scannedItems`);
-  refScannedItems.on('value', handleScannedItemsUpdate);
+  refScannedItems.on("value", handleScannedItemsUpdate);
 
   // --- KẾT THÚC Listener MỚI ---
 
   // Khởi tạo các giá trị timestamp lần đầu
 
-  console.log("Firebase initialized, listening for scanned items and commands on key:", keyMessage);
+  console.log(
+    "Firebase initialized, listening for scanned items and commands on key:",
+    keyMessage,
+  );
 }
 
-
-let TimeStampPing = ""
-let TimeStampScannedItems = "" // Lưu timestamp của scannedItems
-async function handlePingChange(snapshot: firebase.database.DataSnapshot): Promise<void> {
+let TimeStampPing = "";
+let TimeStampScannedItems = ""; // Lưu timestamp của scannedItems
+async function handlePingChange(
+  snapshot: firebase.database.DataSnapshot,
+): Promise<void> {
   const data: Snapshot | null = snapshot.val();
   if (!data || TimeStampPing.length === 0 || TimeStampPing === data.TimeStamp) {
     TimeStampPing = data!.TimeStamp!;
@@ -208,21 +233,25 @@ async function handlePingChange(snapshot: firebase.database.DataSnapshot): Promi
   } else {
     TimeStampPing = data.TimeStamp!;
   }
-  console.log('Data received:', data);
-  if (data.Lenh == 'ping') {
-    updateToPhone('pong', keyMessage, data.DoiTuong);
+  console.log("Data received:", data);
+  if (data.Lenh == "ping") {
+    updateToPhone("pong", keyMessage, data.DoiTuong);
     return;
   }
 }
 
 // --- HÀM MỚI: Xử lý cập nhật danh sách mã quét ---
-async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot): Promise<void> {
-
+async function handleScannedItemsUpdate(
+  snapshot: firebase.database.DataSnapshot,
+): Promise<void> {
   const data: Snapshot | null = snapshot.val();
-  if (!data)
-    return;
+  if (!data) return;
 
-  if (!data || TimeStampScannedItems.length === 0 || TimeStampScannedItems === data.TimeStamp) {
+  if (
+    !data ||
+    TimeStampScannedItems.length === 0 ||
+    TimeStampScannedItems === data.TimeStamp
+  ) {
     TimeStampScannedItems = data!.TimeStamp!;
     return;
   } else {
@@ -230,7 +259,7 @@ async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot
   }
   var arrayData = JSON.parse(data.DoiTuong);
   const newScannedItems: BuuGuiProps[] = Array.isArray(arrayData)
-    ? arrayData.filter(item => item && typeof item.MaBuuGui === 'string') // Lọc bỏ phần tử không hợp lệ
+    ? arrayData.filter((item) => item && typeof item.MaBuuGui === "string") // Lọc bỏ phần tử không hợp lệ
     : [];
   if (newScannedItems.length === 0) {
     allScannedItems = []; // Nếu không có item nào hợp lệ, đặt lại danh sách
@@ -238,7 +267,6 @@ async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot
     processedItems = new Set<string>(); // Đặt lại danh sách đã xử lý
     processingQueue = []; // Đặt lại hàng đợi
     return;
-
   }
 
   // Bỏ qua nếu không có thay đổi thực sự (Firebase có thể trigger thừa)
@@ -254,13 +282,21 @@ async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot
     return;
   }
 
-
-  console.log('Received updated scannedItems (objects):', newScannedItems.length, 'items');
+  console.log(
+    "Received updated scannedItems (objects):",
+    newScannedItems.length,
+    "items",
+  );
 
   // --- KIỂM TRA CỜ DỪNG LỖI ---
   if (isStoppedOnError) {
-    console.warn("Processing stopped due to previous error. Ignoring scannedItems update.");
-    updateToPhone("warning", "Đã dừng xử lý do lỗi trước đó. Cần khởi động lại hoặc xóa lỗi.");
+    console.warn(
+      "Processing stopped due to previous error. Ignoring scannedItems update.",
+    );
+    updateToPhone(
+      "warning",
+      "Đã dừng xử lý do lỗi trước đó. Cần khởi động lại hoặc xóa lỗi.",
+    );
     // Cập nhật allScannedItems nhưng không trigger xử lý
     allScannedItems = newScannedItems;
     updateToPhone("messageContinue", `Lỗi hệ thống khi xử lý .`);
@@ -268,21 +304,24 @@ async function handleScannedItemsUpdate(snapshot: firebase.database.DataSnapshot
   }
   // --- KẾT THÚC KIỂM TRA ---
 
-
   const previousScannedItems: any[] = [...allScannedItems]; // Lưu list cũ để đối chiếu
   allScannedItems = newScannedItems; // Cập nhật list mới nhất
   // --- Reconciliation: Xử lý các item bị xóa (So sánh MaBuuGui) ---
-  const newMaBgsSet = new Set(allScannedItems.map(item => item.MaBuuGui)); // Set MaBuuGui mới
-  const removedItems = previousScannedItems.filter(oldItem => !newMaBgsSet.has(oldItem.MaBuuGui)); // Lọc object cũ không có MaBuuGui trong set mới
+  const newMaBgsSet = new Set(allScannedItems.map((item) => item.MaBuuGui)); // Set MaBuuGui mới
+  const removedItems = previousScannedItems.filter(
+    (oldItem) => !newMaBgsSet.has(oldItem.MaBuuGui),
+  ); // Lọc object cũ không có MaBuuGui trong set mới
 
   if (removedItems.length > 0) {
-    const removedMaBgs = removedItems.map(item => item.MaBuuGui); // Lấy MaBuuGui bị xóa
+    const removedMaBgs = removedItems.map((item) => item.MaBuuGui); // Lấy MaBuuGui bị xóa
     console.log("Items removed by user (MaBuuGui):", removedMaBgs);
     updateToPhone("info", `Đã xóa các mã: ${removedMaBgs.join(", ")}`);
 
     const originalQueueLength = processingQueue.length;
     const removedMaBgsSet = new Set(removedMaBgs); // Set để lọc queue nhanh hơn
-    processingQueue = processingQueue.filter(queueItemMaBG => !removedMaBgsSet.has(queueItemMaBG)); // Lọc queue (vẫn là string[])
+    processingQueue = processingQueue.filter(
+      (queueItemMaBG) => !removedMaBgsSet.has(queueItemMaBG),
+    ); // Lọc queue (vẫn là string[])
 
     if (processingQueue.length < originalQueueLength) {
       console.log("Removed items from processing queue.");
@@ -300,13 +339,21 @@ const handleChayDenCuoiVaIn = async () => {
   isFinalProcessingTriggered = true; // Đặt cờ
 
   // Lấy MaBuuGui của tất cả item trong list mới nhất
-  const currentMaBgs = allScannedItems.map(item => item.MaBuuGui);
+  const currentMaBgs = allScannedItems.map((item) => item.MaBuuGui);
   // Lọc ra MaBuuGui chưa xử lý và chưa có trong queue
-  const maBgsReadyForQueue = currentMaBgs.filter(maBG => !processedItems.has(maBG) && !processingQueue.includes(maBG));
+  const maBgsReadyForQueue = currentMaBgs.filter(
+    (maBG) => !processedItems.has(maBG) && !processingQueue.includes(maBG),
+  );
 
   if (maBgsReadyForQueue.length > 0) {
-    console.log("Adding remaining items (MaBuuGui) to queue:", maBgsReadyForQueue);
-    updateToPhone("info", `Bắt đầu xử lý ${maBgsReadyForQueue.length} mã cuối.`);
+    console.log(
+      "Adding remaining items (MaBuuGui) to queue:",
+      maBgsReadyForQueue,
+    );
+    updateToPhone(
+      "info",
+      `Bắt đầu xử lý ${maBgsReadyForQueue.length} mã cuối.`,
+    );
     processingQueue.push(...maBgsReadyForQueue); // Thêm MaBuuGui (string) vào queue
     processNextItemInBackground();
   } else if (processingQueue.length === 0 && !currentItemBeingProcessed) {
@@ -315,10 +362,12 @@ const handleChayDenCuoiVaIn = async () => {
     await triggerPrint();
     isFinalProcessingTriggered = false;
   } else {
-    console.log("Waiting for current processing to finish before printing remaining.");
+    console.log(
+      "Waiting for current processing to finish before printing remaining.",
+    );
     updateToPhone("info", "Đang chờ xử lý các mã trước đó...");
   }
-}
+};
 
 // --- HÀM MỚI: Kiểm tra và đưa item vào hàng đợi xử lý ---
 function triggerProcessingCheck(): void {
@@ -341,7 +390,11 @@ function triggerProcessingCheck(): void {
   }
 
   // Lọc các *đối tượng* chưa xử lý và chưa có trong queue
-  const itemsReadyForQueue = allScannedItems.filter(item => !processedItems.has(item.MaBuuGui) && !processingQueue.includes(item.MaBuuGui));
+  const itemsReadyForQueue = allScannedItems.filter(
+    (item) =>
+      !processedItems.has(item.MaBuuGui) &&
+      !processingQueue.includes(item.MaBuuGui),
+  );
 
   if (itemsReadyForQueue.length > BUFFER_SIZE) {
     const nextItemMaBG = itemsReadyForQueue[0].MaBuuGui; // Lấy MaBuuGui (string) của item cũ nhất
@@ -356,7 +409,9 @@ function triggerProcessingCheck(): void {
     isFinalProcessingTriggered = false;
   }
 }
-async function hardRefreshSpecificTab(tabId: number): Promise<chrome.tabs.Tab | undefined> {
+async function hardRefreshSpecificTab(
+  tabId: number,
+): Promise<chrome.tabs.Tab | undefined> {
   if (!tabId) {
     console.error("hardRefreshSpecificTab: Invalid tabId provided.");
     return undefined;
@@ -390,7 +445,11 @@ async function processNextItemInBackground(): Promise<void> {
   // --- KẾT THÚC KIỂM TRA ---
 
   if (currentItemBeingProcessed || processingQueue.length === 0) {
-    if (!currentItemBeingProcessed && processingQueue.length === 0 && isFinalProcessingTriggered) {
+    if (
+      !currentItemBeingProcessed &&
+      processingQueue.length === 0 &&
+      isFinalProcessingTriggered
+    ) {
       console.log("Queue is now empty after processing. Triggering print.");
       await triggerPrint();
       isFinalProcessingTriggered = false;
@@ -401,8 +460,12 @@ async function processNextItemInBackground(): Promise<void> {
   const maBGToProcess = processingQueue.shift()!; // Lấy MaBuuGui (string)
 
   // Kiểm tra lại xem MaBuuGui có còn trong danh sách đối tượng mới nhất không
-  if (!allScannedItems.some(item => item.MaBuuGui === maBGToProcess)) {
-    console.log("Item", maBGToProcess, "was removed before processing could start. Skipping.");
+  if (!allScannedItems.some((item) => item.MaBuuGui === maBGToProcess)) {
+    console.log(
+      "Item",
+      maBGToProcess,
+      "was removed before processing could start. Skipping.",
+    );
     processedItems.delete(maBGToProcess);
     triggerProcessingCheck();
     return;
@@ -410,23 +473,31 @@ async function processNextItemInBackground(): Promise<void> {
 
   currentItemBeingProcessed = maBGToProcess; // Đánh dấu item đang xử lý (string)
   // Tìm index để hiển thị badge chính xác
-  const currentIndexInList = allScannedItems.findIndex(item => item.MaBuuGui === maBGToProcess);
-  console.log(`Đang xử lý BG: ${currentItemBeingProcessed} (Index: ${currentIndexInList}, Queue: ${processingQueue.length})`);
+  const currentIndexInList = allScannedItems.findIndex(
+    (item) => item.MaBuuGui === maBGToProcess,
+  );
+  console.log(
+    `Đang xử lý BG: ${currentItemBeingProcessed} (Index: ${currentIndexInList}, Queue: ${processingQueue.length})`,
+  );
   updateToPhone("message", `Đang xử lý ${currentItemBeingProcessed}`);
   chrome.action.setBadgeText({ text: `${currentIndexInList + 1}` }); // Hiển thị index (1-based)
 
   try {
     // --- Lấy thông tin BuuGuiProps ĐẦY ĐỦ ---
     // Ưu tiên lấy từ allScannedItems đã có sẵn để đảm bảo dùng đúng dữ liệu đã trigger việc xử lý
-    let currentBuuGui = allScannedItems.find(item => item.MaBuuGui === maBGToProcess);
+    let currentBuuGui = allScannedItems.find(
+      (item) => item.MaBuuGui === maBGToProcess,
+    );
 
     if (!currentBuuGui) {
-      throw new Error(`Không tìm thấy thông tin Bưu gửi đầy đủ cho: ${maBGToProcess}`);
+      throw new Error(
+        `Không tìm thấy thông tin Bưu gửi đầy đủ cho: ${maBGToProcess}`,
+      );
     }
 
     // Cần cơ chế lấy maKH và options phù hợp. Ví dụ lấy từ storage
-    const maKH = await chromeStorageGet('currentMaKH'); // Ví dụ
-    const options = await chromeStorageGet('currentOptions'); // Ví dụ
+    const maKH = await chromeStorageGet("currentMaKH"); // Ví dụ
+    const options = await chromeStorageGet("currentOptions"); // Ví dụ
 
     if (!maKH) {
       throw new Error(`Chưa chọn khách hàng (maKH)`);
@@ -439,96 +510,135 @@ async function processNextItemInBackground(): Promise<void> {
       throw new Error("Không tìm thấy tab Portal đang hoạt động.");
     }
 
-    chrome.tabs.sendMessage(tabId, {
-      message: "PROCESS_SINGLE_ITEM", // Lệnh mới
-      current: currentBuuGui,
-      makh: maKH,
-      keyMessage: keyMessage,
-      options: options
-    }, async (response) => {
-      const processedMaBG = currentItemBeingProcessed; // Lưu lại mã vừa xử lý
-      currentItemBeingProcessed = null; // Đặt lại ngay
+    chrome.tabs.sendMessage(
+      tabId,
+      {
+        message: "PROCESS_SINGLE_ITEM", // Lệnh mới
+        current: currentBuuGui,
+        makh: maKH,
+        keyMessage: keyMessage,
+        options: options,
+      },
+      async (response) => {
+        const processedMaBG = currentItemBeingProcessed; // Lưu lại mã vừa xử lý
+        currentItemBeingProcessed = null; // Đặt lại ngay
 
-      // Kiểm tra lỗi runtime trước
-      if (chrome.runtime.lastError) {
-        console.error(`Lỗi gửi/nhận từ content script cho ${processedMaBG}:`, chrome.runtime.lastError.message);
-        updateToPhone("messageContinue", `Lỗi hệ thống khi xử lý ${processedMaBG}.`);
-        isStoppedOnError = true; // Dừng lại do lỗi hệ thống
-        processingQueue = [];
-        triggerProcessingCheck(); // Không cần thiết nhưng để đảm bảo
-        return;
-      }
-
-      // Kiểm tra xem item có bị xóa trong lúc đang xử lý không
-      if (!allScannedItems.some(item => item.MaBuuGui === processedMaBG!)) {
-        console.log("Item", processedMaBG, "was deleted during processing. Ignoring result.");
-        processedItems.delete(processedMaBG!); // Đảm bảo không bị tính là đã xử lý
-        triggerProcessingCheck();
-        return;
-      }
-
-      // Xử lý kết quả
-      if (response && response.status === 'success') {
-        console.log("Processed successfully:", processedMaBG);
-        processedItems.add(processedMaBG!);
-        updateToPhone("message", `${processedMaBG} đã được xử lý`);
-
-        successfulProcessCount++;
-        console.log(`Successful items since last refresh: ${successfulProcessCount}`);
-
-        if (successfulProcessCount >= REFRESH_THRESHOLD) {
-          console.log(`Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${tabId}...`);
-          updateToPhone("message", `Đã xử lý ${successfulProcessCount} mã. Đang làm mới trang...`);
-          await delay(1000);
-
-          const refreshedTab = await hardRefreshSpecificTab(tabId);
-
-          if (!refreshedTab) {
-            console.error(`Tab ${tabId} could not be refreshed or was closed. Stopping process.`);
-            updateToPhone("message", `Lỗi: Không thể làm mới tab ${tabId}. Dừng xử lý.`);
-            isStoppedOnError = true;
-            processingQueue = [];
-            successfulProcessCount = 0;
-            chrome.action.setBadgeText({ text: 'REF_ERR' });
-            chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
-            return; // Thoát khỏi IIFE
-          }
-
-          console.log(`Tab ${tabId} refreshed successfully. Resetting counter.`);
-          updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
-          successfulProcessCount = 0;
-
-          await delay(2500); // Chờ ổn định
+        // Kiểm tra lỗi runtime trước
+        if (chrome.runtime.lastError) {
+          console.error(
+            `Lỗi gửi/nhận từ content script cho ${processedMaBG}:`,
+            chrome.runtime.lastError.message,
+          );
+          updateToPhone(
+            "messageContinue",
+            `Lỗi hệ thống khi xử lý ${processedMaBG}.`,
+          );
+          isStoppedOnError = true; // Dừng lại do lỗi hệ thống
+          processingQueue = [];
+          triggerProcessingCheck(); // Không cần thiết nhưng để đảm bảo
+          return;
         }
-      } else {
-        // --- Dừng lại khi có lỗi từ content script ---
-        const errorMsg = response?.error || 'Lỗi không xác định từ Portal';
-        console.error("Lỗi xử lý từ content script:", processedMaBG, response);
-        updateToPhone("messageContinue", `Lỗi xử lý ${processedMaBG}: ${errorMsg}. Đã dừng!`);
-        isStoppedOnError = true;
-        processingQueue = [];
-        successfulProcessCount = 0;
-        chrome.action.setBadgeText({ text: 'Lỗi!' });
-        chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
-        return; // Thoát khỏi IIFE
-      }
-      triggerProcessingCheck(); // Gọi kiểm tra tiếp theo
-    });
 
+        // Kiểm tra xem item có bị xóa trong lúc đang xử lý không
+        if (!allScannedItems.some((item) => item.MaBuuGui === processedMaBG!)) {
+          console.log(
+            "Item",
+            processedMaBG,
+            "was deleted during processing. Ignoring result.",
+          );
+          processedItems.delete(processedMaBG!); // Đảm bảo không bị tính là đã xử lý
+          triggerProcessingCheck();
+          return;
+        }
+
+        // Xử lý kết quả
+        if (response && response.status === "success") {
+          console.log("Processed successfully:", processedMaBG);
+          processedItems.add(processedMaBG!);
+          updateToPhone("message", `${processedMaBG} đã được xử lý`);
+
+          successfulProcessCount++;
+          console.log(
+            `Successful items since last refresh: ${successfulProcessCount}`,
+          );
+
+          if (successfulProcessCount >= REFRESH_THRESHOLD) {
+            console.log(
+              `Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${tabId}...`,
+            );
+            updateToPhone(
+              "message",
+              `Đã xử lý ${successfulProcessCount} mã. Đang làm mới trang...`,
+            );
+            await delay(1000);
+
+            const refreshedTab = await hardRefreshSpecificTab(tabId);
+
+            if (!refreshedTab) {
+              console.error(
+                `Tab ${tabId} could not be refreshed or was closed. Stopping process.`,
+              );
+              updateToPhone(
+                "message",
+                `Lỗi: Không thể làm mới tab ${tabId}. Dừng xử lý.`,
+              );
+              isStoppedOnError = true;
+              processingQueue = [];
+              successfulProcessCount = 0;
+              chrome.action.setBadgeText({ text: "REF_ERR" });
+              chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+              return; // Thoát khỏi IIFE
+            }
+
+            console.log(
+              `Tab ${tabId} refreshed successfully. Resetting counter.`,
+            );
+            updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
+            successfulProcessCount = 0;
+
+            await delay(2500); // Chờ ổn định
+          }
+        } else {
+          // --- Dừng lại khi có lỗi từ content script ---
+          const errorMsg = response?.error || "Lỗi không xác định từ Portal";
+          console.error(
+            "Lỗi xử lý từ content script:",
+            processedMaBG,
+            response,
+          );
+          updateToPhone(
+            "messageContinue",
+            `Lỗi xử lý ${processedMaBG}: ${errorMsg}. Đã dừng!`,
+          );
+          isStoppedOnError = true;
+          processingQueue = [];
+          successfulProcessCount = 0;
+          chrome.action.setBadgeText({ text: "Lỗi!" });
+          chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+          return; // Thoát khỏi IIFE
+        }
+        triggerProcessingCheck(); // Gọi kiểm tra tiếp theo
+      },
+    );
   } catch (error: any) {
-    console.error(`Lỗi nghiêm trọng khi chuẩn bị xử lý ${currentItemBeingProcessed}:`, error);
+    console.error(
+      `Lỗi nghiêm trọng khi chuẩn bị xử lý ${currentItemBeingProcessed}:`,
+      error,
+    );
     updateToPhone("message", `Lỗi hệ thống: ${error.message}. Đã dừng!`);
     isStoppedOnError = true; // Dừng lại do lỗi nghiêm trọng
     processingQueue = [];
     currentItemBeingProcessed = null;
-    chrome.action.setBadgeText({ text: 'Lỗi!' });
-    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+    chrome.action.setBadgeText({ text: "Lỗi!" });
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
   }
 }
 
-
 // --- HÀM MỚI: Tìm Tab Portal ---
-async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): Promise<number | undefined> {
+async function findPortalTabId(
+  maKH: string = "",
+  hdrId?: string | undefined,
+): Promise<number | undefined> {
   await delay(500); // Đợi một chút để đảm bảo tab đã load xong
   console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...");
   let foundReadyTabId: number | null = null;
@@ -536,32 +646,43 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
 
   try {
     // 1. Tìm các tab Portal có URL khớp
-    const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
-    console.log(`handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`);
+    const portalTabs = await chrome.tabs.query({
+      url: "https://portalkhl.vnpost.vn/*",
+    });
+    console.log(
+      `handleSendAutoToPortal: Tìm thấy ${portalTabs.length} tab Portal khớp URL.`,
+    );
 
     // 2. Duyệt qua các tab và kiểm tra element
     for (const tab of portalTabs) {
       if (!tab.id) continue; // Bỏ qua nếu tab không có ID
       if (!hdrId) {
-
-        console.log(`handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`);
+        console.log(
+          `handleSendAutoToPortal: Kiểm tra tab ID: ${tab.id}, URL: ${tab.url}`,
+        );
         try {
           // *** ĐÁNH DẤU: Tiêm script để kiểm tra sự tồn tại của #ttNumberSearch ***
           const injectionResults = await chrome.scripting.executeScript({
             target: { tabId: tab.id },
-            func: () => !!document.querySelector("#ttNumberSearch") // Hàm kiểm tra trực tiếp
+            func: () => !!document.querySelector("#ttNumberSearch"), // Hàm kiểm tra trực tiếp
           });
 
           // executeScript trả về một mảng kết quả, kiểm tra phần tử đầu tiên
-          if (injectionResults && injectionResults[0] && injectionResults[0].result === true) {
-            console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`);
+          if (
+            injectionResults &&
+            injectionResults[0] &&
+            injectionResults[0].result === true
+          ) {
+            console.log(
+              `handleSendAutoToPortal: Tab ID: ${tab.id} đã sẵn sàng (tìm thấy #ttNumberSearch).`,
+            );
             foundReadyTabId = tab.id;
             readyTabInfo = tab; // Lưu lại thông tin tab
             var currentMaKH = "";
             if (maKH != "") {
-              currentMaKH = maKH
+              currentMaKH = maKH;
             } else {
-              currentMaKH = await chromeStorageGet("currentMaKH")
+              currentMaKH = await chromeStorageGet("currentMaKH");
             }
             window.postMessage({
               type: "CONTENT",
@@ -569,25 +690,29 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
             });
             break; // Dừng tìm kiếm khi đã tìm thấy tab phù hợp
           } else {
-            console.log(`handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`);
+            console.log(
+              `handleSendAutoToPortal: Tab ID: ${tab.id} không tìm thấy #ttNumberSearch.`,
+            );
           }
         } catch (injectionError: any) {
           // Có thể tab đã đóng hoặc không có quyền tiêm script
-          console.warn(`handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`);
+          console.warn(
+            `handleSendAutoToPortal: Lỗi khi kiểm tra tab ID: ${tab.id}. Lỗi: ${injectionError.message}`,
+          );
           // Bỏ qua và tiếp tục với tab tiếp theo (nếu có)
         }
-      }
-      else {
+      } else {
         foundReadyTabId = tab.id;
         readyTabInfo = tab; // Lưu lại thông tin tab
       }
-
     }
 
     // 3. Xử lý dựa trên kết quả kiểm tra
     if (foundReadyTabId && readyTabInfo) {
       // *** ĐÁNH DẤU: Nếu tìm thấy tab sẵn sàng ***
-      console.log(`handleSendAutoToPortal: Đã tìm thấy tab Portal (ID: ${foundReadyTabId}). Kích hoạt và gửi trực tiếp...`);
+      console.log(
+        `handleSendAutoToPortal: Đã tìm thấy tab Portal (ID: ${foundReadyTabId}). Kích hoạt và gửi trực tiếp...`,
+      );
       updateToPhone("message", `Portal OK. Đang gửi...`, keyMessage);
 
       if (!hdrId) {
@@ -600,8 +725,11 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
         const loginResult = await ensurePortalLogin(foundReadyTabId);
 
         // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
-        await chrome.tabs.update(foundReadyTabId, { active: true, url: `https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=${hdrId}` });
-        await waitForTabToLoad(foundReadyTabId)
+        await chrome.tabs.update(foundReadyTabId, {
+          active: true,
+          url: `https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=${hdrId}`,
+        });
+        await waitForTabToLoad(foundReadyTabId);
       }
       await delay(500);
 
@@ -609,18 +737,18 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
       // Hàm này sẽ tự động lấy tab đang active (chính là tab vừa được kích hoạt)
       // Thêm await nếu handleSendToPortal là async và bạn cần đợi nó xong
       return foundReadyTabId; // Trả về ID tab đã tìm thấy
-
-
     } else {
       // *** ĐÁNH DẤU: Nếu không tìm thấy tab nào sẵn sàng ***
-      console.log("handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...");
+      console.log(
+        "handleSendAutoToPortal: Không tìm thấy tab Portal sẵn sàng. Tiến hành khởi tạo...",
+      );
       updateToPhone("message", "Đang khởi tạo Portal...", keyMessage);
       var currentMaKH = "";
       if (maKH != "") {
-        currentMaKH = maKH
+        currentMaKH = maKH;
         console.log("handleSendAutoToPortal: currentMaKH:", currentMaKH);
       } else {
-        currentMaKH = await chromeStorageGet("currentMaKH")
+        currentMaKH = await chromeStorageGet("currentMaKH");
       }
 
       const snapshot = await db!.ref("PORTAL/HopDongs/" + currentMaKH).get();
@@ -629,46 +757,61 @@ async function findPortalTabId(maKH: string = "", hdrId?: string | undefined): P
       const hdrId: string | null = await khoiTaoPortal(hopDong);
 
       if (hdrId) {
-        console.log("handleSendAutoToPortal: Khởi tạo thành công. Mã hợp đồng:", hdrId);
-        await updateToPhone("message", `Khởi tạo thành công. Mã hợp đồng: ${hdrId}. Đang gửi dữ liệu...`, keyMessage);
+        console.log(
+          "handleSendAutoToPortal: Khởi tạo thành công. Mã hợp đồng:",
+          hdrId,
+        );
+        await updateToPhone(
+          "message",
+          `Khởi tạo thành công. Mã hợp đồng: ${hdrId}. Đang gửi dữ liệu...`,
+          keyMessage,
+        );
         //thực hiện gửi hdrId và currentMaKH với lệnh sendhdr dùng updatetophone để phone cập nhật thông tin
         // Gửi hdrId và currentMaKH về điện thoại với lệnh "sendhdr"
-        await updateToPhone("sendhdr", JSON.stringify({ hdrId, maKH: currentMaKH }), keyMessage);
+        await updateToPhone(
+          "sendhdr",
+          JSON.stringify({ hdrId, maKH: currentMaKH }),
+          keyMessage,
+        );
 
         // Sau khi khởi tạo thành công, tab đích đã sẵn sàng và active, gọi gửi dữ liệu
         // Thêm await nếu handleSendToPortal là async
         //get tabid Active
-        var tabs = await chrome.tabs.query({ active: true, currentWindow: true }) // Lấy ID tab hiện tại (đã được kích hoạt)
-        return tabs[0].id
+        var tabs = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        }); // Lấy ID tab hiện tại (đã được kích hoạt)
+        return tabs[0].id;
       } else {
         console.error("handleSendAutoToPortal: Khởi tạo Portal thất bại.");
         // handleKhoiTao đã gửi thông báo lỗi rồi, không cần gửi lại ở đây
         // updateToPhone("message", "Khởi tạo Portal thất bại, vui lòng thử lại sau.", keyMessage);
       }
     }
-
   } catch (error: any) {
     // 4. Xử lý lỗi chung (ví dụ: lỗi khi query tabs)
     console.error("Lỗi trong handleSendAutoToPortal:", error);
-    updateToPhone("message", `Lỗi khi tự động gửi Portal: ${error.message}`, keyMessage);
+    updateToPhone(
+      "message",
+      `Lỗi khi tự động gửi Portal: ${error.message}`,
+      keyMessage,
+    );
   }
-
 }
-
 
 // --- HÀM MỚI: Trigger việc in ấn ---
 async function triggerPrint(): Promise<void> {
   // Lấy danh sách MaBuuGui của những item đã xử lý thành công VÀ còn trong list cuối cùng
   const maBgsToPrint = allScannedItems
-    .filter(item => processedItems.has(item.MaBuuGui)) // Lọc các object hợp lệ
-    .map(item => item.MaBuuGui);                      // Chỉ lấy MaBuuGui (string)
+    .filter((item) => processedItems.has(item.MaBuuGui)) // Lọc các object hợp lệ
+    .map((item) => item.MaBuuGui); // Chỉ lấy MaBuuGui (string)
 
   console.log("Triggering print for valid processed MaBuuGui:", maBgsToPrint);
 
   if (maBgsToPrint.length === 0) {
     console.log("No valid items to print.");
     updateToPhone("info", "Không có mã hợp lệ nào để in.");
-    chrome.action.setBadgeText({ text: '' });
+    chrome.action.setBadgeText({ text: "" });
     return;
   }
 
@@ -681,15 +824,13 @@ async function triggerPrint(): Promise<void> {
   // processedItems.clear();
   // isStoppedOnError = false; // Reset lỗi nếu muốn phiên làm việc tiếp theo bắt đầu lại
   // isFinalProcessingTriggered = false;
-  chrome.action.setBadgeText({ text: 'OK' });
-  chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
+  chrome.action.setBadgeText({ text: "OK" });
+  chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
   await delay(2000);
-  chrome.action.setBadgeText({ text: '' });
+  chrome.action.setBadgeText({ text: "" });
   processedItems.clear(); // Xóa lịch sử xử lý cho phiên mới
   isStoppedOnError = false; // Reset lỗi cho phiên mới
   isFinalProcessingTriggered = false;
-
-
 }
 // --- HÀM TIỆN ÍCH MỚI: So sánh mảng đối tượng dựa trên MaBuuGui ---
 function objectArraysAreEqual(a: BuuGuiProps[], b: BuuGuiProps[]): boolean {
@@ -714,20 +855,30 @@ function objectArraysAreEqual(a: BuuGuiProps[], b: BuuGuiProps[]): boolean {
 // - khoiTaoPortal: Logic khởi tạo ban đầu có thể vẫn cần
 // - Các hàm liên quan đến PNS nếu không thuộc luồng chính này
 // Các lệnh không cần kiểm tra token
-const commandsNoTokenRequired = ["getmypostdata", "getpns",'guiAiLe','sendSubmit','sendtoportal','sendautotoportal','khoitao','loginpns','loginpnsgd'];
+const commandsNoTokenRequired = [
+  "getmypostdata",
+  "getpns",
+  "guiAiLe",
+  "sendSubmit",
+  "sendtoportal",
+  "sendautotoportal",
+  "khoitao",
+  "loginpns",
+  "loginpnsgd",
+];
 
-async function handleDataChange(snapshot: firebase.database.DataSnapshot): Promise<void> {
-
+async function handleDataChange(
+  snapshot: firebase.database.DataSnapshot,
+): Promise<void> {
   const data: Snapshot | null = snapshot.val();
-  if (!data)
-    return;
+  if (!data) return;
   if (!data || TimeStampTemp.length === 0 || TimeStampTemp === data.TimeStamp) {
     TimeStampTemp = data!.TimeStamp ?? "";
     return;
   } else {
     TimeStampTemp = data.TimeStamp ?? "";
   }
-if (!commandsNoTokenRequired.includes(data.Lenh)) {
+  if (!commandsNoTokenRequired.includes(data.Lenh)) {
     const isOk: boolean = await checkToken();
     if (!isOk) {
       const tokenTemp = await loginDirect(accountPortal, passwordPortal);
@@ -748,40 +899,47 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
   }
 
   const commandHandlers: { [key: string]: (data: any) => Promise<void> } = {
-    "getmahieutontoweb": async (data: any) => {
+    getmahieutontoweb: async (data: any) => {
       await handleMaHieuFromPC(data);
     },
-    "guiAiLe": async (data: any) => await handleGuiAiLe(data.DoiTuong),
-    "sendSubmit": async () => await handleSendSubmit(),
-    "printMaHieus": async (data: any) => await printMaHieus(JSON.parse(data.DoiTuong)),
-    "xoabg": async (data: any) => await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
-    "xoanhieubg": async (data: any) => {
+    guiAiLe: async (data: any) => await handleGuiAiLe(data.DoiTuong),
+    sendSubmit: async () => await handleSendSubmit(),
+    printMaHieus: async (data: any) =>
+      await printMaHieus(JSON.parse(data.DoiTuong)),
+    xoabg: async (data: any) =>
+      await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
+    xoanhieubg: async (data: any) => {
       await handleXoaNhieuBuuGui(data.DoiTuong);
-
     },
-    "checkportal": async (data: any) => {
+    checkportal: async (data: any) => {
       await handleCheckPortal();
     },
-    "laylan": async (data: any) => {
+    laylan: async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
-      const codes: string[] = maHieus!.map(element => element.Code);
-      const codesIDs: string[] = maHieus!.map(element => element.IDCODE);
+      const codes: string[] = maHieus!.map((element) => element.Code);
+      const codesIDs: string[] = maHieus!.map((element) => element.IDCODE);
       const result = {
         isSorted: false,
         codes: codes,
         isAutoBD: false,
         isPrinted: true,
-        codeIDs: codesIDs
+        codeIDs: codesIDs,
       };
-      console.log('Result:', result);
+      console.log("Result:", result);
       updateToPC("checkdingoais", JSON.stringify(result));
     },
-    "getmypostdata": async (data: any) => await handleGetMyPostData(data),
-    "continueAuto": async (_data: any) => { // Không cần data.DoiTuong cho lệnh này
+    getmypostdata: async (data: any) => await handleGetMyPostData(data),
+    continueAuto: async (_data: any) => {
+      // Không cần data.DoiTuong cho lệnh này
       console.log("Received 'continueAuto' command from Firebase.");
       if (!isStoppedOnError) {
-        updateToPhone("info", "Không có lỗi nào đang được ghi nhận để tiếp tục.");
-        console.log("'continueAuto' received but system is not in an error state.");
+        updateToPhone(
+          "info",
+          "Không có lỗi nào đang được ghi nhận để tiếp tục.",
+        );
+        console.log(
+          "'continueAuto' received but system is not in an error state.",
+        );
         return;
       }
       // 1. Reset cờ lỗi
@@ -792,9 +950,8 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
       updateToPhone("message", "Đã nhận lệnh tiếp tục. Thử xử lý lại...");
 
       // 3. Xóa badge lỗi (nếu có)
-      chrome.action.setBadgeText({ text: '' });
-      chrome.action.setBadgeBackgroundColor({ color: '#007bff' }); // Reset màu badge (tùy chọn)
-
+      chrome.action.setBadgeText({ text: "" });
+      chrome.action.setBadgeBackgroundColor({ color: "#007bff" }); // Reset màu badge (tùy chọn)
 
       // 4. Kích hoạt lại việc kiểm tra và xử lý
       // `triggerProcessingCheck` sẽ tự động tìm item tiếp theo chưa được xử lý
@@ -805,20 +962,25 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
       // trong lúc chờ bấm "Tiếp tục".
       triggerProcessingCheck();
     },
-    "xacnhanportal": async (data: any) => await handleXacNhanPortal(data.DoiTuong, token),
+    xacnhanportal: async (data: any) =>
+      await handleXacNhanPortal(data.DoiTuong, token),
 
-    "preparePrintMaHieus": async (data: any) => await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
-    "hoanTatTin": async (data: any) => await hoanTatTin(JSON.parse(data.DoiTuong)),
-    "dieuTin": async (data: any) => await dieuTin(JSON.parse(data.DoiTuong)),
-    "sendtoportal": async (data: any) => { handleSendToPortal(data.DoiTuong) },
+    preparePrintMaHieus: async (data: any) =>
+      await preParePrintMaHieus(JSON.parse(data.DoiTuong)),
+    hoanTatTin: async (data: any) =>
+      await hoanTatTin(JSON.parse(data.DoiTuong)),
+    dieuTin: async (data: any) => await dieuTin(JSON.parse(data.DoiTuong)),
+    sendtoportal: async (data: any) => {
+      handleSendToPortal(data.DoiTuong);
+    },
     // "test": async (data: any) => { await hoanTatTinPNSFetch(["CK990242988VN", "CK990403835VN"], 10) },
-    "sendautotoportal": async (data: any) => handleSendAutoToPortal(data),
-    "sendtoendandprint": async () => handleChayDenCuoiVaIn(),
-    "savekhoptions": async (data: any) => handleSaveKHOption(data),
-    "edithanghoa": async (data: any) => handleEditHangHoa(data),
-    "updatekl": async (data: any) => await handleEditKL(data),
+    sendautotoportal: async (data: any) => handleSendAutoToPortal(data),
+    sendtoendandprint: async () => handleChayDenCuoiVaIn(),
+    savekhoptions: async (data: any) => handleSaveKHOption(data),
+    edithanghoa: async (data: any) => handleEditHangHoa(data),
+    updatekl: async (data: any) => await handleEditKL(data),
 
-    "getpns": async (data: any) => {
+    getpns: async (data: any) => {
       let dayLast;
       try {
         dayLast = JSON.parse(data.DoiTuong).day;
@@ -828,7 +990,7 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
       }
       await handleGetPNS(dayLast ?? "-2");
     },
-    "addpns": async (data: any) => {
+    addpns: async (data: any) => {
       let dayLast1;
       try {
         dayLast1 = JSON.parse(data.DoiTuong).day;
@@ -838,8 +1000,10 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
       }
       await handleAddPNS(dayLast1 ?? "-2");
     },
-    "khoitao": async (data: any) => { await handleKhoiTao(data); },
-    "edittoportal": async (data: any) => {
+    khoitao: async (data: any) => {
+      await handleKhoiTao(data);
+    },
+    edittoportal: async (data: any) => {
       try {
         const bgs = await getBuuGuisFromFirebase();
         const temp1 = JSON.parse(data.DoiTuong);
@@ -855,8 +1019,7 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
         console.error("Error in edittoportal case:", error);
       }
     },
-    "loginpns": async (data: any) => {
-
+    loginpns: async (data: any) => {
       const listTab = await chrome.tabs.query({});
       if (listTab.length === 0) return;
       for (let i = 0; i < listTab.length; i++) {
@@ -866,7 +1029,7 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
             {
               message: "SENDCAPCHAR",
               content: data.DoiTuong,
-              gd: false
+              gd: false,
             },
             (res) => {
               if (!chrome.runtime.lastError) {
@@ -874,13 +1037,13 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
               } else {
                 console.log("Lỗi khi nhận tin nhắn từ content PNS", res);
               }
-            }
+            },
           );
           break;
         }
       }
     },
-    "loginpnsgd": async (data: any) => {
+    loginpnsgd: async (data: any) => {
       const listTab = await chrome.tabs.query({});
       if (listTab.length === 0) return;
       for (let i = 0; i < listTab.length; i++) {
@@ -890,7 +1053,7 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
             {
               message: "SENDCAPCHAR",
               content: data.DoiTuong,
-              gd: true
+              gd: true,
             },
             (res) => {
               if (!chrome.runtime.lastError) {
@@ -898,17 +1061,18 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
               } else {
                 console.log("Lỗi khi nhận tin nhắn từ content PNS", res);
               }
-            }
+            },
           );
           break;
         }
       }
     },
-    "getPortal": async (data: any) => await handleGetPortal(data.DoiTuong),
-    "printPage": async (data: any) => await handlePrintPage(data.DoiTuong),
-    "printPageSort": async (data: any) => await handlePrintPageSort(data),
-    "printSortTinhVaNoiDung": async (data: any) => await handlePrintSortTinhVaNoiDung(data),
-    "getMaHieus": async (data: any) => {
+    getPortal: async (data: any) => await handleGetPortal(data.DoiTuong),
+    printPage: async (data: any) => await handlePrintPage(data.DoiTuong),
+    printPageSort: async (data: any) => await handlePrintPageSort(data),
+    printSortTinhVaNoiDung: async (data: any) =>
+      await handlePrintSortTinhVaNoiDung(data),
+    getMaHieus: async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
       await updateToPhone("getMaHieus", JSON.stringify(maHieus));
     },
@@ -919,13 +1083,12 @@ if (!commandsNoTokenRequired.includes(data.Lenh)) {
   }
 }
 initFirebase();
-setUpAlarm()
+setUpAlarm();
 
 // --- Listener TIN NHẮN từ content script ---
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   if (request.event === "CONTENT")
     if (request.message === "SEND_CAPCHAR") {
-
       // Xử lý dữ liệu captcha ở đây
       // Ví dụ:
       updateToPhone("showcapchar", request.content, request.keyMessage);
@@ -935,7 +1098,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       updateToPhone(
         "checkstatemh",
         request.content + "|" + request.content1,
-        request.keyMessage
+        request.keyMessage,
       );
     }
 
@@ -945,8 +1108,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   const messagesToBlockOnError = ["SEND_MH", "REQUEST_EXCEL", "ADD"]; // Ví dụ
 
   if (isStoppedOnError && messagesToBlockOnError.includes(request.message)) {
-    console.warn(`Processing stopped due to error. Blocking message: ${request.message}`);
-    sendResponse({ status: "error", error: "Processing stopped due to previous error" });
+    console.warn(
+      `Processing stopped due to error. Blocking message: ${request.message}`,
+    );
+    sendResponse({
+      status: "error",
+      error: "Processing stopped due to previous error",
+    });
     return true; // Quan trọng: Vẫn trả về true để giữ kênh mở
   }
   // --- KẾT THÚC KIỂM TRA ---
@@ -959,14 +1127,16 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       } else if (request.message === "SEND_MH") {
         // Message này có thể không cần thiết nữa nếu background quản lý hết
         // Hoặc dùng để xác nhận lại lần cuối từ content script
-        console.log(`Confirmation from content script for ${request.content}: ${request.content1}`);
+        console.log(
+          `Confirmation from content script for ${request.content}: ${request.content1}`,
+        );
         sendResponse({ status: "received" });
       } else if (request.message === "REQUEST_EXCEL") {
         let idsToFetch = [];
         // Đảm bảo request.content là mảng string
         if (Array.isArray(request.content)) {
           idsToFetch = request.content.map(String);
-        } else if (typeof request.content === 'string') {
+        } else if (typeof request.content === "string") {
           idsToFetch = [request.content];
         } else {
           console.error("Invalid content for REQUEST_EXCEL:", request.content);
@@ -974,12 +1144,17 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
           return;
         }
 
-
         try {
           const res = await getMaHieusFromPortalId(idsToFetch, token);
           if (!res) {
-            updateToPhone("message", "Không lấy được dữ liệu từ Portal để xuất Excel");
-            sendResponse({ status: "error", error: "Failed to fetch data from Portal" });
+            updateToPhone(
+              "message",
+              "Không lấy được dữ liệu từ Portal để xuất Excel",
+            );
+            sendResponse({
+              status: "error",
+              error: "Failed to fetch data from Portal",
+            });
           } else {
             await openAndExportExcel(res, request.request, request.ishcc);
             sendResponse({ status: "success" });
@@ -999,33 +1174,219 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         // Xử lý các message khác nếu có
         sendResponse({ status: "unknown_message" });
       }
+    } else if (request.event === "CONTENTMY") {
+      // ===== THÊM MỚI: Xử lý các message từ contentMy.tsx =====
+      if (request.type === "UPDATE_EXTRA_INFO") {
+        handleUpdateExtraInfo(request.payload, sendResponse);
+        return; // Không return true ở đây vì đã xử lý async bên trong
+      } else if (request.type === "GET_EXTRA_INFO") {
+        handleGetExtraInfo(request.payload, sendResponse);
+        return;
+      } else if (request.type === "DELETE_EXTRA_INFO") {
+        handleDeleteExtraInfo(request.payload, sendResponse);
+        return;
+      } else if (request.type === "DELETE_LAST_LINE_EXTRA_INFO") {
+        handleDeleteLastLineExtraInfo(request.payload, sendResponse);
+        return;
+      } else if (request.type === "CREATE_COMPLAINT") {
+        handleCreateComplaint(request.payload, sendResponse);
+        return;
+      }
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
-    }     // Thêm các event khác nếu cần
+    } // Thêm các event khác nếu cần
   })();
   return true; // Quan trọng: Luôn trả về true để giữ kênh message mở cho các xử lý bất đồng bộ
 });
 const preParePrintMaHieus = async (maHieus: string[]) => {
   await prepareBlobs(maHieus);
+};
+
+/**
+ * Lưu thông tin thêm vào Firebase
+ */
+async function handleUpdateExtraInfo(
+  payload: { maVanDon: string; content: string },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { maVanDon, content } = payload;
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lấy log cũ từ Firebase
+    const snapshot = await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).get();
+    const oldLog = snapshot.val() || "";
+
+    // Tạo timestamp
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, "0");
+    const month = String(now.getMonth() + 1).padStart(2, "0");
+    const year = now.getFullYear();
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const timestamp = `${day}-${month}-${year} ${hours}:${minutes}`;
+
+    // Tạo log entry mới
+    const newLogEntry = `${timestamp} ${content}`;
+
+    // Thêm log mới
+    const updatedLog = oldLog ? `${oldLog}\n${newLogEntry}` : newLogEntry;
+
+    // Lưu vào Firebase
+    await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).set(updatedLog);
+
+    console.log(`Đã cập nhật thông tin cho ${maVanDon} vào Firebase`);
+    sendResponse({ status: "success", updatedLog: updatedLog });
+  } catch (error: any) {
+    console.error("Lỗi khi cập nhật thông tin thêm:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
 }
-async function handleCheckPortal(){
+
+/**
+ * Lấy thông tin thêm từ Firebase
+ */
+async function handleGetExtraInfo(
+  payload: { maVanDon: string },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { maVanDon } = payload;
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lấy dữ liệu từ Firebase
+    const snapshot = await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).get();
+    const data = snapshot.val() || "";
+
+    sendResponse({ status: "success", data: data });
+  } catch (error: any) {
+    console.error("Lỗi khi lấy thông tin thêm:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+
+/**
+ * Xóa thông tin thêm khỏi Firebase
+ */
+async function handleDeleteExtraInfo(
+  payload: { maVanDon: string },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { maVanDon } = payload;
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Xóa dữ liệu khỏi Firebase
+    await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).remove();
+
+    console.log(`Đã xóa thông tin thêm của ${maVanDon} khỏi Firebase`);
+    sendResponse({ status: "success" });
+  } catch (error: any) {
+    console.error("Lỗi khi xóa thông tin thêm:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+
+/**
+ * Xóa dòng cuối cùng của thông tin thêm từ Firebase
+ */
+async function handleDeleteLastLineExtraInfo(
+  payload: { maVanDon: string },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { maVanDon } = payload;
+    
+    console.log(`[BG] handleDeleteLastLineExtraInfo được gọi cho ${maVanDon}`);
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lấy log hiện tại từ Firebase
+    const snapshot = await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).get();
+    const currentLog = snapshot.val() || "";
+    
+    console.log(`[BG] Current log length: ${currentLog.length}`);
+    console.log(`[BG] Current log:`, currentLog);
+
+    if (!currentLog || currentLog.trim() === "") {
+      console.log(`[BG] Không có thông tin để xóa`);
+      sendResponse({ status: "error", error: "Không có thông tin để xóa" });
+      return;
+    }
+
+    // Tách các dòng
+    const lines = currentLog.split('\n').filter((line: string) => line.trim() !== '');
+    console.log(`[BG] Số dòng hiện tại: ${lines.length}`);
+
+    if (lines.length === 0) {
+      // Không có dòng nào, xóa toàn bộ
+      console.log(`[BG] Không có dòng nào, xóa node`);
+      await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).remove();
+      sendResponse({ status: "success", updatedLog: "" });
+      return;
+    }
+
+    // Xóa dòng cuối
+    const removedLine = lines.pop();
+    console.log(`[BG] Đã xóa dòng: ${removedLine}`);
+    console.log(`[BG] Số dòng còn lại: ${lines.length}`);
+
+    // Tạo log mới
+    const updatedLog = lines.join('\n');
+    console.log(`[BG] Updated log:`, updatedLog);
+
+    if (updatedLog.trim() === "") {
+      // Nếu không còn dòng nào, xóa luôn node trên Firebase
+      console.log(`[BG] Không còn dòng nào, xóa node`);
+      await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).remove();
+      sendResponse({ status: "success", updatedLog: "" });
+    } else {
+      // Lưu log mới vào Firebase
+      console.log(`[BG] Lưu log mới vào Firebase`);
+      await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).set(updatedLog);
+      sendResponse({ status: "success", updatedLog: updatedLog });
+    }
+
+    console.log(`[BG] Đã xóa dòng cuối của ${maVanDon} khỏi Firebase`);
+  } catch (error: any) {
+    console.error("[BG] Lỗi khi xóa dòng cuối:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+async function handleCheckPortal() {
   try {
     updateToPhone("message", "Đang gửi yêu cầu lấy danh sách mã hiệu tồn...");
-    
+
     // 1. Gửi lệnh "getmahieuton" lên PC
     await updateToPC("getmahieuton", "");
-    
+
     // 2. Chờ nhận phản hồi từ PC thông qua Firebase
-    updateToPhone("message", "Đã gửi lệnh lên PC, đang chờ danh sách mã hiệu...");
-    
+    updateToPhone(
+      "message",
+      "Đã gửi lệnh lên PC, đang chờ danh sách mã hiệu...",
+    );
+
     // Thiết lập Promise để chờ phản hồi từ PC
     const codesData = await waitForMaHieuListFromPC();
-    
-    
+
     // 3. Xử lý portal dựa trên danh sách mã hiệu
     await processPortalWithMaHieuList(codesData);
-    
   } catch (error: any) {
     console.error("Lỗi trong handleCheckPortal:", error);
     updateToPhone("message", `Lỗi kiểm tra portal: ${error.message}`);
@@ -1034,7 +1395,7 @@ async function handleCheckPortal(){
 
 // Biến toàn cục để lưu trữ response từ PC
 let pendingMaHieuResponse: {
-  resolve: (value: { allCodes: string[], unprocessedCodes: string[] }) => void;
+  resolve: (value: { allCodes: string[]; unprocessedCodes: string[] }) => void;
   reject: (reason: any) => void;
 } | null = null;
 
@@ -1044,35 +1405,34 @@ let pendingMaHieuResponse: {
 async function handleMaHieuFromPC(data: any): Promise<void> {
   try {
     console.log("Received mã hiệu response from PC:", data);
-    
+
     if (!pendingMaHieuResponse) {
       console.log("No pending request for mã hiệu response");
       return;
     }
 
     const responseData = JSON.parse(data.DoiTuong);
-    
+
     // Kiểm tra nếu responseData là mảng HangHoaItem
     if (Array.isArray(responseData)) {
       // Lấy tất cả mã hiệu từ PC
       const allCodes = responseData
-        .map((item: any) => item.SH )
+        .map((item: any) => item.SH)
         .filter((code: string) => code && code.trim() !== "");
-      
+
       // Lọc các item có State = 0 (chưa đóng đi)
       const unprocessedCodes = responseData
         .filter((item: any) => item.ST === 0)
         .map((item: any) => item.SH)
         .filter((code: string) => code && code.trim() !== "");
-      
-      
+
       const result = { allCodes, unprocessedCodes };
       pendingMaHieuResponse.resolve(result);
     } else {
       console.error("Invalid response format from PC");
       pendingMaHieuResponse.reject(new Error("Invalid response format"));
     }
-    
+
     pendingMaHieuResponse = null;
   } catch (error) {
     console.error("Error handling mã hiệu from PC:", error);
@@ -1086,17 +1446,22 @@ async function handleMaHieuFromPC(data: any): Promise<void> {
 /**
  * Chờ nhận danh sách mã hiệu từ PC thông qua Firebase
  */
-async function waitForMaHieuListFromPC(): Promise<{ allCodes: string[], unprocessedCodes: string[] }> {
+async function waitForMaHieuListFromPC(): Promise<{
+  allCodes: string[];
+  unprocessedCodes: string[];
+}> {
   console.log("waitForMaHieuListFromPC called");
   return new Promise((resolve, reject) => {
     console.log("pendingMaHieuResponse set up");
     // Lưu trữ resolve/reject để sử dụng trong handleMaHieuFromPC
     pendingMaHieuResponse = { resolve, reject };
-    
+
     // Timeout sau 30 giây
     setTimeout(() => {
       if (pendingMaHieuResponse) {
-        pendingMaHieuResponse.reject(new Error("Timeout waiting for mã hiệu list from PC"));
+        pendingMaHieuResponse.reject(
+          new Error("Timeout waiting for mã hiệu list from PC"),
+        );
         pendingMaHieuResponse = null;
       }
     }, 30000);
@@ -1106,106 +1471,133 @@ async function waitForMaHieuListFromPC(): Promise<{ allCodes: string[], unproces
 /**
  * Xử lý portal dựa trên danh sách mã hiệu từ PC
  */
-async function processPortalWithMaHieuList(codesData: { allCodes: string[], unprocessedCodes: string[] }): Promise<void> {
+async function processPortalWithMaHieuList(codesData: {
+  allCodes: string[];
+  unprocessedCodes: string[];
+}): Promise<void> {
   try {
     const { allCodes, unprocessedCodes } = codesData;
-    
-    
+
     // Chuyển đổi thành Set để tra cứu nhanh hơn
     const allCodesSet = new Set(allCodes);
     const unprocessedCodesSet = new Set(unprocessedCodes);
-    
+
     // Lấy danh sách portal đã đánh dấu hoàn thành từ Firebase
     // console.log("Fetching processed portals from Firebase...");
-    const processedPortalsSnapshot = await db!.ref("PORTAL/PROCESSED_PORTALS").get();
+    const processedPortalsSnapshot = await db!
+      .ref("PORTAL/PROCESSED_PORTALS")
+      .get();
     if (!processedPortalsSnapshot.exists()) {
       console.log("No processed portals found, initializing empty set.");
     } else {
     }
     const processedPortals = new Set(processedPortalsSnapshot.val() || []);
-    
+
     // Lấy dữ liệu portal từ API
     let toDayText = formatDateRight(new Date());
     let maHieus = "";
-    
+
     const portalData: any = await getItemHdr(toDayText, maHieus);
     if (portalData.status === 401) {
       updateToPhone("error", "Lỗi xác thực khi lấy dữ liệu portal");
       return;
     }
-    
+
     // Lọc các portal có trạng thái "chấp nhận" và chưa được đánh dấu
-    const acceptedPortals = portalData.filter((portal: any) => 
-      portal.status === "3" && !processedPortals.has(portal.id)
+    const acceptedPortals = portalData.filter(
+      (portal: any) =>
+        portal.status === "3" && !processedPortals.has(portal.id),
     );
-    
-    updateToPhone("message", `Tìm thấy ${acceptedPortals.length} portal cần kiểm tra với ${unprocessedCodes.length} mã hiệu chưa đóng đi`);
-    
+
+    updateToPhone(
+      "message",
+      `Tìm thấy ${acceptedPortals.length} portal cần kiểm tra với ${unprocessedCodes.length} mã hiệu chưa đóng đi`,
+    );
+
     // Lấy cache mã hiệu portal từ Firebase (theo ngày)
-    const todayKey = formatDateRight(new Date()).replace(/\//g, '-'); // VD: "08-08-2025"
+    const todayKey = formatDateRight(new Date()).replace(/\//g, "-"); // VD: "08-08-2025"
     const portalCodesCache = await getPortalCodesCache(todayKey);
-    
+
     // Kiểm tra từng portal
     let newlyProcessedPortals: string[] = [];
     let totalChecked = 0;
-    
+
     for (const portal of acceptedPortals) {
       totalChecked++;
-      
+
       try {
         // Lấy danh sách mã hiệu của portal này (có cache)
-        const maHieusData = await getCachedMaHieusFromPortalId(portal.id, token, portalCodesCache, todayKey);
-        
+        const maHieusData = await getCachedMaHieusFromPortalId(
+          portal.id,
+          token,
+          portalCodesCache,
+          todayKey,
+        );
+
         if (!maHieusData || maHieusData.length === 0) {
           console.warn(`Portal ${portal.id} không có mã hiệu`);
           continue;
         }
-        
+
         // Trích xuất tất cả mã hiệu từ portal
         const portalCodes = maHieusData
           .flatMap((m: any) => m.itemDetails.map((item: any) => item.ttNumber))
           .filter((code: any) => code); // Loại bỏ giá trị null/undefined
-        
+
         // Kiểm tra xem TẤT CẢ mã hiệu của portal có trong danh sách từ PC không
-        const portalCodesNotInPC = portalCodes.filter((code: any) => !allCodesSet.has(code));
-        
+        const portalCodesNotInPC = portalCodes.filter(
+          (code: any) => !allCodesSet.has(code),
+        );
+
         if (portalCodesNotInPC.length > 0) {
           // console.log(`Portal ${portal.id} (${portal.name}) có ${portalCodesNotInPC.length} mã hiệu không có trong PC - không thể xác định trạng thái:`, portalCodesNotInPC);
           continue; // Bỏ qua portal này vì không thể xác định trạng thái hoàn toàn
         }
-        
+
         // Tất cả mã hiệu đều có trong PC, kiểm tra xem có mã nào chưa đóng đi không
-        const hasUnprocessedCodes = portalCodes.some((code: any) => unprocessedCodesSet.has(code));
-        
+        const hasUnprocessedCodes = portalCodes.some((code: any) =>
+          unprocessedCodesSet.has(code),
+        );
+
         if (!hasUnprocessedCodes) {
           // Portal không có mã hiệu nào chưa đóng đi → đánh dấu hoàn thành
           newlyProcessedPortals.push(portal.id);
           processedPortals.add(portal.id);
-        } 
+        }
         // else {
         //   const unprocessedInPortal = portalCodes.filter((code: any) => unprocessedCodesSet.has(code));
         //   console.log(`Portal ${portal.id} (${portal.name}) vẫn còn ${unprocessedInPortal.length}/${portalCodes.length} mã hiệu chưa đóng đi:`, unprocessedInPortal);
         // }
-        
       } catch (error: any) {
         console.error(`Lỗi khi kiểm tra portal ${portal.id}:`, error);
-        updateToPhone("message", `Lỗi kiểm tra portal ${portal.name}: ${error.message}`);
+        updateToPhone(
+          "message",
+          `Lỗi kiểm tra portal ${portal.name}: ${error.message}`,
+        );
       }
     }
-    
+
     // Cập nhật danh sách portal đã xử lý lên Firebase
     if (newlyProcessedPortals.length > 0) {
-      await db!.ref("PORTAL/PROCESSED_PORTALS").set(Array.from(processedPortals));
-      updateToPhone("message", `Đã đánh dấu ${newlyProcessedPortals.length} portal `);
+      await db!
+        .ref("PORTAL/PROCESSED_PORTALS")
+        .set(Array.from(processedPortals));
+      updateToPhone(
+        "message",
+        `Đã đánh dấu ${newlyProcessedPortals.length} portal `,
+      );
     }
-    
+
     // Cập nhật dữ liệu portal (loại bỏ những portal đã hoàn thành)
-    const updatedPortalData = portalData.filter((portal: any) => 
-      !processedPortals.has(portal.id)
+    const updatedPortalData = portalData.filter(
+      (portal: any) => !processedPortals.has(portal.id),
     );
 
     // Loại bỏ các portal có trạng thái = 2 và số lượng = 0
-    const filteredPortalData = updatedPortalData.filter((m: any) => !((m.status === "2" || m.status==="1") && Number(m.amount) === 0));
+    const filteredPortalData = updatedPortalData.filter(
+      (m: any) =>
+        !((m.status === "2" || m.status === "1") && Number(m.amount) === 0),
+    );
 
     const newItems = filteredPortalData.map((m: any) => ({
       Id: m.id,
@@ -1215,13 +1607,15 @@ async function processPortalWithMaHieuList(codesData: { allCodes: string[], unpr
       SoLuong: m.amount,
       NguoiNhap: m.username,
     }));
-    
+
     // Cập nhật Firebase
     await db!.ref("PORTAL/MAINPAGE/").remove();
     await db!.ref("PORTAL/MAINPAGE/").set(newItems);
-    
-    updateToPhone("message", `Hoàn thành kiểm tra ${newItems.length} portal chưa xử lý`);
-    
+
+    updateToPhone(
+      "message",
+      `Hoàn thành kiểm tra ${newItems.length} portal chưa xử lý`,
+    );
   } catch (error: any) {
     console.error("Lỗi trong processPortalWithMaHieuList:", error);
     updateToPhone("error", `Lỗi kiểm tra trạng thái portal: ${error.message}`);
@@ -1256,16 +1650,25 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
         passwordPortal = parsedDoiTuong.password;
       }
 
-
       if (!maKH) {
         throw new Error("Dữ liệu lệnh thiếu maKH.");
       }
     } catch (parseError: any) {
-      console.error(`${logPrefix} Failed to parse DoiTuong JSON:`, commandData.DoiTuong, parseError);
-      updateToPhone("error", `Lỗi dữ liệu lệnh sendautotoportal: ${parseError.message}`);
+      console.error(
+        `${logPrefix} Failed to parse DoiTuong JSON:`,
+        commandData.DoiTuong,
+        parseError,
+      );
+      updateToPhone(
+        "error",
+        `Lỗi dữ liệu lệnh sendautotoportal: ${parseError.message}`,
+      );
       return;
     }
-    console.log(`${logPrefix} Parsed command - maKH: ${maKH}, startMaBG: ${startMaBG}, options:`, options);
+    console.log(
+      `${logPrefix} Parsed command - maKH: ${maKH}, startMaBG: ${startMaBG}, options:`,
+      options,
+    );
     // --- Bước 2: Tìm hoặc Khởi tạo Tab Portal (CHỈ MỘT LẦN) ---
     console.log(`${logPrefix} Finding or Initializing Portal tab ONCE...`);
     targetTabId = await findPortalTabId(maKH, hdrId); // Gọi hàm tìm/khởi tạo
@@ -1293,11 +1696,17 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
       }
       console.log(`${logPrefix} Fetched ${bgs.length} items from Firebase.`);
       if (bgs.length === 0) {
-        updateToPhone("info", "Không có bưu gửi nào trong danh sách trên Firebase.");
+        updateToPhone(
+          "info",
+          "Không có bưu gửi nào trong danh sách trên Firebase.",
+        );
         return;
       }
     } catch (fetchError: any) {
-      console.error(`${logPrefix} Error fetching or parsing BuuGuis from Firebase:`, fetchError);
+      console.error(
+        `${logPrefix} Error fetching or parsing BuuGuis from Firebase:`,
+        fetchError,
+      );
       updateToPhone("error", `Lỗi lấy dữ liệu Firebase: ${fetchError.message}`);
       return;
     }
@@ -1305,10 +1714,15 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     // 3. Xác định chỉ số bắt đầu (startIndex)
     let startIndex = 0;
     if (startMaBG) {
-      startIndex = bgs.findIndex(item => item.MaBuuGui === startMaBG);
+      startIndex = bgs.findIndex((item) => item.MaBuuGui === startMaBG);
       if (startIndex === -1) {
-        console.warn(`${logPrefix} startMaBG "${startMaBG}" not found in the fetched list. Starting from index 0.`);
-        updateToPhone("warning", `Không tìm thấy mã bắt đầu ${startMaBG}, xử lý từ đầu.`);
+        console.warn(
+          `${logPrefix} startMaBG "${startMaBG}" not found in the fetched list. Starting from index 0.`,
+        );
+        updateToPhone(
+          "warning",
+          `Không tìm thấy mã bắt đầu ${startMaBG}, xử lý từ đầu.`,
+        );
         startIndex = 0; // Nếu không tìm thấy, bắt đầu từ đầu
       } else {
         console.log(`${logPrefix} Found startMaBG at index ${startIndex}.`);
@@ -1318,14 +1732,22 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     }
 
     // 4. Vòng lặp xử lý tuần tự
-    updateToPhone("message", `Bắt đầu xử lý danh sách ${bgs.length - startIndex} bưu gửi...`);
+    updateToPhone(
+      "message",
+      `Bắt đầu xử lý danh sách ${bgs.length - startIndex} bưu gửi...`,
+    );
     for (let i = startIndex; i < bgs.length; i++) {
       if (shouldStopLoop) break; // Kiểm tra cờ dừng lỗi
 
       const currentItem = bgs[i];
-      console.log(`${logPrefix} Processing item ${i + 1}/${bgs.length} (Index in list: ${i}): ${currentItem.MaBuuGui}`);
+      console.log(
+        `${logPrefix} Processing item ${i + 1}/${bgs.length} (Index in list: ${i}): ${currentItem.MaBuuGui}`,
+      );
       chrome.action.setBadgeText({ text: `${i + 1 - startIndex}` }); // Hiển thị số thứ tự xử lý
-      updateToPhone("message", `Đang xử lý ${i + 1 - startIndex}/${bgs.length - startIndex}: ${currentItem.MaBuuGui}`);
+      updateToPhone(
+        "message",
+        `Đang xử lý ${i + 1 - startIndex}/${bgs.length - startIndex}: ${currentItem.MaBuuGui}`,
+      );
 
       try {
         // 5.1. Kiểm tra Tab còn tồn tại không (an toàn hơn)
@@ -1335,60 +1757,91 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
           await chrome.tabs.get(targetTabId!); // Thêm ! vì đã kiểm tra lúc đầu
         } catch (e) {
           // Nếu tab không còn tồn tại -> Lỗi nghiêm trọng, dừng lại
-          console.error(`${logPrefix} Target tab ${targetTabId} not found before sending message. Stopping.`);
-          updateToPhone("error", `Tab Portal (ID: ${targetTabId}) đã bị đóng. Dừng xử lý.`);
+          console.error(
+            `${logPrefix} Target tab ${targetTabId} not found before sending message. Stopping.`,
+          );
+          updateToPhone(
+            "error",
+            `Tab Portal (ID: ${targetTabId}) đã bị đóng. Dừng xử lý.`,
+          );
           chrome.action.setBadgeText({ text: "TAB_GONE" });
-          chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+          chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
           shouldStopLoop = true;
           continue; // Dừng lần lặp này và thoát vòng lặp ở lần kiểm tra tiếp theo
         }
 
-
         // 4.2. Gửi message PROCESS_SINGLE_ITEM và chờ response
-        console.log(`${logPrefix} Sending PROCESS_SINGLE_ITEM for ${currentItem.MaBuuGui} to tab ${targetTabId}...`);
+        console.log(
+          `${logPrefix} Sending PROCESS_SINGLE_ITEM for ${currentItem.MaBuuGui} to tab ${targetTabId}...`,
+        );
         // Dùng Promise để await response từ sendMessage
         const response = await new Promise<any>((resolve, reject) => {
-          chrome.tabs.sendMessage(targetTabId!, { // Thêm ! vì đã kiểm tra targetTabId
-            message: "PROCESS_SINGLE_ITEM",
-            current: currentItem,
-            makh: maKH, // maKH dùng chung từ lệnh
-            isDeletePhone: isDeletePhone,
-            keyMessage: keyMessage,
-            options: options // options dùng chung từ lệnh
-          }, (res) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message || "Lỗi gửi/nhận message"));
-            } else {
-              resolve(res); // Resolve với phản hồi từ content script
-            }
-          });
+          chrome.tabs.sendMessage(
+            targetTabId!,
+            {
+              // Thêm ! vì đã kiểm tra targetTabId
+              message: "PROCESS_SINGLE_ITEM",
+              current: currentItem,
+              makh: maKH, // maKH dùng chung từ lệnh
+              isDeletePhone: isDeletePhone,
+              keyMessage: keyMessage,
+              options: options, // options dùng chung từ lệnh
+            },
+            (res) => {
+              if (chrome.runtime.lastError) {
+                reject(
+                  new Error(
+                    chrome.runtime.lastError.message || "Lỗi gửi/nhận message",
+                  ),
+                );
+              } else {
+                resolve(res); // Resolve với phản hồi từ content script
+              }
+            },
+          );
         });
 
         // 4.3. Xử lý response
-        if (response && response.status === 'success') {
-          console.log(`${logPrefix} Successfully processed item: ${currentItem.MaBuuGui}`);
+        if (response && response.status === "success") {
+          console.log(
+            `${logPrefix} Successfully processed item: ${currentItem.MaBuuGui}`,
+          );
           // Không cần add vào processedItems của luồng tự động
 
           processCountSinceRefresh++; // Tăng biến đếm *cục bộ*
-          console.log(`${logPrefix} Success count since refresh: ${processCountSinceRefresh}`);
+          console.log(
+            `${logPrefix} Success count since refresh: ${processCountSinceRefresh}`,
+          );
 
           // 4.4. Kiểm tra và thực hiện refresh nếu cần
           if (processCountSinceRefresh >= REFRESH_THRESHOLD) {
-            console.log(`${logPrefix} Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${targetTabId}...`);
-            updateToPhone("message", `Đã xử lý ${processCountSinceRefresh} mã. Đang làm mới trang...`);
+            console.log(
+              `${logPrefix} Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${targetTabId}...`,
+            );
+            updateToPhone(
+              "message",
+              `Đã xử lý ${processCountSinceRefresh} mã. Đang làm mới trang...`,
+            );
             await delay(1000); // Delay trước refresh
 
             const refreshedTab = await hardRefreshSpecificTab(targetTabId!); // Gọi refresh
             if (!refreshedTab) {
-              console.error(`${logPrefix} Tab ${targetTabId} refresh failed/closed. Stopping loop.`);
-              updateToPhone("message", `Lỗi: Không thể làm mới tab ${targetTabId}. Dừng xử lý.`);
+              console.error(
+                `${logPrefix} Tab ${targetTabId} refresh failed/closed. Stopping loop.`,
+              );
+              updateToPhone(
+                "message",
+                `Lỗi: Không thể làm mới tab ${targetTabId}. Dừng xử lý.`,
+              );
               chrome.action.setBadgeText({ text: "REF_ERR" });
-              chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+              chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
               shouldStopLoop = true; // Đặt cờ dừng
               continue; // Bỏ qua phần còn lại của lần lặp
             }
 
-            console.log(`${logPrefix} Tab ${targetTabId} refreshed successfully. Resetting counter.`);
+            console.log(
+              `${logPrefix} Tab ${targetTabId} refreshed successfully. Resetting counter.`,
+            );
             updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
             processCountSinceRefresh = 0; // Reset biến đếm cục bộ
             targetTabId = refreshedTab.id; // Cập nhật lại tabId phòng trường hợp ID thay đổi (hiếm)
@@ -1397,23 +1850,36 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
           }
         } else {
           // Lỗi từ content script
-          const errorMsg = response?.error || (response ? 'Trạng thái không thành công' : 'Không có phản hồi');
-          console.error(`${logPrefix} Failed to process item ${currentItem.MaBuuGui} via content script: ${errorMsg}`, response);
-          updateToPhone("message", `Lỗi xử lý mã ${currentItem.MaBuuGui}: ${errorMsg}. Dừng lại.`);
+          const errorMsg =
+            response?.error ||
+            (response ? "Trạng thái không thành công" : "Không có phản hồi");
+          console.error(
+            `${logPrefix} Failed to process item ${currentItem.MaBuuGui} via content script: ${errorMsg}`,
+            response,
+          );
+          updateToPhone(
+            "message",
+            `Lỗi xử lý mã ${currentItem.MaBuuGui}: ${errorMsg}. Dừng lại.`,
+          );
           chrome.action.setBadgeText({ text: "CS_ERR" });
-          chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+          chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
           shouldStopLoop = true; // Đặt cờ dừng
           continue; // Bỏ qua phần còn lại của lần lặp
         }
 
         await delay(500); // Delay nhỏ giữa các lần xử lý thành công
-
       } catch (loopError: any) {
         // Bắt lỗi trong lần lặp hiện tại (tìm tab, gửi message, refresh...)
-        console.error(`${logPrefix} Error during loop iteration ${i} for item ${currentItem.MaBuuGui}:`, loopError);
-        updateToPhone("message", `Lỗi nghiêm trọng khi xử lý ${currentItem.MaBuuGui}: ${loopError.message}. Dừng lại.`);
+        console.error(
+          `${logPrefix} Error during loop iteration ${i} for item ${currentItem.MaBuuGui}:`,
+          loopError,
+        );
+        updateToPhone(
+          "message",
+          `Lỗi nghiêm trọng khi xử lý ${currentItem.MaBuuGui}: ${loopError.message}. Dừng lại.`,
+        );
         chrome.action.setBadgeText({ text: "LOOP_ERR" });
-        chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+        chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
         shouldStopLoop = true; // Đặt cờ dừng
         continue; // Bỏ qua phần còn lại của lần lặp
       }
@@ -1424,34 +1890,42 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
       console.log(`${logPrefix} Finished processing list successfully.`);
       updateToPhone("message", `Đang chuẩn bị in. Chờ xíu`, keyMessage);
       //chuyển MaBuuGui thành mảng từ bgs
-      var maHieus = bgs.map(m => m.MaBuuGui)
-      printMaHieus(maHieus)
+      var maHieus = bgs.map((m) => m.MaBuuGui);
+      printMaHieus(maHieus);
       updateToPhone("message", `In xong`, keyMessage);
       chrome.action.setBadgeText({ text: "OK" });
-      chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
+      chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
       await delay(2000);
-      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setBadgeText({ text: "" });
     } else {
       console.log(`${logPrefix} Processing loop stopped due to an error.`);
       // Badge lỗi đã được set ở nơi xảy ra lỗi
     }
-
   } catch (initialError: any) {
     // Bắt lỗi xảy ra *trước* vòng lặp (parse JSON, fetch Firebase)
-    console.error(`${logPrefix} Initial error before starting loop:`, initialError);
-    updateToPhone("message", `Lỗi khởi tạo xử lý theo lệnh: ${initialError.message}`);
+    console.error(
+      `${logPrefix} Initial error before starting loop:`,
+      initialError,
+    );
+    updateToPhone(
+      "message",
+      `Lỗi khởi tạo xử lý theo lệnh: ${initialError.message}`,
+    );
     chrome.action.setBadgeText({ text: "INIT_ERR" });
-    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
   } finally {
     // Đảm bảo badge được xóa nếu không phải OK và không có lỗi nào set badge
     const currentBadge = await chrome.action.getBadgeText({});
     if (currentBadge !== "OK" && !currentBadge.includes("ERR")) {
-      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setBadgeText({ text: "" });
     }
   }
 }
 
-const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boolean> => {
+const handleSendToPortal = async (
+  doiTuong: any,
+  isPrint = false,
+): Promise<boolean> => {
   console.log("handleSendToPortal: Bắt đầu gửi...", doiTuong);
   let bgsFirebase: firebase.database.DataSnapshot;
   let bgs: BuuGuiProps[];
@@ -1465,7 +1939,9 @@ const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boole
     bgsFirebase = await db!.ref("PORTAL/BuuGuis/").get();
     const rawVal = bgsFirebase.val();
     if (!rawVal) {
-      console.error("handleSendToPortal: Không lấy được dữ liệu BuuGuis từ Firebase.");
+      console.error(
+        "handleSendToPortal: Không lấy được dữ liệu BuuGuis từ Firebase.",
+      );
       updateToPhone("message", "Lỗi: Không có dữ liệu bưu gửi.", keyMessage);
       return false;
     }
@@ -1476,7 +1952,11 @@ const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boole
 
     if (s === -1) {
       console.warn("handleSendToPortal: Không tìm thấy bưu gửi:", temp1.maBG);
-      updateToPhone("message", `Lỗi: Không tìm thấy bưu gửi ${temp1.maBG}.`, keyMessage);
+      updateToPhone(
+        "message",
+        `Lỗi: Không tìm thấy bưu gửi ${temp1.maBG}.`,
+        keyMessage,
+      );
       return false; // Không tìm thấy thì dừng lại
     }
     console.log("handleSendToPortal: Tìm thấy bưu gửi tại index", s);
@@ -1490,7 +1970,11 @@ const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boole
 
     if (tabs.length === 0 || !tabs[0]?.id) {
       console.error("handleSendToPortal: Không tìm thấy tab đang active.");
-      updateToPhone("message", "Lỗi: Không tìm thấy tab Portal đang mở.", keyMessage);
+      updateToPhone(
+        "message",
+        "Lỗi: Không tìm thấy tab Portal đang mở.",
+        keyMessage,
+      );
       return false; // Không có tab active thì dừng
     }
     tabId = tabs[0].id;
@@ -1510,92 +1994,122 @@ const handleSendToPortal = async (doiTuong: any, isPrint = false): Promise<boole
           makh: temp1.maKH,
           keyMessage: keyMessage,
         },
-        (response) => { // Hàm callback này được gọi khi content script gọi sendResponse
+        (response) => {
+          // Hàm callback này được gọi khi content script gọi sendResponse
           // *** ĐÁNH DẤU: Kiểm tra lỗi giao tiếp ***
           if (chrome.runtime.lastError) {
-            console.error("handleSendToPortal: Lỗi khi gửi/nhận tin nhắn:", chrome.runtime.lastError.message);
+            console.error(
+              "handleSendToPortal: Lỗi khi gửi/nhận tin nhắn:",
+              chrome.runtime.lastError.message,
+            );
             // Reject promise nếu có lỗi ở tầng Chrome API
-            return reject(new Error(chrome.runtime.lastError.message || "Lỗi không xác định khi gửi tin nhắn"));
+            return reject(
+              new Error(
+                chrome.runtime.lastError.message ||
+                  "Lỗi không xác định khi gửi tin nhắn",
+              ),
+            );
           }
           // Nếu không có lỗi ở tầng Chrome API, coi như content script đã nhận và xử lý
-          console.log("handleSendToPortal: Phản hồi từ content script:", response);
+          console.log(
+            "handleSendToPortal: Phản hồi từ content script:",
+            response,
+          );
           // *** ĐÁNH DẤU: Resolve promise khi nhận được phản hồi ***
           if (response) {
             resolve(true);
           } else {
             resolve(false);
           }
-        }
+        },
       );
     });
     if (!isAddOk) {
       console.error("handleSendToPortal: Lỗi content script.");
       updateToPhone("error", "Lỗi: từ content script.", keyMessage);
       return false; // Không có phản hồi thì dừng
-
     }
     // *** ĐÁNH DẤU: Code này chỉ chạy *sau khi* Promise được resolve ***
     console.log("handleSendToPortal: Content script đã xử lý xong lệnh ADD.");
-    updateToPhone("message", `Đã gửi và xử lý xong ${temp1.maBG} trên Portal.`, keyMessage);
+    updateToPhone(
+      "message",
+      `Đã gửi và xử lý xong ${temp1.maBG} trên Portal.`,
+      keyMessage,
+    );
     if (isPrint) {
       updateToPhone("message", `Đang chuẩn bị in. Chờ xíu`, keyMessage);
       //chuyển MaBuuGui thành mảng từ bgs
-      var maHieus = bgs.map(m => m.MaBuuGui)
-      printMaHieus(maHieus)
+      var maHieus = bgs.map((m) => m.MaBuuGui);
+      printMaHieus(maHieus);
       updateToPhone("message", `In xong`, keyMessage);
     }
     return true; // *** ĐÁNH DẤU: Trả về true báo hiệu thành công ***
-
   } catch (error: any) {
     // Bắt lỗi từ các await trước đó hoặc từ Promise bị reject
-    console.error("handleSendToPortal: Lỗi trong quá trình gửi lệnh ADD:", error);
-    updateToPhone("message", `Lỗi khi gửi lệnh ADD (${temp1?.maBG || '?'}): ${error.message}`, keyMessage);
+    console.error(
+      "handleSendToPortal: Lỗi trong quá trình gửi lệnh ADD:",
+      error,
+    );
+    updateToPhone(
+      "message",
+      `Lỗi khi gửi lệnh ADD (${temp1?.maBG || "?"}): ${error.message}`,
+      keyMessage,
+    );
     return false; // *** ĐÁNH DẤU: Trả về false báo hiệu thất bại ***
   }
 };
 
-
 async function dieuTin(maHieus: any) {
   // printMaHieus(JSON.parse(data.DoiTuong) as string[], token);
-  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/tin/quan-ly-tin.html", "quan-ly-tin")
+  var activeTab = await createOrActiveTab(
+    "https://packnsend.vnpost.vn/tin/quan-ly-tin.html",
+    "quan-ly-tin",
+  );
   var text = "";
   for (let i = 0; i < maHieus.length; i++) {
     const element = maHieus[i];
-    text += element + " "
+    text += element + " ";
   }
   if (activeTab != undefined)
     //wait 2s
     await delay(2000);
 
   await chrome.scripting.executeScript({
-    target: { tabId: activeTab!.id! }, func: (text) => {
-      var textTr = document.querySelector("#txtTrackingCode") as HTMLInputElement;
-      textTr.value = text
-
-    }, args: [text]
-  })
+    target: { tabId: activeTab!.id! },
+    func: (text) => {
+      var textTr = document.querySelector(
+        "#txtTrackingCode",
+      ) as HTMLInputElement;
+      textTr.value = text;
+    },
+    args: [text],
+  });
 }
-
 
 async function hoanTatTin(maHieus: any) {
   // printMaHieus(JSON.parse(data.DoiTuong) as string[], token);
-  var activeTab = await createOrActiveTab("https://packnsend.vnpost.vn/hoan-tat-tin.html", "hoan-tat-tin", true)
+  var activeTab = await createOrActiveTab(
+    "https://packnsend.vnpost.vn/hoan-tat-tin.html",
+    "hoan-tat-tin",
+    true,
+  );
   var text = "";
   for (let i = 0; i < maHieus.length; i++) {
     const element = maHieus[i];
-    text += element + ","
+    text += element + ",";
   }
   if (activeTab != undefined)
     //send command
-    await delay(2000)
+    await delay(2000);
   await chrome.scripting.executeScript({
-    target: { tabId: activeTab!.id! }, func: (text) => {
+    target: { tabId: activeTab!.id! },
+    func: (text) => {
       //Điền danh sách mã hiệu chỗ tìm kiếm
       var textTr = document.querySelector("#txtLadingCode") as HTMLInputElement;
-      textTr.value = text
+      textTr.value = text;
       // Tạo và dispatch sự kiện change
       function pad(n: number) {
-        return n < 10 ? '0' + n : n;
+        return n < 10 ? "0" + n : n;
       }
 
       const now = new Date();
@@ -1606,32 +2120,35 @@ async function hoanTatTin(maHieus: any) {
       const pastStr = `${pad(past.getDate())}/${pad(past.getMonth() + 1)}/${past.getFullYear()}`;
 
       // Gán giá trị vào input
-      const input = document.getElementById('txtDateRange');
+      const input = document.getElementById("txtDateRange");
       (input as HTMLInputElement).value = `${pastStr} - ${todayStr}`;
 
       // Trigger sự kiện nếu cần (nếu có event listener trên ô này)
-      const event = new Event('change', { bubbles: true });
+      const event = new Event("change", { bubbles: true });
       if (input) {
         input.dispatchEvent(event);
       } else {
         console.error("Input element is null");
       }
 
-
       //thực hiện nhấn nút từ id btnSearch và chờ 2s
-      const btnSearch = document.querySelector("#btnSearch") as HTMLButtonElement;
+      const btnSearch = document.querySelector(
+        "#btnSearch",
+      ) as HTMLButtonElement;
       if (btnSearch) {
         btnSearch.click();
       }
       //wait 2s
       setTimeout(() => {
-        const event = document.createEvent('HTMLEvents');
-        event.initEvent('change', true, false);
+        const event = document.createEvent("HTMLEvents");
+        event.initEvent("change", true, false);
         //dispatch event change cho textTr
         textTr.dispatchEvent(event);
 
         //Chọn tất cả
-        const selectElement = document.querySelector('select[name="tbl_order_ORD002_length"]');
+        const selectElement = document.querySelector(
+          'select[name="tbl_order_ORD002_length"]',
+        );
         if (selectElement) {
           (selectElement as HTMLSelectElement).value = "-1";
           selectElement?.dispatchEvent(event);
@@ -1640,46 +2157,49 @@ async function hoanTatTin(maHieus: any) {
         }
 
         //Đánh dấu chọn tất cả
-        const checkall = document.querySelector('#chkAll') as HTMLInputElement;
+        const checkall = document.querySelector("#chkAll") as HTMLInputElement;
         checkall.checked = true;
 
         checkall.dispatchEvent(event);
       }, 2000);
-
-
-    }, args: [text]
-  })
-
+    },
+    args: [text],
+  });
 }
 const prepareBlobs = async (maHieus: string[]) => {
   //đảo ngược maHieus
-  maHieus = maHieus.reverse()
+  maHieus = maHieus.reverse();
   //2	1	Bưu kiện - Parcel	1	593200	562310	29/12/2024	TB	2,0	CB593856255VN
   var blobsTemp: BlobStruct[] = await loadTodaysBlobs();
   for (let index = 0; index < maHieus.length; index++) {
     try {
       const element = maHieus[index];
-      updateToPhone("message", `Đang lưu ${index + 1}|${maHieus.length} MH ${element} `);
+      updateToPhone(
+        "message",
+        `Đang lưu ${index + 1}|${maHieus.length} MH ${element} `,
+      );
       chrome.action.setBadgeText({ text: (index + 1).toString() });
       var blob: Blob | null = null;
-      if (blobsTemp.find(m => m.maHieu === element) != null) {
-        blob = blobsTemp.find(m => m.maHieu === element)?.blob!
-      } else
-        blob = await getBlobMaHieu(element)
+      if (blobsTemp.find((m) => m.maHieu === element) != null) {
+        blob = blobsTemp.find((m) => m.maHieu === element)?.blob!;
+      } else blob = await getBlobMaHieu(element);
 
       if (blob != null) {
         //save blob to indexedDB
-        await saveBlob({ maHieu: element, blob: blob, dateCreated: Date.now() })
-      }
-      else {
+        await saveBlob({
+          maHieu: element,
+          blob: blob,
+          dateCreated: Date.now(),
+        });
+      } else {
         updateToPhone("message", `Lỗi MH khi in ${element}`);
         break;
       }
     } catch {
-      break
+      break;
     }
   }
-}
+};
 
 // Lưu trữ dữ liệu tỉnh thành để không phải load lại nhiều lần
 let tinhThanhData: { vo: string[]; ra: string[] } | null = null;
@@ -1692,10 +2212,10 @@ const loadTinhThanhData = async () => {
     return tinhThanhData;
   }
   try {
-    const url = chrome.runtime.getURL('tinhthanh.json');
+    const url = chrome.runtime.getURL("tinhthanh.json");
     const response = await fetch(url);
     if (!response.ok) {
-      throw new Error('Không thể tải file tinhthanh.json');
+      throw new Error("Không thể tải file tinhthanh.json");
     }
     tinhThanhData = await response.json();
     return tinhThanhData;
@@ -1713,12 +2233,12 @@ const loadTinhThanhData = async () => {
  * @returns Chuỗi đã được xóa dấu và chuyển thành chữ thường.
  */
 const removeDiacritics = (str: string): string => {
-  if (!str) return '';
+  if (!str) return "";
   return str
     .toLowerCase() // 1. Chuyển thành chữ thường
-    .normalize('NFD') // 2. Tách ký tự và dấu (e.g., 'vĩnh' -> 'v' + 'i' + 'n' + 'h' + '´')
-    .replace(/[\u0300-\u036f]/g, '') // 3. Xóa tất cả các ký tự dấu
-    .replace(/đ/g, 'd'); // 4. Xử lý riêng chữ 'đ' thành 'd'
+    .normalize("NFD") // 2. Tách ký tự và dấu (e.g., 'vĩnh' -> 'v' + 'i' + 'n' + 'h' + '´')
+    .replace(/[\u0300-\u036f]/g, "") // 3. Xóa tất cả các ký tự dấu
+    .replace(/đ/g, "d"); // 4. Xử lý riêng chữ 'đ' thành 'd'
 };
 
 /**
@@ -1727,25 +2247,28 @@ const removeDiacritics = (str: string): string => {
  * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
  * @returns 'ra', 'vo', hoặc 'khong_xac_dinh'.
  */
-const getDirection = (address: string, provinces: { vo: string[]; ra: string[] }): string => {
+const getDirection = (
+  address: string,
+  provinces: { vo: string[]; ra: string[] },
+): string => {
   const normalizedAddress = removeDiacritics(address.toLowerCase());
 
   // Kiểm tra trong danh sách "ra" trước
   for (const province of provinces.ra) {
     if (normalizedAddress.lastIndexOf(province) != -1) {
-      return 'ra';
+      return "ra";
     }
   }
 
   // Kiểm tra trong danh sách "vô"
   for (const province of provinces.vo) {
     if (normalizedAddress.lastIndexOf(province) != -1) {
-      return 'vo';
+      return "vo";
     }
   }
 
   // Nếu không tìm thấy
-  return 'khong_xac_dinh';
+  return "khong_xac_dinh";
 };
 
 // --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
@@ -1756,36 +2279,39 @@ const getDirection = (address: string, provinces: { vo: string[]; ra: string[] }
  * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
  * @returns 'quang_nam', 'quang_ngai', 'ra', 'vo', hoặc 'khong_xac_dinh'.
  */
-const getSortingGroup = (address: string, provinces: { vo: string[]; ra: string[] }): string => {
+const getSortingGroup = (
+  address: string,
+  provinces: { vo: string[]; ra: string[] },
+): string => {
   const normalizedAddress = address.toLowerCase();
 
   // Ưu tiên kiểm tra các trường hợp đặc biệt trước
   if (normalizedAddress.lastIndexOf("quảng nam") != -1) {
-    return 'quang_nam';
+    return "quang_nam";
   }
   if (normalizedAddress.lastIndexOf("quảng ngãi") != -1) {
-    return 'quang_ngai';
+    return "quang_ngai";
   }
 
   // Nếu không phải trường hợp đặc biệt, kiểm tra trong danh sách "ra"
   for (const province of provinces.ra) {
     // Bỏ qua các tỉnh đã được xử lý riêng để tránh trùng lặp
-    if (province === 'quảng nam' || province === 'quảng ngãi') continue;
+    if (province === "quảng nam" || province === "quảng ngãi") continue;
 
     if (normalizedAddress.lastIndexOf(province) != -1) {
-      return 'ra';
+      return "ra";
     }
   }
 
   // Kiểm tra trong danh sách "vô"
   for (const province of provinces.vo) {
     if (normalizedAddress.lastIndexOf(province) != -1) {
-      return 'vo';
+      return "vo";
     }
   }
 
   // Nếu không tìm thấy
-  return 'khong_xac_dinh';
+  return "khong_xac_dinh";
 };
 // --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
 const handlePrintSortTinhVaNoiDung = async (data: any) => {
@@ -1803,16 +2329,18 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
     console.log("Dữ liệu gốc từ API:", res);
 
     // Bước 3: Làm phẳng mảng để có danh sách tất cả các item
-    const allItems = (res as NguoiGuiDetailProp[]).flatMap(m => m.itemDetails);
+    const allItems = (res as NguoiGuiDetailProp[]).flatMap(
+      (m) => m.itemDetails,
+    );
 
     // *** ĐỊNH NGHĨA THỨ TỰ ƯU TIÊN MỚI ***
     // Gán một giá trị số cho mỗi nhóm. Số nhỏ hơn sẽ được ưu tiên xếp trước.
     const groupPriorities: { [key: string]: number } = {
-      'quang_nam': 1,
-      'quang_ngai': 2,
-      'ra': 3,
-      'vo': 4,
-      'khong_xac_dinh': 5, // Xếp cuối cùng
+      quang_nam: 1,
+      quang_ngai: 2,
+      ra: 3,
+      vo: 4,
+      khong_xac_dinh: 5, // Xếp cuối cùng
     };
 
     // Bước 4: Sắp xếp mảng allItems theo logic đa cấp mới
@@ -1834,8 +2362,8 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
       // Tiêu chí 2: Sắp xếp theo dispatchNumber để nhóm các chuỗi giống hệt nhau lại với nhau.
       // Chúng ta sử dụng localeCompare để so sánh chuỗi một cách tự nhiên.
       // Điều này sẽ đặt "DO" cạnh "DO", "TRANG" cạnh "TRANG", v.v.
-      const dispatchA = a.dispatchNumber || ''; // Xử lý trường hợp null/undefined
-      const dispatchB = b.dispatchNumber || ''; // Xử lý trường hợp null/undefined
+      const dispatchA = a.dispatchNumber || ""; // Xử lý trường hợp null/undefined
+      const dispatchB = b.dispatchNumber || ""; // Xử lý trường hợp null/undefined
 
       const dispatchComparison = dispatchA.localeCompare(dispatchB);
       if (dispatchComparison !== 0) {
@@ -1847,16 +2375,22 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
       return 0;
     });
     const safeProvinces = provinces ?? { vo: [], ra: [] };
-    console.log("Dữ liệu sau khi sắp xếp:", allItems.map(item => ({ ma: item.ttNumber, diaChi: item.receiverAddress, nhom: getSortingGroup(item.receiverAddress, safeProvinces) })));
+    console.log(
+      "Dữ liệu sau khi sắp xếp:",
+      allItems.map((item) => ({
+        ma: item.ttNumber,
+        diaChi: item.receiverAddress,
+        nhom: getSortingGroup(item.receiverAddress, safeProvinces),
+      })),
+    );
 
     // Bước 5: Trích xuất chỉ ttNumber từ danh sách đã sắp xếp
-    const sortedMaHieus = allItems.map(item => item.ttNumber);
+    const sortedMaHieus = allItems.map((item) => item.ttNumber);
 
     console.log("Danh sách mã hiệu cuối cùng để in:", sortedMaHieus);
 
     // Bước 6: Gọi hàm in
     await printMaHieus(sortedMaHieus);
-
   } catch (error) {
     console.error("Đã xảy ra lỗi trong quá trình xử lý in:", error);
     updateToPhone("error", `Lỗi khi sắp xếp và in: ${error}`);
@@ -1864,36 +2398,36 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
 };
 
 const handlePrintPageSort = async (data: any) => {
-  var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token)
+  var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
   console.log("handlePrintPageSort: res", res);
 
   var maHieus = (res as NguoiGuiDetailProp[])
     .map((m) => m.itemDetails.map((n) => n.ttNumber))
     .flat();
   //sap xep ma hieu
-  maHieus.sort(customSort)
-  await printMaHieus(maHieus)
-}
+  maHieus.sort(customSort);
+  await printMaHieus(maHieus);
+};
 
 const checkToken = async (): Promise<boolean> => {
   try {
-   
+    console.log("checkToken: Testing token validity with test ID...");
 
-    console.log('checkToken: Testing token validity with test ID...');
-    
     // Sử dụng một ID test để kiểm tra token
     // ID "1061399653" là một ID test cố định
     const res = await getMaHieusFromPortalId(["1061399653"], token);
-    
+
     // Kiểm tra kết quả trả về
     if (!res) {
-      console.log('checkToken: No response from API - token likely invalid or network error');
+      console.log(
+        "checkToken: No response from API - token likely invalid or network error",
+      );
       return false;
     }
 
     // Kiểm tra xem có phải là array không
     if (!Array.isArray(res)) {
-      console.log('checkToken: Response is not an array');
+      console.log("checkToken: Response is not an array");
       return false;
     }
 
@@ -1901,95 +2435,102 @@ const checkToken = async (): Promise<boolean> => {
     if (res.length > 0 && (res[0] as any).status) {
       const status = (res[0] as any).status;
       console.log(`checkToken: API returned status ${status}`);
-      
+
       if (status === 401) {
-        console.log('checkToken: Token expired or unauthorized (401)');
+        console.log("checkToken: Token expired or unauthorized (401)");
         return false;
       } else if (status === 403) {
-        console.log('checkToken: Token access forbidden (403)');
+        console.log("checkToken: Token access forbidden (403)");
         return false;
       } else if (status === 400) {
-        console.log('checkToken: Bad request (400) - token may be invalid format');
+        console.log(
+          "checkToken: Bad request (400) - token may be invalid format",
+        );
         return false;
       } else if (status >= 500) {
-        console.log('checkToken: Server error (500+) - cannot verify token');
+        console.log("checkToken: Server error (500+) - cannot verify token");
         return false;
       }
-      
+
       // Status khác có thể vẫn valid, tiếp tục kiểm tra
     }
 
     // Kiểm tra xem response có structure hợp lệ không
     if (res.length > 0) {
       const firstItem = res[0];
-      
+
       // Kiểm tra có phải là valid NguoiGuiDetailProp không
       if ((firstItem as NguoiGuiDetailProp).id !== undefined) {
-        console.log('checkToken: Valid token - received proper response structure');
+        console.log(
+          "checkToken: Valid token - received proper response structure",
+        );
         return true;
       }
-      
+
       // Nếu không có structure mong đợi nhưng có data, vẫn coi là valid
-      console.log('checkToken: Response received but structure unclear - assuming valid');
+      console.log(
+        "checkToken: Response received but structure unclear - assuming valid",
+      );
       return true;
     }
 
     // Nếu array rỗng, có thể token valid nhưng không tìm thấy data cho ID test
-    console.log('checkToken: Empty response - token appears valid but no data for test ID');
+    console.log(
+      "checkToken: Empty response - token appears valid but no data for test ID",
+    );
     return true;
-
   } catch (error) {
-    console.error('checkToken: Error checking token validity:', error);
-    
+    console.error("checkToken: Error checking token validity:", error);
+
     // Kiểm tra loại lỗi để đưa ra quyết định chính xác hơn
     if (error instanceof Error) {
       const errorMsg = error.message.toLowerCase();
-      if (errorMsg.includes('401') || errorMsg.includes('unauthorized')) {
-        console.log('checkToken: Token is invalid (unauthorized)');
+      if (errorMsg.includes("401") || errorMsg.includes("unauthorized")) {
+        console.log("checkToken: Token is invalid (unauthorized)");
         return false;
-      } else if (errorMsg.includes('403') || errorMsg.includes('forbidden')) {
-        console.log('checkToken: Token access forbidden');
+      } else if (errorMsg.includes("403") || errorMsg.includes("forbidden")) {
+        console.log("checkToken: Token access forbidden");
         return false;
-      } else if (errorMsg.includes('network') || errorMsg.includes('fetch')) {
-        console.log('checkToken: Network error - cannot verify token');
+      } else if (errorMsg.includes("network") || errorMsg.includes("fetch")) {
+        console.log("checkToken: Network error - cannot verify token");
         return false;
       }
     }
-    
+
     return false;
   }
 };
 
-
 function saveToken(token: string): void {
   chrome.storage.local.set({ token });
-  console.log('Token saved:', token);
+  console.log("Token saved:", token);
 }
 async function saveStorage(value: string): Promise<void> {
-  await chrome.storage.local.set({ "blobs": value });
+  await chrome.storage.local.set({ blobs: value });
 }
 async function saveStorageExcel(value: string): Promise<void> {
-  await chrome.storage.local.set({ "excel": value });
+  await chrome.storage.local.set({ excel: value });
 }
 
 const handleGetMaHieus = async (data: any) => {
   const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
-  if (!res) return
+  if (!res) return;
   const maHieus = res
-    .map((m: NguoiGuiDetailProp) => m.itemDetails.map((n) => ({
-      ID: m.id,
-      Code: n.ttNumber,
-      IDCODE: n.id,
-      Weight: n.weight,
-      Address: n.receiverAddress,
-      Name: n.receiverName,
-      Date: n.createdDate,
-      ProvinceCode: n.receiverProvinceCode
-    })))
+    .map((m: NguoiGuiDetailProp) =>
+      m.itemDetails.map((n) => ({
+        ID: m.id,
+        Code: n.ttNumber,
+        IDCODE: n.id,
+        Weight: n.weight,
+        Address: n.receiverAddress,
+        Name: n.receiverName,
+        Date: n.createdDate,
+        ProvinceCode: n.receiverProvinceCode,
+      })),
+    )
     .flat();
-  return maHieus
+  return maHieus;
 };
-
 
 const handleGetPortal = async (time: string = "") => {
   updateToPhone("message", " Đang lấy data từ Portal");
@@ -2004,8 +2545,7 @@ const handleGetDataFromPortal = async (time: string) => {
       // Parse the time parameter to extract date and maHieus
       // Format: "date|maHieus" where maHieus comes after the pipe separator
       const parts = time.split("|");
-      if (parts[0].length != 0)
-        toDayText = parts[0]; // Date part
+      if (parts[0].length != 0) toDayText = parts[0]; // Date part
       if (parts.length > 1) {
         maHieus = parts[1]; // maHieus part after the pipe
       }
@@ -2030,7 +2570,6 @@ const handleGetDataFromPortal = async (time: string) => {
 
     // Ghi dữ liệu mới vào "PORTAL/MAINPAGE/"
     await db!.ref("PORTAL/MAINPAGE/").set(newItems);
-
   } catch (error) {
     console.error("Error fetching data from portal:", error);
   }
@@ -2040,99 +2579,95 @@ const handleEditHangHoa = (data: any) => {
   createOrActiveTab(
     "https://portalkhl.vnpost.vn/itemhdr/?id=" + data.DoiTuong,
     "portalkhl.vnpost.vn",
-    true
+    true,
   );
 };
 
-
-
 const printMaHieus = async (maHieus: string[]) => {
-  chrome.action.setBadgeText({ text: 'In...' });
-  chrome.action.setBadgeBackgroundColor({ color: '#0000FF' });
+  chrome.action.setBadgeText({ text: "In..." });
+  chrome.action.setBadgeBackgroundColor({ color: "#0000FF" });
 
   try {
     // Lấy blobs từ mảng maHieus
     var blobs: Blob[] | null = await getBlobs(maHieus);
-    console.log('Đã lấy blobs:', blobs?.length || 0);
-    
+    console.log("Đã lấy blobs:", blobs?.length || 0);
+
     if (blobs == null || blobs.length === 0) {
       console.error("Không lấy được blobs hoặc danh sách rỗng");
-      chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+      chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
       await delay(1000);
-      chrome.action.setBadgeText({ text: '' });
+      chrome.action.setBadgeText({ text: "" });
       return;
     }
 
     // Kiểm tra xem offscreen document đã tồn tại chưa
     const existingContexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
     });
 
     // Nếu chưa có, tạo mới
     if (existingContexts.length === 0) {
       await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
+        url: "offscreen.html",
         reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-        justification: 'Print PDF files using DOM APIs'
+        justification: "Print PDF files using DOM APIs",
       });
     }
-    
+
     var blob = await convertBlobsToBlob(blobs);
     var base64String = await pdfBlobTo64(blob);
-    
+
     // Gửi message đến offscreen document để in
     const response = await chrome.runtime.sendMessage({
       type: "PRINT_PDF",
-      base64Data: base64String
+      base64Data: base64String,
     });
-    
+
     if (response && response.success) {
       console.log("In PDF thành công");
-      chrome.action.setBadgeBackgroundColor({ color: '#00FF00' });
+      chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
     } else {
       console.error("Lỗi khi in PDF:", response?.error);
-      chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+      chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
     }
-    
   } catch (error: any) {
     console.error("Lỗi khi tạo/sử dụng offscreen document:", error);
-    chrome.action.setBadgeBackgroundColor({ color: '#FF0000' });
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
   }
-  
+
   //waiting 1 s
   await delay(1000);
-  chrome.action.setBadgeText({ text: '' });
-}
-
-
+  chrome.action.setBadgeText({ text: "" });
+};
 
 const updateToPhone = async (
   lenh: String,
   doiTuong: String,
-  key: string = keyMessage
+  key: string = keyMessage,
 ) => {
-
-  await db!.ref(`PORTAL/CHILD/${key}/message/tophone`).set({
-    Lenh: lenh,
-    DoiTuong: doiTuong,
-    TimeStamp: Date.now().toLocaleString(),
-  }).catch((error: any) => {
-    console.error('Error saving data:', error);
-  });
-}
-const updateToPC = async (
-  lenh: String,
-  doiTuong: String,
-) => {
-
-  await db!.ref(`${keyMessage}/message/topc`).set({
-    Lenh: lenh,
-    DoiTuong: doiTuong,
-    TimeStamp: Date.now().toLocaleString(),
-  }).catch((error: any) => {
-    console.error('Error saving data:', error);
-  });
-}
+  await db!
+    .ref(`PORTAL/CHILD/${key}/message/tophone`)
+    .set({
+      Lenh: lenh,
+      DoiTuong: doiTuong,
+      TimeStamp: Date.now().toLocaleString(),
+    })
+    .catch((error: any) => {
+      console.error("Error saving data:", error);
+    });
+};
+const updateToPC = async (lenh: String, doiTuong: String) => {
+  await db!
+    .ref(`${keyMessage}/message/topc`)
+    .set({
+      Lenh: lenh,
+      DoiTuong: doiTuong,
+      TimeStamp: Date.now().toLocaleString(),
+    })
+    .catch((error: any) => {
+      console.error("Error saving data:", error);
+    });
+};
 
 //create struct for blobs have blob and maHieu
 interface BlobStruct {
@@ -2149,36 +2684,40 @@ const getBlobs = async (maHieus: string[]) => {
   for (let index = 0; index < maHieus.length; index++) {
     try {
       const element = maHieus[index];
-      updateToPhone("message", `In ${index + 1}|${maHieus.length} MH ${element} `);
+      updateToPhone(
+        "message",
+        `In ${index + 1}|${maHieus.length} MH ${element} `,
+      );
       chrome.action.setBadgeText({ text: (index + 1).toString() });
 
       var blob: Blob | null = null;
-      if (blobsTemp.find(m => m.maHieu === element) != null) {
-        blob = blobsTemp.find(m => m.maHieu === element)?.blob!
-      } else
-        blob = await getBlobMaHieu(element)
+      if (blobsTemp.find((m) => m.maHieu === element) != null) {
+        blob = blobsTemp.find((m) => m.maHieu === element)?.blob!;
+      } else blob = await getBlobMaHieu(element);
 
       if (blob != null) {
         //save blob to indexedDB
-        await saveBlob({ maHieu: element, blob: blob, dateCreated: Date.now() })
+        await saveBlob({
+          maHieu: element,
+          blob: blob,
+          dateCreated: Date.now(),
+        });
         blobs.push(blob!);
-      }
-      else {
+      } else {
         updateToPhone("message", `Lỗi MH khi in ${element}`);
         return null;
       }
     } catch {
-      break
+      break;
     }
   }
   return blobs;
-}
+};
 const getBlobMaHieu = async (maHieu: string): Promise<Blob | null> => {
-  const res = await fetchPrintByMH(maHieu, token)
+  const res = await fetchPrintByMH(maHieu, token);
   const base64String = res[0]; // your base64 string
   return base64ToBlob(base64String, "application/pdf");
-}
-
+};
 
 async function loadTodaysBlobs(): Promise<BlobStruct[]> {
   return new Promise<BlobStruct[]>((resolve, reject) => {
@@ -2188,8 +2727,12 @@ async function loadTodaysBlobs(): Promise<BlobStruct[]> {
     openRequest.onupgradeneeded = (event: IDBVersionChangeEvent) => {
       const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains("blobs")) {
-        const objectStore = db.createObjectStore("blobs", { keyPath: "maHieu" });
-        objectStore.createIndex("dateCreatedIndex", "dateCreated", { unique: false });
+        const objectStore = db.createObjectStore("blobs", {
+          keyPath: "maHieu",
+        });
+        objectStore.createIndex("dateCreatedIndex", "dateCreated", {
+          unique: false,
+        });
       }
     };
 
@@ -2201,8 +2744,16 @@ async function loadTodaysBlobs(): Promise<BlobStruct[]> {
 
       // Xác định khoảng thời gian cho ngày hôm nay
       const now = new Date();
-      const startOfToday: number = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-      const startOfTomorrow: number = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+      const startOfToday: number = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate(),
+      ).getTime();
+      const startOfTomorrow: number = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+      ).getTime();
 
       // Tạo IDBKeyRange từ đầu ngày hôm nay đến cuối ngày (startOfTomorrow - 1ms)
       const range = IDBKeyRange.bound(startOfToday, startOfTomorrow - 1);
@@ -2211,7 +2762,8 @@ async function loadTodaysBlobs(): Promise<BlobStruct[]> {
       const cursorRequest: IDBRequest = dateIndex.openCursor(range);
 
       cursorRequest.onsuccess = (event: Event) => {
-        const cursor: IDBCursorWithValue | null = (event.target as IDBRequest).result;
+        const cursor: IDBCursorWithValue | null = (event.target as IDBRequest)
+          .result;
         if (cursor) {
           blobsTemp.push(cursor.value);
           cursor.continue();
@@ -2235,7 +2787,7 @@ const khoitaoPNS = async () => {
   //neu khong co thi tao tab moi
   var tab: any = await createOrActiveTab(
     "https://packnsend.vnpost.vn/",
-    "packnsend.vnpost.vn"
+    "packnsend.vnpost.vn",
   );
   await delay(3000);
   //neu co thi thuc hien lay du lieu
@@ -2251,10 +2803,9 @@ const khoitaoPNS = async () => {
       } else {
         console.log("Lỗi khi nhận tin nhắn từ content PNS", res);
       }
-    }
+    },
   );
 };
-
 
 const handleGetPNS = async (dayLast: any) => {
   updateToPhone("message", "Đã nhận lệnh lấy dữ liệu từ PNS");
@@ -2264,16 +2815,16 @@ const handleGetPNS = async (dayLast: any) => {
 
     khachHangsTemp.forEach((m) => {
       m.countState.countChapNhan = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đã chấp nhận"
+        (m) => m.TrangThai === "Đã chấp nhận",
       ).length;
       m.countState.countDangGom = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đang đi thu gom"
+        (m) => m.TrangThai === "Đang đi thu gom",
       ).length;
       m.countState.countNhanHang = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Nhận hàng thành công"
+        (m) => m.TrangThai === "Nhận hàng thành công",
       ).length;
       m.countState.countPhanHuong = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đã phân hướng"
+        (m) => m.TrangThai === "Đã phân hướng",
       ).length;
     });
     await db!.ref("PNS/KhachHangs").set(khachHangsTemp);
@@ -2300,14 +2851,15 @@ const handleGetPNS = async (dayLast: any) => {
 //   });
 // };
 
-
 // --- HÀM MỚI: Đảm bảo đăng nhập Portal ---
 /**
  * Kiểm tra xem tab có cần đăng nhập Portal không và thực hiện đăng nhập nếu cần.
  * @param tabId ID của tab cần kiểm tra và đăng nhập.
  * @returns Promise chứa đối tượng { success: boolean, loadedTab?: chrome.tabs.Tab }
  */
-async function ensurePortalLogin(tabId: number): Promise<{ success: boolean; loadedTab?: chrome.tabs.Tab }> {
+async function ensurePortalLogin(
+  tabId: number,
+): Promise<{ success: boolean; loadedTab?: chrome.tabs.Tab }> {
   let loadedTab: chrome.tabs.Tab | undefined;
   let originalUrl: string | undefined;
   let loginSuccess = false;
@@ -2315,11 +2867,15 @@ async function ensurePortalLogin(tabId: number): Promise<{ success: boolean; loa
   try {
     // Lấy thông tin tab hiện tại và chờ tải xong
     loadedTab = await waitForTabToLoad(tabId);
-    console.log(`ensurePortalLogin: Tab ${tabId} tải xong tại URL: ${loadedTab.url}`);
+    console.log(
+      `ensurePortalLogin: Tab ${tabId} tải xong tại URL: ${loadedTab.url}`,
+    );
 
-    if (loadedTab.url && loadedTab.url.includes('login')) {
+    if (loadedTab.url && loadedTab.url.includes("login")) {
       await delay(1000);
-      console.log(`ensurePortalLogin: Tab ${tabId} đang ở trang login. Thực hiện đăng nhập...`);
+      console.log(
+        `ensurePortalLogin: Tab ${tabId} đang ở trang login. Thực hiện đăng nhập...`,
+      );
       updateToPhone("message", "Đang đăng nhập vào Portal...");
       originalUrl = loadedTab.url; // Lưu URL trang login
 
@@ -2334,34 +2890,54 @@ async function ensurePortalLogin(tabId: number): Promise<{ success: boolean; loa
             password: mPassword,
           });
         },
-        args: [accountPortal, passwordPortal]
+        args: [accountPortal, passwordPortal],
       });
-      console.log(`ensurePortalLogin: Đã tiêm script đăng nhập vào tab ${tabId}`);
+      console.log(
+        `ensurePortalLogin: Đã tiêm script đăng nhập vào tab ${tabId}`,
+      );
 
       // Chờ tab tải xong sau khi đăng nhập
-      console.log(`ensurePortalLogin: Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`);
+      console.log(
+        `ensurePortalLogin: Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`,
+      );
       loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 6000); // Chờ tối đa 6s
-      console.log(`ensurePortalLogin: Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`);
+      console.log(
+        `ensurePortalLogin: Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`,
+      );
 
       // Kiểm tra lại xem đăng nhập thành công không
-      if (loadedTab?.url?.includes('login')) {
-        console.error(`ensurePortalLogin: Đăng nhập thất bại, vẫn ở trang login (${tabId}).`);
+      if (loadedTab?.url?.includes("login")) {
+        console.error(
+          `ensurePortalLogin: Đăng nhập thất bại, vẫn ở trang login (${tabId}).`,
+        );
         updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
         loginSuccess = false;
       } else if (!loadedTab?.url) {
-        console.error(`ensurePortalLogin: Không lấy được URL cuối cùng của tab ${tabId} sau khi chờ.`);
-        updateToPhone("message", "Lỗi: Không xác định được trạng thái sau đăng nhập.");
+        console.error(
+          `ensurePortalLogin: Không lấy được URL cuối cùng của tab ${tabId} sau khi chờ.`,
+        );
+        updateToPhone(
+          "message",
+          "Lỗi: Không xác định được trạng thái sau đăng nhập.",
+        );
         loginSuccess = false;
       } else {
-        console.log(`ensurePortalLogin: Đăng nhập thành công (đã rời trang login) cho tab ${tabId}.`);
+        console.log(
+          `ensurePortalLogin: Đăng nhập thành công (đã rời trang login) cho tab ${tabId}.`,
+        );
         loginSuccess = true;
       }
     } else {
-      console.log(`ensurePortalLogin: Tab ${tabId} không ở trang login, giả sử đã đăng nhập.`);
+      console.log(
+        `ensurePortalLogin: Tab ${tabId} không ở trang login, giả sử đã đăng nhập.`,
+      );
       loginSuccess = true; // Giả sử đã đăng nhập nếu không thấy trang login
     }
   } catch (error: any) {
-    console.error(`ensurePortalLogin: Lỗi trong quá trình kiểm tra/đăng nhập cho tab ${tabId}:`, error);
+    console.error(
+      `ensurePortalLogin: Lỗi trong quá trình kiểm tra/đăng nhập cho tab ${tabId}:`,
+      error,
+    );
     updateToPhone("message", `Lỗi đăng nhập Portal: ${error.message}`);
     loginSuccess = false;
   }
@@ -2394,7 +2970,7 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
     var initialTab = await createOrActiveTab(
       "https://portalkhl.vnpost.vn/accept-api",
       "portalkhl.vnpost.vn",
-      true
+      true,
     );
 
     if (!initialTab || !initialTab.id) {
@@ -2414,9 +2990,11 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
 
     // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
     if (loginSuccess && loadedTab?.id) {
-      console.log(`khoiTaoPortal: Đăng nhập OK. Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`);
+      console.log(
+        `khoiTaoPortal: Đăng nhập OK. Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`,
+      );
       updateToPhone("message", "Đang khởi tạo hợp đồng...");
-      await delay(1000)
+      await delay(1000);
 
       const response = await chrome.tabs.sendMessage(loadedTab.id, {
         message: "KHOITAOPORTAL",
@@ -2433,13 +3011,16 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
           console.log("URL hiện tại sau khi khởi tạo:", currentUrl);
 
           // Trích xuất hdrId từ URL (ví dụ: https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1054055351)
-          const urlParams = new URLSearchParams(currentUrl?.split('?')[1]);
-          const hdrId = urlParams.get('hdrId');
+          const urlParams = new URLSearchParams(currentUrl?.split("?")[1]);
+          const hdrId = urlParams.get("hdrId");
 
           if (hdrId) {
             console.log("Đã lấy được hdrId:", hdrId);
             currentHdrId = hdrId; // Lưu vào biến global
-            updateToPhone("message", `Khởi tạo thành công. Mã hợp đồng: ${hdrId}`);
+            updateToPhone(
+              "message",
+              `Khởi tạo thành công. Mã hợp đồng: ${hdrId}`,
+            );
           } else {
             console.warn("Không tìm thấy hdrId trong URL");
             currentHdrId = null;
@@ -2452,14 +3033,19 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
         }
         return currentHdrId; // Trả về hdrId nếu thành công (có thể là string hoặc null)
       } else {
-        const errorMsg = (response && response.data) ? response.data : "Phản hồi không hợp lệ từ content script.";
+        const errorMsg =
+          response && response.data
+            ? response.data
+            : "Phản hồi không hợp lệ từ content script.";
         console.error("Lỗi từ content script KHOITAOPORTAL:", errorMsg);
         updateToPhone("message", `Lỗi khởi tạo: ${errorMsg}`);
         currentHdrId = null; // Reset hdrId khi thất bại
         return null; // *** ĐÁNH DẤU: Điểm thất bại 3 (Phản hồi không đúng) ***
       }
     } else if (!loginSuccess) {
-      console.log("Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.");
+      console.log(
+        "Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.",
+      );
       return null;
       // Tin nhắn lỗi đã được gửi ở trên nếu đăng nhập thất bại
     }
@@ -2467,8 +3053,11 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
     // await createTab("https://google.com.vn");
   } catch (error: any) {
     console.error("Lỗi trong hàm khoiTaoPortal:", error);
-    updateToPhone("message", `Lỗi nghiêm trọng: ${error.message || "Lỗi không xác định khi khởi tạo."}`);
-    return null
+    updateToPhone(
+      "message",
+      `Lỗi nghiêm trọng: ${error.message || "Lỗi không xác định khi khởi tạo."}`,
+    );
+    return null;
     // Gửi trạng thái lỗi nghiêm trọng về điện thoại
   }
   console.warn("khoiTaoPortal chạy đến cuối mà không return tường minh.");
@@ -2478,7 +3067,6 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
   updateToPhone("message", "Đã nhận lệnh khởi tạo");
 
   const temp = JSON.parse(data.DoiTuong);
-
 
   if (temp.account && temp.password) {
     accountPortal = temp.account;
@@ -2490,15 +3078,16 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
   const hdrId = await khoiTaoPortal(hopDong);
   return hdrId !== null; // Trả về true nếu có hdrId, false nếu null
 };
-const handleGetDataFromPNS = async (dayLast: any): Promise<KhachHangProps[]> => {
+const handleGetDataFromPNS = async (
+  dayLast: any,
+): Promise<KhachHangProps[]> => {
   // var cookie = await getCookieFromWeb("packnsend.vnpost.vn");
   const data = await getDataFromPNS(dayLast);
-  if (data == null)
-    return []
+  if (data == null) return [];
   const snapshots = changePNSObjectToSnapshots(data.Data);
   const khachHangs = changeSnapshotToKHs(snapshots);
   khachHangs.sort((a, b) => b.BuuGuis.length - a.BuuGuis.length);
-  return khachHangs
+  return khachHangs;
 };
 const changePNSObjectToSnapshots = (list: any): DataSnapshotProps[] => {
   return list.map((element: any, index: number) => ({
@@ -2514,7 +3103,9 @@ const changePNSObjectToSnapshots = (list: any): DataSnapshotProps[] => {
     TrangThai: element.StatusName,
   }));
 };
-const changeSnapshotToKHs = (snapshots: DataSnapshotProps[]): KhachHangProps[] => {
+const changeSnapshotToKHs = (
+  snapshots: DataSnapshotProps[],
+): KhachHangProps[] => {
   const khachHangs: KhachHangProps[] = [];
   snapshots.forEach((element) => {
     // Sửa lỗi type: Bổ sung các thuộc tính còn thiếu và đảm bảo KhoiLuong là string nếu cần
@@ -2529,7 +3120,7 @@ const changeSnapshotToKHs = (snapshots: DataSnapshotProps[]): KhachHangProps[] =
       IsBlackList: false, // Hoặc giá trị mặc định phù hợp khác
       Money: 0, // Hoặc giá trị mặc định phù hợp khác
       ListDo: null, // Hoặc giá trị mặc định phù hợp khác
-      TrangThaiRequest: null // Hoặc giá trị mặc định phù hợp khác,
+      TrangThaiRequest: null, // Hoặc giá trị mặc định phù hợp khác,
     };
 
     const b = khachHangs.findIndex((m) => m.MaKH === element.MaKH);
@@ -2575,7 +3166,13 @@ const getActiveTabId = async () => {
   });
   return tabs.length === 0 ? 0 : tabs[0].id!;
 };
-const sendMessageToTab = async (tabId: any, bgs: any, currentBuuGui: any, maKH: any, keyMessage: any) => {
+const sendMessageToTab = async (
+  tabId: any,
+  bgs: any,
+  currentBuuGui: any,
+  maKH: any,
+  keyMessage: any,
+) => {
   await chrome.tabs.sendMessage(
     tabId,
     {
@@ -2587,52 +3184,60 @@ const sendMessageToTab = async (tabId: any, bgs: any, currentBuuGui: any, maKH: 
     },
     (response) => {
       if (chrome.runtime.lastError) {
-        console.error("Error sending message to tab:", chrome.runtime.lastError);
+        console.error(
+          "Error sending message to tab:",
+          chrome.runtime.lastError,
+        );
       } else {
         console.log("Response from content script:", response);
       }
-    }
+    },
   );
 };
 
 const handlePrintPage = async (data: any) => {
   var listJsonItem = await getMaHieusFromPortalId(JSON.parse(data), token);
 
-  var res = await fetch("https://api-portalkhl.vnpost.vn/khl2024/khl/jasper/JasperVD", {
-    headers: {
-      accept: "application/json, text/plain, */*",
-      "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-      authorization: `Bearer  ${token}`,
-      capikey: "19001235",
-      "content-type": "application/json; charset=UTF-8",
-      dnt: "1",
-      origin: "https://portalkhl.vnpost.vn",
-      referer: "https://portalkhl.vnpost.vn/",
-      "sec-ch-ua":
-        '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": '"Windows"',
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-site",
+  var res = await fetch(
+    "https://api-portalkhl.vnpost.vn/khl2024/khl/jasper/JasperVD",
+    {
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+        authorization: `Bearer  ${token}`,
+        capikey: "19001235",
+        "content-type": "application/json; charset=UTF-8",
+        dnt: "1",
+        origin: "https://portalkhl.vnpost.vn",
+        referer: "https://portalkhl.vnpost.vn/",
+        "sec-ch-ua":
+          '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+      },
+      referrer: "https://portalkhl.vnpost.vn/",
+      referrerPolicy: "strict-origin-when-cross-origin",
+      body: JSON.stringify({
+        idcheck: listJsonItem,
+        listReport: ["BD1New"],
+        lienNumbers: ["1"],
+        hiddenPrice: false,
+      }),
+      method: "POST",
+      mode: "cors",
+      credentials: "include",
     },
-    referrer: "https://portalkhl.vnpost.vn/",
-    referrerPolicy: "strict-origin-when-cross-origin",
-    body: JSON.stringify({
-      idcheck: listJsonItem,
-      listReport: ["BD1New"],
-      lienNumbers: ["1"],
-      hiddenPrice: false,
-    }),
-    method: "POST",
-    mode: "cors",
-    credentials: "include",
-  })
-  var data = await res.json()
+  );
+  var data = await res.json();
   var tab = await createOrActiveTab(
     "https://example.com/",
     "https://example.com/",
-    false, false, true
+    false,
+    false,
+    true,
   );
   const base64String = data[0]; // your base64 string
   await saveStorage(base64String);
@@ -2640,24 +3245,29 @@ const handlePrintPage = async (data: any) => {
   //waiting 1 s
   await new Promise((resolve) => setTimeout(resolve, 1000));
   await chrome.tabs.sendMessage(tab!.id!, { message: "PRINTBLOB" });
-
 };
-
-
 
 const API_BASE_URL = "https://api-pre-portalkhl.vnpost.vn";
 const PNS_BASE_URL = "https://packnsend.vnpost.vn";
 const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
-  const res = await fetch(`${API_BASE_URL}/khl-api/khl/jasper/printByTTNumber`, {
-    method: "POST",
-    headers: {
-      accept: "application/json, text/plain, */*",
-      "content-type": "application/json; charset=UTF-8",
-      authorization: `Bearer ${token}`,
-      capikey: "19001235"
+  const res = await fetch(
+    `${API_BASE_URL}/khl-api/khl/jasper/printByTTNumber`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json; charset=UTF-8",
+        authorization: `Bearer ${token}`,
+        capikey: "19001235",
+      },
+      body: JSON.stringify({
+        ttNumber: maHieu,
+        listReport: ["BD1New"],
+        lienNumbers: ["1"],
+        hiddenPrice: false,
+      }),
     },
-    body: JSON.stringify({ ttNumber: maHieu, listReport: ["BD1New"], lienNumbers: ["1"], hiddenPrice: false })
-  });
+  );
   return res.json();
 };
 
@@ -2667,7 +3277,7 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
     let parsedIds;
     try {
       // If ids is a string, try to parse it as JSON
-      parsedIds = typeof ids === 'string' ? JSON.parse(ids) : ids;
+      parsedIds = typeof ids === "string" ? JSON.parse(ids) : ids;
     } catch (error) {
       // If parsing fails, treat it as a single value
       parsedIds = ids;
@@ -2675,47 +3285,53 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
 
     const requestBody = {
       username: [accountPortal],
-      listId: Array.isArray(parsedIds) ? parsedIds : [parsedIds]
+      listId: Array.isArray(parsedIds) ? parsedIds : [parsedIds],
     };
 
-    console.log("Sending request to Portal API with body:", JSON.stringify(requestBody));
+    console.log(
+      "Sending request to Portal API with body:",
+      JSON.stringify(requestBody),
+    );
     updateToPhone("message", "Đang xác nhận Portal...");
 
-    const responseData = await safeFetch(API_BASE_URL+ "/khl-api/khl/sendBccp/hdr", {
-      "headers": {
-        "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-        "authorization": `Bearer ${token}`,
-        "capikey": "19001235",
-        "content-type": "application/json; charset=UTF-8",
-        "priority": "u=1, i",
-        "sec-ch-ua": "\"Not)A;Brand\";v=\"8\", \"Chromium\";v=\"138\", \"Google Chrome\";v=\"138\"",
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": "\"Windows\"",
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-site"
+    const responseData = await safeFetch(
+      API_BASE_URL + "/khl-api/khl/sendBccp/hdr",
+      {
+        headers: {
+          accept: "application/json, text/plain, */*",
+          "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+          authorization: `Bearer ${token}`,
+          capikey: "19001235",
+          "content-type": "application/json; charset=UTF-8",
+          priority: "u=1, i",
+          "sec-ch-ua":
+            '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": '"Windows"',
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-site",
+        },
+        referrer: "https://portalkhl.vnpost.vn/",
+        body: JSON.stringify(requestBody),
+        method: "POST",
+        mode: "cors",
+        credentials: "include",
       },
-      "referrer": "https://portalkhl.vnpost.vn/",
-      "body": JSON.stringify(requestBody),
-      "method": "POST",
-      "mode": "cors",
-      "credentials": "include"
-    });
+    );
 
     console.log("Portal API response:", responseData);
     updateToPhone("message", "Xác nhận Portal thành công!");
     console.log("Portal confirmation successful:", responseData);
-
   } catch (networkError: any) {
     // Handle network errors, timeout, etc.
     console.error("Network error in handleXacNhanPortal:", networkError);
 
     let errorMessage = "Lỗi kết nối mạng";
     if (networkError.message) {
-      if (networkError.message.includes('fetch')) {
+      if (networkError.message.includes("fetch")) {
         errorMessage = "Không thể kết nối đến Portal API";
-      } else if (networkError.message.includes('timeout')) {
+      } else if (networkError.message.includes("timeout")) {
         errorMessage = "Kết nối bị timeout. Vui lòng thử lại.";
       } else {
         errorMessage = `Lỗi mạng: ${networkError.message}`;
@@ -2724,72 +3340,95 @@ const handleXacNhanPortal = async (ids: any, token: string) => {
 
     updateToPhone("message", errorMessage);
   }
-}
+};
 
-const getMaHieusFromPortalId = async (ids: any, token: string): Promise<NguoiGuiDetailProp[] | null> => {
-  console.log('IDS ', ids)
+const getMaHieusFromPortalId = async (
+  ids: any,
+  token: string,
+): Promise<NguoiGuiDetailProp[] | null> => {
+  console.log("IDS ", ids);
 
   try {
     const res = await Promise.all(
       ids.map(async (id: string) => {
         try {
-          const response = await fetch(`${API_BASE_URL}/khl-api/khl/portalItem/getItemHdr`, {
-            headers: {
-              accept: "application/json, text/plain, */*",
-              "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-              authorization: `Bearer ${token}`,
-              "content-type": "application/json; charset=UTF-8",
-              "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-              "sec-ch-ua-mobile": "?0",
-              "sec-ch-ua-platform": '"Windows"',
-              "sec-fetch-dest": "empty",
-              "sec-fetch-mode": "cors",
-              "sec-fetch-site": "same-site",
+          const response = await fetch(
+            `${API_BASE_URL}/khl-api/khl/portalItem/getItemHdr`,
+            {
+              headers: {
+                accept: "application/json, text/plain, */*",
+                "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+                authorization: `Bearer ${token}`,
+                "content-type": "application/json; charset=UTF-8",
+                "sec-ch-ua":
+                  '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "same-site",
+              },
+              referrer: "https://portalkhl.vnpost.vn/",
+              referrerPolicy: "strict-origin-when-cross-origin",
+              body: `${id}`, // Assuming body is just the id
+              method: "POST",
+              mode: "cors",
+              credentials: "include",
             },
-            referrer: "https://portalkhl.vnpost.vn/",
-            referrerPolicy: "strict-origin-when-cross-origin",
-            body: `${id}`, // Assuming body is just the id
-            method: "POST",
-            mode: "cors",
-            credentials: "include",
-          });
+          );
 
           // Check if response is ok before parsing
           if (!response.ok) {
-            console.error(`API error for ID ${id}:`, response.status, response.statusText);
+            console.error(
+              `API error for ID ${id}:`,
+              response.status,
+              response.statusText,
+            );
             return { status: response.status, error: response.statusText };
           }
 
           // Check content type to ensure it's JSON
-          const contentType = response.headers.get('content-type');
-          if (!contentType || !contentType.includes('application/json')) {
+          const contentType = response.headers.get("content-type");
+          if (!contentType || !contentType.includes("application/json")) {
             console.error(`Invalid content type for ID ${id}:`, contentType);
             const textResponse = await response.text();
-            console.error('Response text:', textResponse.substring(0, 200) + '...');
-            return { status: 400, error: 'Invalid response format' };
+            console.error(
+              "Response text:",
+              textResponse.substring(0, 200) + "...",
+            );
+            return { status: 400, error: "Invalid response format" };
           }
 
           return await response.json();
         } catch (error) {
           console.error(`Error processing ID ${id}:`, error);
-          return { status: 500, error: error instanceof Error ? error.message : 'Unknown error' };
+          return {
+            status: 500,
+            error: error instanceof Error ? error.message : "Unknown error",
+          };
         }
-      })
+      }),
     );
 
     // Check if first response has error status
-    if (res[0] && (res[0].status === 401 || res[0].status === 400 || res[0].status === 500)) {
-      console.error('API returned error status:', res[0]);
+    if (
+      res[0] &&
+      (res[0].status === 401 || res[0].status === 400 || res[0].status === 500)
+    ) {
+      console.error("API returned error status:", res[0]);
       return null;
     }
 
     return res as NguoiGuiDetailProp[];
   } catch (error) {
-    console.error('Error in getMaHieusFromPortalId:', error);
+    console.error("Error in getMaHieusFromPortalId:", error);
     return null;
   }
 };
-const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<NguoiGuiProp[]> => {
+const getItemHdr = async (
+  toDayText: string,
+  maHieus: string = "",
+): Promise<NguoiGuiProp[]> => {
   try {
     // Build the base JSON object
     const requestBody = {
@@ -2797,7 +3436,7 @@ const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<Nguo
       tuNgay: toDayText,
       denNgay: toDayText,
       sourceSystem: "KHL",
-      origin: ""
+      origin: "",
     };
 
     // Only add ttNumber if maHieus has a value
@@ -2812,7 +3451,8 @@ const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<Nguo
         authorization: `Bearer ${token}`,
         capikey: "19001235",
         "content-type": "application/json; charset=UTF-8",
-        "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        "sec-ch-ua":
+          '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
         "sec-fetch-dest": "empty",
@@ -2829,68 +3469,82 @@ const getItemHdr = async (toDayText: string, maHieus: string = ""): Promise<Nguo
 
     // Check if response is ok
     if (!res.ok) {
-      console.error('getItemHdr API error:', res.status, res.statusText);
+      console.error("getItemHdr API error:", res.status, res.statusText);
       const textResponse = await res.text();
-      console.error('Error response:', textResponse.substring(0, 200) + '...');
+      console.error("Error response:", textResponse.substring(0, 200) + "...");
       return [];
     }
 
     // Check content type
-    const contentType = res.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.error('getItemHdr Invalid content type:', contentType);
+    const contentType = res.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      console.error("getItemHdr Invalid content type:", contentType);
       const textResponse = await res.text();
-      console.error('Response text:', textResponse.substring(0, 200) + '...');
+      console.error("Response text:", textResponse.substring(0, 200) + "...");
       return [];
     }
 
     return await res.json();
   } catch (error) {
-    console.error('Error in getItemHdr:', error);
+    console.error("Error in getItemHdr:", error);
     return [];
   }
 };
 
 const getDataFromPNS = async (dayLast: string): Promise<any> => {
   try {
-    return await safeFetch(`${PNS_BASE_URL}/Order/Home/ExportExcellOrderManage`, {
-      headers: {
-        accept: "*/*",
-        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "sec-ch-ua": '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "same-origin",
-        "x-requested-with": "XMLHttpRequest",
-        cookie: "_ga=GA1.1.1252308094.1682309904; tctbdvn-_zldp=yr040hnCEdI2kxlbdwBeQuILj7FFHTSRALXKDo17bUf5oxEi8nvo1%2FHkNiXB4tD3VVj9liGvi%2BU%3D; _ga_PX3P5JLJ7K=GS1.1.1692945085.4.0.1692945085.0.0.0; _ga_TDJH6SEKEF=GS1.1.1703234131.4.1.1703234170.0.0.0; __SRVNAME=pns7; ASP.NET_SessionId=1tl4k4fo4bu5vhqwn53coee3; .ASPXAUTH=9E1633939FA3B00F904E422CCCB86B402F1B1A92F702B251189551D02FEB874EC894F1B04112D0BC9C69BFF93094451F2651D82616FEB484B469B41DDF924CC365801E490B1E3C2D21E993FBAB7EDCCB4716418487A4F9F4D87BC8C3F2A1F8175F2B8048EFC2B4FFABF23E7F62887AB9; panelIdCookie=userid=593280_xonld",
-        Referer: "https://packnsend.vnpost.vn/tin/quan-ly-tin.html?startDate=11%2F02%2F2024&endDate=11%2F02%2F2024",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
+    return await safeFetch(
+      `${PNS_BASE_URL}/Order/Home/ExportExcellOrderManage`,
+      {
+        headers: {
+          accept: "*/*",
+          "accept-language": "en-US,en;q=0.9,vi;q=0.8",
+          "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "sec-ch-ua":
+            '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": '"Windows"',
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-origin",
+          "x-requested-with": "XMLHttpRequest",
+          cookie:
+            "_ga=GA1.1.1252308094.1682309904; tctbdvn-_zldp=yr040hnCEdI2kxlbdwBeQuILj7FFHTSRALXKDo17bUf5oxEi8nvo1%2FHkNiXB4tD3VVj9liGvi%2BU%3D; _ga_PX3P5JLJ7K=GS1.1.1692945085.4.0.1692945085.0.0.0; _ga_TDJH6SEKEF=GS1.1.1703234131.4.1.1703234170.0.0.0; __SRVNAME=pns7; ASP.NET_SessionId=1tl4k4fo4bu5vhqwn53coee3; .ASPXAUTH=9E1633939FA3B00F904E422CCCB86B402F1B1A92F702B251189551D02FEB874EC894F1B04112D0BC9C69BFF93094451F2651D82616FEB484B469B41DDF924CC365801E490B1E3C2D21E993FBAB7EDCCB4716418487A4F9F4D87BC8C3F2A1F8175F2B8048EFC2B4FFABF23E7F62887AB9; panelIdCookie=userid=593280_xonld",
+          Referer:
+            "https://packnsend.vnpost.vn/tin/quan-ly-tin.html?startDate=11%2F02%2F2024&endDate=11%2F02%2F2024",
+          "Referrer-Policy": "strict-origin-when-cross-origin",
+        },
+        body: `Id=0&FromDate=${toDateString(dayLast)}+&ToDate=+${toDateString(0)}&Code=&CustomerCode=&Status=&ContactPhone=&TrackingCode=&Page=0&Channel=&senderDistrictId=0&senderWardId=0&flagConfig=&orderNumber=&serviceCodeMPITS=`,
+        method: "POST",
       },
-      body: `Id=0&FromDate=${toDateString(dayLast)}+&ToDate=+${toDateString(0)}&Code=&CustomerCode=&Status=&ContactPhone=&TrackingCode=&Page=0&Channel=&senderDistrictId=0&senderWardId=0&flagConfig=&orderNumber=&serviceCodeMPITS=`,
-      method: "POST",
-    });
+    );
   } catch (error) {
-    console.error('Error in getDataFromPNS:', error);
+    console.error("Error in getDataFromPNS:", error);
     return null;
   }
 };
-const loginDirect = async (account: string, password: string): Promise<string | null> => {
+const loginDirect = async (
+  account: string,
+  password: string,
+): Promise<string | null> => {
   try {
     const data = await safeFetch(`${API_BASE_URL}/khl-api/api/auth/signinKhl`, {
       method: "POST",
       headers: {
         accept: "application/json, text/plain, */*",
         "content-type": "application/json; charset=UTF-8",
-        capikey: "19001235"
+        capikey: "19001235",
       },
-      body: JSON.stringify({ username: account, password: password, ip: "", random: Math.random() })
+      body: JSON.stringify({
+        username: account,
+        password: password,
+        ip: "",
+        random: Math.random(),
+      }),
     });
     return data.body.tokenFe || null;
   } catch (error) {
-    console.error('Error in loginDirect:', error);
+    console.error("Error in loginDirect:", error);
     return null;
   }
 };
@@ -2912,7 +3566,7 @@ const loginDirect = async (account: string, password: string): Promise<string | 
 function arrayBufferToBase64(buffer: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     // Tạo một Blob từ ArrayBuffer
-    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    const blob = new Blob([buffer], { type: "application/octet-stream" });
     const reader = new FileReader();
 
     // Xử lý khi đọc thành công
@@ -2920,15 +3574,15 @@ function arrayBufferToBase64(buffer: string): Promise<string> {
       // event.target.result sẽ là một Data URL (ví dụ: "data:application/octet-stream;base64,AAAA...")
       // Chúng ta cần lấy phần base64 sau dấu phẩy
       if (!event.target) {
-        reject(new Error('FileReader event target is null'));
+        reject(new Error("FileReader event target is null"));
         return;
       }
       const dataUrl = event.target.result;
-      if (typeof dataUrl !== 'string' || !dataUrl) {
-        reject(new Error('FileReader result is not a valid string'));
+      if (typeof dataUrl !== "string" || !dataUrl) {
+        reject(new Error("FileReader result is not a valid string"));
         return;
       }
-      const base64 = dataUrl.split(',')[1];
+      const base64 = dataUrl.split(",")[1];
       resolve(base64);
     };
 
@@ -2942,20 +3596,23 @@ function arrayBufferToBase64(buffer: string): Promise<string> {
   });
 }
 
-async function openAndExportExcel(res: any, request: any = null, ishcc: boolean = false) {
+async function openAndExportExcel(
+  res: any,
+  request: any = null,
+  ishcc: boolean = false,
+) {
   let itemDetails = res[0].itemDetails;
-  let fileName = '/temp.xlsx';
-  console.log(ishcc)
+  let fileName = "/temp.xlsx";
+  console.log(ishcc);
   if (ishcc) {
-    fileName = '/temphcc.xlsx';
+    fileName = "/temphcc.xlsx";
   }
 
   // Read and modify temp.xlsx
   fetch(chrome.runtime.getURL(fileName)).then(async (response) => {
-
     const arrayBuffer = await response.arrayBuffer();
     const data = new Uint8Array(arrayBuffer);
-    const workbook = XLSX.read(data, { type: 'array' });
+    const workbook = XLSX.read(data, { type: "array" });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
 
@@ -2964,7 +3621,7 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
       const element = itemDetails[index];
       if (!ishcc) {
         worksheet[`A${indexStart + index}`] = { v: element.serviceCode };
-        worksheet[`D${indexStart + index}`] = { v: '2-Bộ' };
+        worksheet[`D${indexStart + index}`] = { v: "2-Bộ" };
         worksheet[`E${indexStart + index}`] = { v: element.ttNumber };
 
         worksheet[`H${indexStart + index}`] = { v: element.receiverName };
@@ -2973,14 +3630,20 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
         worksheet[`S${indexStart + index}`] = { v: element.weight };
         worksheet[`Z${indexStart + index}`] = { v: element.serviceGtgt };
         worksheet[`AB${indexStart + index}`] = { v: element.codAmount };
-        worksheet[`AK${indexStart + index}`] = { v: '1-Chuyển hoàn ngay' };
-        worksheet[`AL${indexStart + index}`] = { v: '3-Chuyển hoàn về bưu cục gốc' };
+        worksheet[`AK${indexStart + index}`] = { v: "1-Chuyển hoàn ngay" };
+        worksheet[`AL${indexStart + index}`] = {
+          v: "3-Chuyển hoàn về bưu cục gốc",
+        };
         worksheet[`BQ${indexStart + index}`] = { v: request };
       } else {
         worksheet[`A${indexStart + index}`] = { v: element.serviceCode };
         worksheet[`B${indexStart + index}`] = { v: element.procedureId };
-        worksheet[`C${indexStart + index}`] = { v: element.procedureCategoryId };
-        worksheet[`D${indexStart + index}`] = { v: element.procedureType == "1" ? '1-Tiếp nhận' : '2-Chuyển trả' };
+        worksheet[`C${indexStart + index}`] = {
+          v: element.procedureCategoryId,
+        };
+        worksheet[`D${indexStart + index}`] = {
+          v: element.procedureType == "1" ? "1-Tiếp nhận" : "2-Chuyển trả",
+        };
         worksheet[`F${indexStart + index}`] = { v: element.ttNumber };
 
         worksheet[`H${indexStart + index}`] = { v: element.receiverName };
@@ -2991,19 +3654,18 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
         // worksheet[`AB${indexStart + index}`] = { v: element.codAmount };
         worksheet[`CJ${indexStart + index}`] = { v: request };
       }
-
     }
 
     // Cập nhật lại phạm vi của sheet để bao gồm các hàng mới
-    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    const range = XLSX.utils.decode_range(worksheet["!ref"]);
     // Điều chỉnh số hàng cuối cùng nếu cần
     range.e.r = Math.max(range.e.r, indexStart + itemDetails.length - 1);
-    worksheet['!ref'] = XLSX.utils.encode_range(range);
+    worksheet["!ref"] = XLSX.utils.encode_range(range);
 
     // Ghi workbook mới ra một ArrayBuffer
     const newWorkbookArrayBuffer = XLSX.write(workbook, {
       bookType: "xlsx",
-      type: "array"
+      type: "array",
     });
     // // Convert the array buffer to a base64 string
     const base64 = await arrayBufferToBase64(newWorkbookArrayBuffer);
@@ -3012,7 +3674,9 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
       "https://example.com/",
       "https://example.com/",
 
-      false, false, true
+      false,
+      false,
+      true,
     );
     // Read the base64 string back into a workbook
     //  const workbookFromBase64 = XLSX.read(base64, { type: 'base64' });
@@ -3023,7 +3687,10 @@ async function openAndExportExcel(res: any, request: any = null, ishcc: boolean 
     const currentDate = new Date();
     const formattedDate = `${currentDate.getDate()}-${currentDate.getMonth() + 1}-${currentDate.getFullYear()}`;
 
-    await chrome.tabs.sendMessage(tab!.id!, { message: "EXPORTEXCEL", ten: `${res[0].customerName}_${formattedDate}` });
+    await chrome.tabs.sendMessage(tab!.id!, {
+      message: "EXPORTEXCEL",
+      ten: `${res[0].customerName}_${formattedDate}`,
+    });
   });
 }
 
@@ -3031,7 +3698,7 @@ async function handleAddPNS(dayLast: any) {
   updateToPhone("message", "Đã nhận lệnh lấy dữ liệu từ PNS");
   let khachHangsTemp = await handleGetDataFromPNS(dayLast);
   if (khachHangsTemp.length > 0) {
-    console.log(khachHangsTemp)
+    console.log(khachHangsTemp);
 
     //get khachHangs from firebase
     const responsef: any = await db!.ref("PNS/KhachHangs").get();
@@ -3042,21 +3709,23 @@ async function handleAddPNS(dayLast: any) {
       if (index === -1) {
         khachHangsFirebase.push(m);
       } else {
-        khachHangsFirebase[index].BuuGuis = khachHangsFirebase[index].BuuGuis.concat(m.BuuGuis);
+        khachHangsFirebase[index].BuuGuis = khachHangsFirebase[
+          index
+        ].BuuGuis.concat(m.BuuGuis);
       }
     });
     khachHangsFirebase.forEach((m) => {
       m.countState.countChapNhan = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đã chấp nhận"
+        (m) => m.TrangThai === "Đã chấp nhận",
       ).length;
       m.countState.countDangGom = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đang đi thu gom"
+        (m) => m.TrangThai === "Đang đi thu gom",
       ).length;
       m.countState.countNhanHang = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Nhận hàng thành công"
+        (m) => m.TrangThai === "Nhận hàng thành công",
       ).length;
       m.countState.countPhanHuong = m.BuuGuis.filter(
-        (m) => (m.TrangThai === "Đã phân hướng")
+        (m) => m.TrangThai === "Đã phân hướng",
       ).length;
     });
     await db!.ref("PNS/KhachHangs").set(khachHangsFirebase);
@@ -3067,66 +3736,82 @@ async function handleAddPNS(dayLast: any) {
   }
 }
 async function handleXoaBuuGui(id: String): Promise<void | PromiseLike<void>> {
-  console.log(id)
+  console.log(id);
 
-  var res = await fetch("https://api-pre-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
-    "headers": {
-      "accept": "application/json, text/plain, */*",
-      "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
-      "authorization": `Bearer  ${token}`,
-      "content-type": "application/json; charset=UTF-8",
-      "priority": "u=1, i",
-      "sec-ch-ua": "\"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"134\"",
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": "\"Windows\"",
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-site",
-      "Referer": "https://portalkhl.vnpost.vn/",
-      "Referrer-Policy": "strict-origin-when-cross-origin"
+  var res = await fetch(
+    "https://api-pre-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail",
+    {
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "accept-language":
+          "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+        authorization: `Bearer  ${token}`,
+        "content-type": "application/json; charset=UTF-8",
+        priority: "u=1, i",
+        "sec-ch-ua":
+          '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        Referer: "https://portalkhl.vnpost.vn/",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+      },
+      body: `[\"${id}\"]`,
+      method: "POST",
     },
-    "body": `[\"${id}\"]`,
-    "method": "POST"
-  });
+  );
 
-
-  res.status === 200 ? updateToPhone("message", "Xóa thành công") : updateToPhone("message", "Xóa thất bại")
-  console.log("Đã xóa thành công", await res.json())
+  res.status === 200
+    ? updateToPhone("message", "Xóa thành công")
+    : updateToPhone("message", "Xóa thất bại");
+  console.log("Đã xóa thành công", await res.json());
 }
-async function handleXoaNhieuBuuGui(id: any): Promise<void | PromiseLike<void>> {
-  console.log(id)
+async function handleXoaNhieuBuuGui(
+  id: any,
+): Promise<void | PromiseLike<void>> {
+  console.log(id);
 
-  var res = await fetch("https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail", {
-    "headers": {
-      "accept": "application/json, text/plain, */*",
-      "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
-      "authorization": `Bearer  ${token}`,
-      "content-type": "application/json; charset=UTF-8",
-      "priority": "u=1, i",
-      "sec-ch-ua": "\"Chromium\";v=\"134\", \"Not:A-Brand\";v=\"24\", \"Google Chrome\";v=\"134\"",
-      "sec-ch-ua-mobile": "?0",
-      "sec-ch-ua-platform": "\"Windows\"",
-      "sec-fetch-dest": "empty",
-      "sec-fetch-mode": "cors",
-      "sec-fetch-site": "same-site",
-      "Referer": "https://portalkhl.vnpost.vn/",
-      "Referrer-Policy": "strict-origin-when-cross-origin"
+  var res = await fetch(
+    "https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail",
+    {
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "accept-language":
+          "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+        authorization: `Bearer  ${token}`,
+        "content-type": "application/json; charset=UTF-8",
+        priority: "u=1, i",
+        "sec-ch-ua":
+          '"Chromium";v="134", "Not:A-Brand";v="24", "Google Chrome";v="134"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        Referer: "https://portalkhl.vnpost.vn/",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+      },
+      body: id.toString(),
+      method: "POST",
     },
-    "body": id.toString(),
-    "method": "POST"
-  });
+  );
 
-
-  res.status === 200 ? updateToPhone("message", "Xóa thành công") : updateToPhone("message", "Xóa thất bại")
-  console.log("Đã xóa thành công", await res.json())
+  res.status === 200
+    ? updateToPhone("message", "Xóa thành công")
+    : updateToPhone("message", "Xóa thất bại");
+  console.log("Đã xóa thành công", await res.json());
 }
 
 function handleSaveKHOption(data: any): void | PromiseLike<void> {
   var temp1 = JSON.parse(data.DoiTuong);
-  console.log(temp1)
+  console.log(temp1);
   //save chrome local b
-  chrome.storage.local.set({ currentMaKH: temp1.maKH, currentOptions: temp1.options }, function () {
-  })
+  chrome.storage.local.set(
+    { currentMaKH: temp1.maKH, currentOptions: temp1.options },
+    function () {},
+  );
   if (temp1.account && temp1.password) {
     accountPortal = temp1.account;
     passwordPortal = temp1.password;
@@ -3138,9 +3823,12 @@ const handleEditKL = async (data: any): Promise<void> => {
   let loginSuccess = false;
   let loadedTab: chrome.tabs.Tab | undefined = undefined;
   var initialTab = await createOrActiveTab(
-    "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
+    "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" +
+      temp1.ID +
+      "&id=" +
+      temp1.IDCODE,
     "portalkhl.vnpost.vn",
-    true
+    true,
   );
 
   if (!initialTab || !initialTab.id) {
@@ -3158,52 +3846,70 @@ const handleEditKL = async (data: any): Promise<void> => {
   loadedTab = loginResult.loadedTab; // Cập nhật loadedTab từ kết quả
 
   // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
-  if (loginSuccess && loadedTab && !loadedTab.url?.includes('accept-api-dtl')) {
-    console.log("handleEditKL: Đăng nhập thành công, mở lại đúng URL chỉnh sửa KL...");
+  if (loginSuccess && loadedTab && !loadedTab.url?.includes("accept-api-dtl")) {
+    console.log(
+      "handleEditKL: Đăng nhập thành công, mở lại đúng URL chỉnh sửa KL...",
+    );
     await createOrActiveTab(
-      "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" + temp1.ID + "&id=" + temp1.IDCODE,
+      "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" +
+        temp1.ID +
+        "&id=" +
+        temp1.IDCODE,
       "portalkhl.vnpost.vn",
-      true // Kích hoạt tab này
+      true, // Kích hoạt tab này
     );
     // Chờ tab mới tải xong (hoặc tab cũ điều hướng xong)
     loadedTab = await waitForTabToLoad(loadedTab.id!); // Chờ trên cùng tabId
-    console.log(`handleEditKL: Tab ${loadedTab?.id} đã ở đúng URL chỉnh sửa KL: ${loadedTab?.url}`);
+    console.log(
+      `handleEditKL: Tab ${loadedTab?.id} đã ở đúng URL chỉnh sửa KL: ${loadedTab?.url}`,
+    );
     await delay(1500); // Chờ thêm chút cho ổn định
   }
   // --- Kết thúc sử dụng hàm ensurePortalLogin ---
 
-
   // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
   if (loginSuccess && loadedTab?.id) {
-    console.log(`handleEditKL: Đăng nhập OK. Gửi lệnh CHANGEKL cho tab ${loadedTab.id}...`);
-    chrome.tabs.sendMessage(loadedTab.id, { // Sử dụng loadedTab.id đã được cập nhật
-      message: "CHANGEKL", // Lệnh mới
-      kl: temp1.Weight,
-      keyMessage: keyMessage,
-    }, async (response) => {
-
-      // Kiểm tra lỗi runtime trước
-      if (chrome.runtime.lastError) {
-        console.error(`handleEditKL: Lỗi gửi/nhận CHANGEKL: ${chrome.runtime.lastError.message}`);
-        return;
-      }
-      console.log("handleEditKL: Phản hồi từ CHANGEKL:", response);
-      // Xử lý phản hồi nếu cần
-      if (response && response.status === 'success') {
-        updateToPhone("message", `Đã cập nhật KL cho ${temp1.IDCODE}`);
-        // Có thể đóng tab sau khi thành công nếu muốn
-        // await chrome.tabs.remove(loadedTab.id!);
-      } else {
-        updateToPhone("message", `Lỗi cập nhật KL cho ${temp1.IDCODE}: ${response?.error || 'Không rõ'}`);
-      }
-
-    });
+    console.log(
+      `handleEditKL: Đăng nhập OK. Gửi lệnh CHANGEKL cho tab ${loadedTab.id}...`,
+    );
+    chrome.tabs.sendMessage(
+      loadedTab.id,
+      {
+        // Sử dụng loadedTab.id đã được cập nhật
+        message: "CHANGEKL", // Lệnh mới
+        kl: temp1.Weight,
+        keyMessage: keyMessage,
+      },
+      async (response) => {
+        // Kiểm tra lỗi runtime trước
+        if (chrome.runtime.lastError) {
+          console.error(
+            `handleEditKL: Lỗi gửi/nhận CHANGEKL: ${chrome.runtime.lastError.message}`,
+          );
+          return;
+        }
+        console.log("handleEditKL: Phản hồi từ CHANGEKL:", response);
+        // Xử lý phản hồi nếu cần
+        if (response && response.status === "success") {
+          updateToPhone("message", `Đã cập nhật KL cho ${temp1.IDCODE}`);
+          // Có thể đóng tab sau khi thành công nếu muốn
+          // await chrome.tabs.remove(loadedTab.id!);
+        } else {
+          updateToPhone(
+            "message",
+            `Lỗi cập nhật KL cho ${temp1.IDCODE}: ${response?.error || "Không rõ"}`,
+          );
+        }
+      },
+    );
   } else if (!loginSuccess) {
-    console.log("handleEditKL: Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.");
+    console.log(
+      "handleEditKL: Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.",
+    );
     // Tin nhắn lỗi đã được gửi trong ensurePortalLogin
   }
   // Hàm này không cần trả về boolean nữa vì nó xử lý hoàn toàn bên trong
-}
+};
 type MyPostOrderProps = {
   codAmount: number;
   itemCode: string;
@@ -3219,7 +3925,7 @@ type MyPostOrderProps = {
  * Định dạng ngày theo YYYY-MM-DD HH:mm
  */
 function formatMyPostDate(date: Date): string {
-  const pad = (num: number) => num.toString().padStart(2, '0');
+  const pad = (num: number) => num.toString().padStart(2, "0");
   const year = date.getFullYear();
   const month = pad(date.getMonth() + 1);
   const day = pad(date.getDate());
@@ -3228,17 +3934,18 @@ function formatMyPostDate(date: Date): string {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-
 /**
  * Nhóm dữ liệu MyPost theo Khách hàng
  */
-function groupMyPostDataByKhachHang(items: MyPostOrderProps[]): KhachHangProps[] {
+function groupMyPostDataByKhachHang(
+  items: MyPostOrderProps[],
+): KhachHangProps[] {
   if (!items || items.length === 0) {
     return [];
   }
   const khachHangMap = new Map<string, KhachHangProps>();
 
-  items.forEach(item => {
+  items.forEach((item) => {
     const maKH = item.senderCode;
     if (!khachHangMap.has(maKH)) {
       khachHangMap.set(maKH, {
@@ -3250,7 +3957,12 @@ function groupMyPostDataByKhachHang(items: MyPostOrderProps[]): KhachHangProps[]
         Index: 0, // Sẽ cập nhật sau
 
         BuuGuis: [],
-        countState: { countChapNhan: 0, countDangGom: 0, countNhanHang: 0, countPhanHuong: 0 }
+        countState: {
+          countChapNhan: 0,
+          countDangGom: 0,
+          countNhanHang: 0,
+          countPhanHuong: 0,
+        },
       });
     }
 
@@ -3266,21 +3978,21 @@ function groupMyPostDataByKhachHang(items: MyPostOrderProps[]): KhachHangProps[]
       IsBlackList: false,
       Money: item.codAmount,
       ListDo: null,
-      TrangThaiRequest: null
+      TrangThaiRequest: null,
     };
     khachHang.BuuGuis.push(buuGui);
     khachHangMap.forEach((m) => {
       m.countState.countChapNhan = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đã chấp nhận"
+        (m) => m.TrangThai === "Đã chấp nhận",
       ).length;
       m.countState.countDangGom = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Tạo đơn"
+        (m) => m.TrangThai === "Tạo đơn",
       ).length;
       m.countState.countNhanHang = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Bưu tá nhận yêu cầu thu gom"
+        (m) => m.TrangThai === "Bưu tá nhận yêu cầu thu gom",
       ).length;
       m.countState.countPhanHuong = m.BuuGuis.filter(
-        (m) => m.TrangThai === "Đã lấy hàng"
+        (m) => m.TrangThai === "Đã lấy hàng",
       ).length;
     });
   });
@@ -3298,11 +4010,14 @@ const getTokenMyVNPost = async (tabId: number) => {
       }
     });
   });
-}
+};
 /**
  * Lấy dữ liệu từ API MyPost
  */
-async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderProps[] | null> {
+async function getDataFromMyPost(
+  token: string,
+  maKH: any,
+): Promise<MyPostOrderProps[] | null> {
   const now = new Date();
   const past = new Date();
   past.setDate(now.getDate() - 20);
@@ -3310,23 +4025,26 @@ async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderP
   const toDateFromDate = [formatMyPostDate(past), formatMyPostDate(now)];
 
   try {
-    const data = await safeFetch("https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParam?page=0&size=1000", {
-      headers: {
-        "accept": "*/*",
-        "accept-language": "vi,en-US;q=0.9,en;q=0.8",
-        "authorization": token, // Sử dụng token được truyền vào
-        "capikey": "19001111",
-        "content-type": "application/json",
+    const data = await safeFetch(
+      "https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParam?page=0&size=1000",
+      {
+        headers: {
+          accept: "*/*",
+          "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+          authorization: token, // Sử dụng token được truyền vào
+          capikey: "19001111",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          toDateFromDate: toDateFromDate, // Sử dụng ngày đã định dạng
+          orgCode: [maKH], // Sử dụng buuCuc từ storage
+          isInternational: "0",
+          lstStatus: ["1", "2", "3", "4", "5", "6", "7", "30"],
+          orderType: "1",
+        }),
+        method: "POST",
       },
-      body: JSON.stringify({
-        "toDateFromDate": toDateFromDate, // Sử dụng ngày đã định dạng
-        "orgCode": [maKH], // Sử dụng buuCuc từ storage
-        "isInternational": "0",
-        "lstStatus": ["1", "2", "3", "4", "5", "6", "7", "30"],
-        "orderType": "1"
-      }),
-      method: "POST",
-    });
+    );
     return data || [];
   } catch (error: any) {
     console.error("Lỗi fetch dữ liệu MyPost:", error);
@@ -3341,10 +4059,15 @@ async function getDataFromMyPost(token: string, maKH: any): Promise<MyPostOrderP
 async function handleGetMyPostData(data: any) {
   updateToPhone("message", "Bắt đầu lấy dữ liệu từ MyVNPost...");
   try {
-    const myPostTabs = await chrome.tabs.query({ url: "https://my.vnpost.vn/*" });
+    const myPostTabs = await chrome.tabs.query({
+      url: "https://my.vnpost.vn/*",
+    });
 
     if (myPostTabs.length === 0) {
-      updateToPhone("error", "Không tìm thấy tab MyVNPost. Vui lòng mở và đăng nhập.");
+      updateToPhone(
+        "error",
+        "Không tìm thấy tab MyVNPost. Vui lòng mở và đăng nhập.",
+      );
       await createOrActiveTab("https://my.vnpost.vn/", "my.vnpost.vn");
       return;
     }
@@ -3360,7 +4083,10 @@ async function handleGetMyPostData(data: any) {
     const response = await getTokenMyVNPost(tabId);
 
     if (!response || !response.token) {
-      updateToPhone("error", "Không lấy được token. Vui lòng đăng nhập vào MyVNPost và thử lại.");
+      updateToPhone(
+        "error",
+        "Không lấy được token. Vui lòng đăng nhập vào MyVNPost và thử lại.",
+      );
       return;
     }
     console.log("Token MyVNPost:", response.token);
@@ -3368,7 +4094,10 @@ async function handleGetMyPostData(data: any) {
     updateToPhone("message", "Đang tải dữ liệu đơn hàng...");
     var dataJson = JSON.parse(data.DoiTuong);
 
-    const myPostData = await getDataFromMyPost(response.token, dataJson['maKH']);
+    const myPostData = await getDataFromMyPost(
+      response.token,
+      dataJson["maKH"],
+    );
 
     if (myPostData === null) {
       // Hàm getDataFromMyPost đã gửi thông báo lỗi
@@ -3380,7 +4109,10 @@ async function handleGetMyPostData(data: any) {
       return;
     }
 
-    updateToPhone("message", `Đã tải ${myPostData.length} đơn hàng. Đang xử lý...`);
+    updateToPhone(
+      "message",
+      `Đã tải ${myPostData.length} đơn hàng. Đang xử lý...`,
+    );
     const khachHangs = groupMyPostDataByKhachHang(myPostData);
 
     if (db === null) {
@@ -3394,7 +4126,7 @@ async function handleGetMyPostData(data: any) {
       await db.ref(`MYVNPOST/KhachHangs/${kh.MaKH}`).set(kh);
     }
 
-    await db.ref("MYVNPOST/TimeUpdate").set(new Date().toLocaleString('vi-VN'));
+    await db.ref("MYVNPOST/TimeUpdate").set(new Date().toLocaleString("vi-VN"));
     updateToPhone("message", "Cập nhật dữ liệu MyVNPost thành công!");
   } catch (error: any) {
     console.error("Lỗi trong handleGetMyPostData:", error);
@@ -3402,29 +4134,30 @@ async function handleGetMyPostData(data: any) {
   }
 }
 
-chrome.webNavigation.onHistoryStateUpdated.addListener(async (details) => {
-  //Lọc url 
-  if (details.url.includes("https://my.vnpost.vn/")) {
-    console.log("Đã vào trang tạo đơn hàng MyVNPost");
-    // Gửi thông báo đến tab hiện tại
-    chrome.tabs.sendMessage(details.tabId, { type: 'URL_CHANGED', url: details.url }, (_res) => {
-      if (chrome.runtime.lastError) {
-        console.error("Lỗi gửi tin nhắn:", chrome.runtime.lastError.message);
-      } else {
-        console.log("Đã gửi thông báo URL_CHANGED đến tab:", details.tabId);
-      }
-    });
-  }
-}, { url: [{ hostContains: "my.vnpost.vn" }] });
-
-
-
-
-
-
-
-
-
+chrome.webNavigation.onHistoryStateUpdated.addListener(
+  async (details) => {
+    //Lọc url
+    if (details.url.includes("https://my.vnpost.vn/")) {
+      console.log("Đã vào trang tạo đơn hàng MyVNPost");
+      // Gửi thông báo đến tab hiện tại
+      chrome.tabs.sendMessage(
+        details.tabId,
+        { type: "URL_CHANGED", url: details.url },
+        (_res) => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "Lỗi gửi tin nhắn:",
+              chrome.runtime.lastError.message,
+            );
+          } else {
+            console.log("Đã gửi thông báo URL_CHANGED đến tab:", details.tabId);
+          }
+        },
+      );
+    }
+  },
+  { url: [{ hostContains: "my.vnpost.vn" }] },
+);
 
 //HO DUY--------------------------------
 
@@ -3448,7 +4181,9 @@ function broadcastUpdate(payload: SessionData) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
       if (tab.id) {
-        chrome.tabs.sendMessage(tab.id, { type: "STORAGE_UPDATED", payload }).catch(() => { });
+        chrome.tabs
+          .sendMessage(tab.id, { type: "STORAGE_UPDATED", payload })
+          .catch(() => {});
       }
     }
   });
@@ -3456,13 +4191,13 @@ function broadcastUpdate(payload: SessionData) {
 const save_order = (msg: any, sendResponse: (response: any) => void) => {
   const dataToSave: SessionData = {
     orders: msg.payload.orders,
-    currentIndex: 0
+    currentIndex: 0,
   };
   chrome.storage.session.set(dataToSave, () => {
     broadcastUpdate(dataToSave);
-    sendResponse({ status: 'ok' });
+    sendResponse({ status: "ok" });
   });
-}
+};
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {
@@ -3471,17 +4206,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === "GET_INITIAL_DATA" || msg.type === "GET_STATUS") {
-    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
-      sendResponse({
-        orders: result.orders || [],
-        currentIndex: result.currentIndex || 0
-      });
-    });
+    chrome.storage.session.get(
+      ["orders", "currentIndex"],
+      (result: SessionData) => {
+        sendResponse({
+          orders: result.orders || [],
+          currentIndex: result.currentIndex || 0,
+        });
+      },
+    );
     return true;
   }
   if (msg.type === "SEND_AI_DATA") {
-    chrome.action.setBadgeText({ text: 'AI...' });
-    chrome.action.setBadgeBackgroundColor({ color: '#FFA500' }); // Màu cam cho trạng thái chờ
+    chrome.action.setBadgeText({ text: "AI..." });
+    chrome.action.setBadgeBackgroundColor({ color: "#FFA500" }); // Màu cam cho trạng thái chờ
     (async () => {
       try {
         // 2. Gọi hàm xử lý AI và chờ kết quả
@@ -3495,101 +4233,113 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // 4. TRỰC TIẾP LƯU DỮ LIỆU
         // Gọi hàm save_order để lưu vào chrome.storage.session và phát đi thông báo cập nhật.
         // Đây là bước mấu chốt: đảm bảo dữ liệu được lưu ngay cả khi popup đã đóng.
-        save_order({ payload: { orders: orders } }, () => { }); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
+        save_order({ payload: { orders: orders } }, () => {}); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
         // Cập nhật badge thành công (màu xanh lá)
-        chrome.action.setBadgeText({ text: 'OK' });
-        chrome.action.setBadgeBackgroundColor({ color: '#28a745' });
+        chrome.action.setBadgeText({ text: "OK" });
+        chrome.action.setBadgeBackgroundColor({ color: "#28a745" });
         // Xóa badge sau 3 giây
-        setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
+        setTimeout(() => chrome.action.setBadgeText({ text: "" }), 3000);
 
         // Gửi kết quả thành công về cho popup
-        sendResponse({ status: 'success', result: jsonStringResult });
-
+        sendResponse({ status: "success", result: jsonStringResult });
       } catch (error: any) {
         // 4. Xử lý khi có lỗi
         console.error("Lỗi khi xử lý với Gemini:", error);
 
         // Cập nhật badge báo lỗi (màu đỏ)
-        chrome.action.setBadgeText({ text: 'LỖI' });
-        chrome.action.setBadgeBackgroundColor({ color: '#dc3545' });
+        chrome.action.setBadgeText({ text: "LỖI" });
+        chrome.action.setBadgeBackgroundColor({ color: "#dc3545" });
         // Giữ badge lỗi để người dùng thấy
 
         // Gửi thông báo lỗi về cho popup
-        sendResponse({ status: 'error', error: error.message || "Lỗi không xác định từ Gemini" });
+        sendResponse({
+          status: "error",
+          error: error.message || "Lỗi không xác định từ Gemini",
+        });
       }
     })();
 
     // 5. Luôn trả về true để giữ kênh message mở cho đến khi sendResponse được gọi
     return true;
-
   }
 
   if (msg.type === "CLEAR_ORDERS") {
     const emptyData: SessionData = { orders: [], currentIndex: 0 };
     chrome.storage.session.set(emptyData, () => {
       broadcastUpdate(emptyData);
-      sendResponse({ status: 'cleared' });
+      sendResponse({ status: "cleared" });
     });
     return true;
   }
 
   if (msg.type === "FILL_NEXT") {
-    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
-      const orders = result.orders || [];
-      let currentIndex = result.currentIndex || 0;
+    chrome.storage.session.get(
+      ["orders", "currentIndex"],
+      (result: SessionData) => {
+        const orders = result.orders || [];
+        let currentIndex = result.currentIndex || 0;
 
-      if (currentIndex >= orders.length) {
-        sendResponse({ order: null });
-        return;
-      }
+        if (currentIndex >= orders.length) {
+          sendResponse({ order: null });
+          return;
+        }
 
-      const nextOrder = orders[currentIndex];
-      currentIndex++;
+        const nextOrder = orders[currentIndex];
+        currentIndex++;
 
-      chrome.storage.session.set({ currentIndex }, () => {
-        broadcastUpdate({ currentIndex });
-        sendResponse({ order: nextOrder });
-      });
-    });
+        chrome.storage.session.set({ currentIndex }, () => {
+          broadcastUpdate({ currentIndex });
+          sendResponse({ order: nextOrder });
+        });
+      },
+    );
     return true;
   }
 
   if (msg.type === "GO_BACK") {
-    chrome.storage.session.get(['orders', 'currentIndex'], (result: SessionData) => {
-      const orders = result.orders || [];
-      let currentIndex = result.currentIndex || 0;
+    chrome.storage.session.get(
+      ["orders", "currentIndex"],
+      (result: SessionData) => {
+        const orders = result.orders || [];
+        let currentIndex = result.currentIndex || 0;
 
-      if (currentIndex > 0) {
-        currentIndex--;
-      }
+        if (currentIndex > 0) {
+          currentIndex--;
+        }
 
-      const prevOrder = orders[currentIndex];
+        const prevOrder = orders[currentIndex];
 
-      chrome.storage.session.set({ currentIndex }, () => {
-        broadcastUpdate({ currentIndex });
-        sendResponse({ order: prevOrder });
-      });
-    });
+        chrome.storage.session.set({ currentIndex }, () => {
+          broadcastUpdate({ currentIndex });
+          sendResponse({ order: prevOrder });
+        });
+      },
+    );
     return true;
   }
   if (msg.event === "CONTENTMY") {
     if (msg.type === "CREATE_COMPLAINT") {
       handleCreateComplaint(msg.payload, sendResponse);
       return true; // Quan trọng: Luôn trả về true để xử lý bất đồng bộ
-    } sendResponse({ status: "badge_updated" });
+    }
   }
-
-
 });
 //END Ho Duy--------------------------------
-
 
 // Bạn cần đảm bảo đã có hàm `waitForTabToLoad`
 // Nếu chưa có, đây là một phiên bản đơn giản:
 async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
   return new Promise((resolve) => {
-    const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
-      if (updatedTabId === tabId && changeInfo.status === 'complete' && tab.url) {
+    const listener = (
+      updatedTabId: number,
+      changeInfo: chrome.tabs.TabChangeInfo,
+      tab: chrome.tabs.Tab,
+    ) => {
+      if (
+        updatedTabId === tabId &&
+        changeInfo.status === "complete" &&
+        tab.url
+      ) {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve(tab);
       }
@@ -3597,7 +4347,7 @@ async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
     chrome.tabs.onUpdated.addListener(listener);
     // Fallback trong trường hợp tab đã load xong trước khi listener được thêm
     chrome.tabs.get(tabId, (tab) => {
-      if (tab.status === 'complete' && tab.url) {
+      if (tab.status === "complete" && tab.url) {
         chrome.tabs.onUpdated.removeListener(listener);
         resolve(tab);
       }
@@ -3608,49 +4358,57 @@ async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
 /**
  * Hàm chính xử lý quy trình khiếu nại
  */
-async function handleCreateComplaint(payload: { itemCode: string, token: string | null, type: string }, sendResponse: (response: any) => void) {
+async function handleCreateComplaint(
+  payload: { itemCode: string; token: string | null; type: string },
+  sendResponse: (response: any) => void,
+) {
   const { itemCode, token, type } = payload;
   console.log(`[BG] Bắt đầu xử lý khiếu nại cho: ${itemCode}`);
 
   try {
-
-
     const commonHeaders = {
-      "accept": "*/*",
-      "authorization": token!, // Sử dụng token động
-      "capikey": "19001111",
+      accept: "*/*",
+      authorization: token!, // Sử dụng token động
+      capikey: "19001111",
       "content-type": "application/json",
       "sec-fetch-mode": "cors",
       "sec-fetch-site": "same-site",
-      "referrer": "https://my.vnpost.vn/",
+      referrer: "https://my.vnpost.vn/",
     };
 
     // 2. Fetch lần 1 để lấy orderHdrId
     console.log(`[BG] Fetching orderHdrId for ${itemCode}...`);
-    const searchData = await safeFetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`, {
-      headers: commonHeaders,
-      method: "POST",
-    });
-    
-    if (!searchData || !searchData.orderHdrId) throw new Error("API không trả về orderHdrId.");
+    const searchData = await safeFetch(
+      `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`,
+      {
+        headers: commonHeaders,
+        method: "POST",
+      },
+    );
+
+    if (!searchData || !searchData.orderHdrId)
+      throw new Error("API không trả về orderHdrId.");
 
     const orderHdrId = searchData.orderHdrId;
     console.log(`[BG] Lấy được orderHdrId: ${orderHdrId}`);
 
     // 3. Fetch lần 2 để lấy chi tiết đơn hàng
     console.log(`[BG] Fetching order details for ${orderHdrId}...`);
-    const detailData = await safeFetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${orderHdrId}`, {
-      headers: commonHeaders,
-      method: "GET",
-    });
-    
+    const detailData = await safeFetch(
+      `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${orderHdrId}`,
+      {
+        headers: commonHeaders,
+        method: "GET",
+      },
+    );
+
     if (!detailData) throw new Error("API không trả về chi tiết đơn hàng.");
 
     const complaintData = {
       orgCode: detailData.orgCode,
       serviceCode: detailData.serviceCode,
       itemCode: detailData.itemCode,
-      type: type
+      type: type,
     };
     console.log("[BG] Dữ liệu khiếu nại đã trích xuất:", complaintData);
 
@@ -3662,7 +4420,10 @@ async function handleCreateComplaint(payload: { itemCode: string, token: string 
 
     if (cmsTabs.length > 0) {
       console.log("[BG] Tìm thấy tab CMS. Kích hoạt nó...");
-      cmsTab = await chrome.tabs.update(cmsTabs[0].id!, { active: true, url: cmsUrl });
+      cmsTab = await chrome.tabs.update(cmsTabs[0].id!, {
+        active: true,
+        url: cmsUrl,
+      });
     } else {
       console.log("[BG] Không tìm thấy tab CMS. Tạo tab mới...");
       cmsTab = await chrome.tabs.create({ url: cmsUrl, active: true });
@@ -3675,12 +4436,11 @@ async function handleCreateComplaint(payload: { itemCode: string, token: string 
     // 5. Gửi dữ liệu sang tab CMS
     chrome.tabs.sendMessage(cmsTab.id!, {
       type: "PREPARE_COMPLAINT_FORM",
-      payload: complaintData
+      payload: complaintData,
     });
 
     // 6. Phản hồi thành công về cho content script ban đầu
     sendResponse({ status: "success" });
-
   } catch (error: any) {
     console.error("[BG] Lỗi trong quá trình tạo khiếu nại:", error);
     sendResponse({ status: "error", error: error.message });
@@ -3692,12 +4452,15 @@ interface FileData {
   base64Data: string;
 }
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite-preview-06-17:generateContent";
+const GEMINI_API_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite-preview-06-17:generateContent";
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const GEMINI_API_KEY = "AIzaSyDi6U8u1FK-wLKejyzJ1dntVUHpiaHipIE"; // Thay thế bằng API key thực tế của bạn
 // Hàm gọi API đã được cập nhật
-async function processWithGemini(userPrompt: string, fileData: FileData | null): Promise<string> {
-
+async function processWithGemini(
+  userPrompt: string,
+  fileData: FileData | null,
+): Promise<string> {
   const systemInstruction = `ta có file địa chỉ mẫu, dựa vào thông tin sau, chuyển sang json (chỉ trả về json) có tag sau (GOC,MAUSAC,NGUOINHAN,DIACHI,SDT,COD) .trong đó nội dung gốc ví dụ (1.6 nguyễn duy khuyến 350k 35n 2đỏ Nguyễn Duy Khuyến, đường số 6, ấp Phú Tân, xã Phú Bình, huyện Tân Phú, tỉnh Đồng Nai. Đt 0916302413), màu sắc ví dụ đỏ là DO ,trắng TRẮNG , xanh XANH, 1 đỏ 1 xanh DOXANH , 2đỏ DODO 2 xanh XANHXANH, tên người nhận theo mẫu sau 1.6 nguyễn duy khuyến 350k hoặc 14.2 uyên trần 538k) , số điện thoại, và địa chỉ (trong địa chỉ có  tự chỉnh lại cho đúng nếu sai ví dụ xa thong nhat huyen bu dang binh phuoc thành xã thống nhất huyện bù đăng tỉnh bình phước ),số tiền cod ( 510k là 510000, 538k là 538000)
     sai phần người nhận rồi, ý tôi muốn là 20a1 ót duong van 320k 35n 2đỏ 0918820593\n313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre thì người nhận là 20a1 ót duong van 320k , hay 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt thì NGUOINHAN là 32a4 phương dinh 450k
 
@@ -3706,8 +4469,8 @@ async function processWithGemini(userPrompt: string, fileData: FileData | null):
 [19/06/2025 16:25:53] Kim Vân: 26a3 trần thanh trúc 350k 35n 2đỏ Địa chỉ: 107 Thủ Khoa Huân, phường 1, Thành phố Tân An, Long An (0983288725)
 [20/06/2025 07:49:49] Nguyễn Diệu: 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt
 [21/06/2025 08:46:10] Bích Ngọc: 20a1 ót duong van 320k 35n 2đỏ 0918820593
-313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre 
-và đây là kết quả của tôi 
+313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre
+và đây là kết quả của tôi
 [
     {
         "GOC": "14.1 do nguyễn 570k 45n 2trắng 0916333309 Đ/C 3/161 ấp ngãi lợi b,xã lợi bình nhơn,TP Tân An,Long An",
@@ -3754,43 +4517,45 @@ và đây là kết quả của tôi
 
   // Xây dựng các "parts" cho request
   const requestParts = [
-    { "text": systemInstruction },
-    { "text": `\n\nYêu cầu của người dùng:\n"${userPrompt}"` }
+    { text: systemInstruction },
+    { text: `\n\nYêu cầu của người dùng:\n"${userPrompt}"` },
   ];
 
   // Nếu có file, thêm nó vào như một part riêng
   if (fileData) {
     requestParts.push({
       // @ts-ignore
-      "inlineData": {
-        "mimeType": fileData.mimeType,
-        "data": fileData.base64Data
-      }
+      inlineData: {
+        mimeType: fileData.mimeType,
+        data: fileData.base64Data,
+      },
     });
   }
 
   // Body của request bây giờ chứa một mảng các parts
   const requestBody = {
-    "contents": [{
-      "parts": requestParts
-    }],
-    "generationConfig": {
-      "temperature": 0.3,
-      "topK": 1,
-      "topP": 1,
-      "maxOutputTokens": 65536,
-      "thinkingConfig": {
-        "thinkingBudget": -1
-      }
-    }
+    contents: [
+      {
+        parts: requestParts,
+      },
+    ],
+    generationConfig: {
+      temperature: 0.3,
+      topK: 1,
+      topP: 1,
+      maxOutputTokens: 65536,
+      thinkingConfig: {
+        thinkingBudget: -1,
+      },
+    },
   };
 
   try {
     const response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': GEMINI_API_KEY,
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
       },
       body: JSON.stringify(requestBody),
     });
@@ -3798,22 +4563,27 @@ và đây là kết quả của tôi
     if (!response.ok) {
       const errorBody = await response.json();
       console.error("API Error:", errorBody);
-      throw new Error(`Lỗi API: ${errorBody.error.message || response.statusText}`);
+      throw new Error(
+        `Lỗi API: ${errorBody.error.message || response.statusText}`,
+      );
     }
-
 
     const data = await response.json();
 
     // Kiểm tra xem có response trả về không
-    if (!data.candidates || data.candidates.length === 0 || !data.candidates[0].content.parts) {
+    if (
+      !data.candidates ||
+      data.candidates.length === 0 ||
+      !data.candidates[0].content.parts
+    ) {
       throw new Error("Không nhận được phản hồi hợp lệ từ Gemini.");
     }
 
     const textResult = data.candidates[0].content.parts[0].text;
     // Bước 1: Trích xuất phần nội dung JSON.
     // Chúng ta tìm vị trí của dấu `[` đầu tiên và dấu `]` cuối cùng.
-    const startIndex = textResult.indexOf('[');
-    const endIndex = textResult.lastIndexOf(']');
+    const startIndex = textResult.indexOf("[");
+    const endIndex = textResult.lastIndexOf("]");
     const jsonContentString = textResult.substring(startIndex, endIndex + 1);
 
     // Bước 2: Phân tích chuỗi JSON thành đối tượng JavaScript
@@ -3822,9 +4592,8 @@ và đây là kết quả của tôi
 
     // Bước 3: Chuyển đối tượng JavaScript trở lại thành một JSON string chuẩn
     const finalJsonString = JSON.stringify(jsObject);
-    debugger
+    debugger;
     return finalJsonString; // Trả về chuỗi JSON đã chuẩn hóa
-
   } catch (error) {
     console.error("Lỗi khi gọi Gemini API:", error);
     throw error;
@@ -3836,11 +4605,15 @@ và đây là kết quả của tôi
  * Cấu trúc lưu: { PORTAL_CODES_CACHE: { dateKey: string, data: { [portalId]: any } } }
  * Nếu dateKey khác ngày hiện tại, cache sẽ được reset (xóa dữ liệu cũ)
  */
-async function getPortalCodesCache(dateKey: string): Promise<{ [portalId: string]: any }> {
+async function getPortalCodesCache(
+  dateKey: string,
+): Promise<{ [portalId: string]: any }> {
   try {
     const STORAGE_KEY = "PORTAL_CODES_CACHE";
     const stored = await chrome.storage.local.get([STORAGE_KEY]);
-    const cacheObj = stored[STORAGE_KEY] as { dateKey: string; data: { [portalId: string]: any } } | undefined;
+    const cacheObj = stored[STORAGE_KEY] as
+      | { dateKey: string; data: { [portalId: string]: any } }
+      | undefined;
 
     if (!cacheObj || cacheObj.dateKey !== dateKey) {
       // Reset cache cho ngày mới
@@ -3863,7 +4636,7 @@ async function getCachedMaHieusFromPortalId(
   portalId: string,
   token: string,
   cache: { [portalId: string]: any },
-  dateKey: string
+  dateKey: string,
 ): Promise<any> {
   try {
     const STORAGE_KEY = "PORTAL_CODES_CACHE";
@@ -3881,7 +4654,10 @@ async function getCachedMaHieusFromPortalId(
 
     // Cập nhật cache trong chrome.storage.local
     const stored = await chrome.storage.local.get([STORAGE_KEY]);
-    const cacheObj = (stored[STORAGE_KEY] as { dateKey: string; data: { [id: string]: any } }) || { dateKey, data: {} };
+    const cacheObj = (stored[STORAGE_KEY] as {
+      dateKey: string;
+      data: { [id: string]: any };
+    }) || { dateKey, data: {} };
     if (cacheObj.dateKey !== dateKey) {
       cacheObj.dateKey = dateKey;
       cacheObj.data = {};
@@ -3894,12 +4670,13 @@ async function getCachedMaHieusFromPortalId(
 
     return maHieusData;
   } catch (error) {
-    console.error(`Error getting cached data for portal ${portalId} (local storage):`, error);
+    console.error(
+      `Error getting cached data for portal ${portalId} (local storage):`,
+      error,
+    );
     throw error;
   }
 }
-
-
 
 // Interface để match với ExtractedData class từ Flutter
 interface ExtractedData {
@@ -3911,67 +4688,80 @@ interface ExtractedData {
 
 async function handleGuiAiLe(DoiTuong: any): Promise<void> {
   try {
-    console.log('handleGuiAiLe received:', DoiTuong);
-    
+    console.log("handleGuiAiLe received:", DoiTuong);
+
     // Parse dữ liệu từ Flutter (đã được JSON.stringify)
     let extractedData: ExtractedData;
-    if (typeof DoiTuong === 'string') {
+    if (typeof DoiTuong === "string") {
       extractedData = JSON.parse(DoiTuong);
     } else {
       extractedData = DoiTuong;
     }
-    
-    console.log('Parsed ExtractedData:', extractedData);
-    
+
+    console.log("Parsed ExtractedData:", extractedData);
+
     // Lấy tab đang active hiện tại
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    
+
     if (tabs.length === 0 || !tabs[0].id) {
-      console.error('Không tìm thấy tab đang active');
+      console.error("Không tìm thấy tab đang active");
       return;
     }
-    
+
     const activeTabId = tabs[0].id;
-    console.log('Sending data to active tab:', activeTabId);
-    
+    console.log("Sending data to active tab:", activeTabId);
+
     // Gửi dữ liệu đến content script của tab đang active
-    chrome.tabs.sendMessage(activeTabId, {
-      message: "FILL_PORTAL_DATA_FROM_AI",
-      extractedData: extractedData
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error sending message to content script:', chrome.runtime.lastError);
-      } else {
-        console.log('Data sent successfully to content script:', response);
-      }
-    });
-    
+    chrome.tabs.sendMessage(
+      activeTabId,
+      {
+        message: "FILL_PORTAL_DATA_FROM_AI",
+        extractedData: extractedData,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            "Error sending message to content script:",
+            chrome.runtime.lastError,
+          );
+        } else {
+          console.log("Data sent successfully to content script:", response);
+        }
+      },
+    );
   } catch (error) {
-    console.error('Error in handleGuiAiLe:', error);
+    console.error("Error in handleGuiAiLe:", error);
   }
 }
 
 async function handleSendSubmit(): Promise<void | PromiseLike<void>> {
-   // Lấy tab đang active hiện tại
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-    
-    if (tabs.length === 0 || !tabs[0].id) {
-      console.error('Không tìm thấy tab đang active');
-      return;
-    }
-    
-    const activeTabId = tabs[0].id;
-    console.log('Sending data to active tab:', activeTabId);
-    
-    // Gửi dữ liệu đến content script của tab đang active
-    chrome.tabs.sendMessage(activeTabId, {
+  // Lấy tab đang active hiện tại
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (tabs.length === 0 || !tabs[0].id) {
+    console.error("Không tìm thấy tab đang active");
+    return;
+  }
+
+  const activeTabId = tabs[0].id;
+  console.log("Sending data to active tab:", activeTabId);
+
+  // Gửi dữ liệu đến content script của tab đang active
+  chrome.tabs.sendMessage(
+    activeTabId,
+    {
       message: "SEND_SUBMIT",
-    }, (response) => {
+    },
+    (response) => {
       if (chrome.runtime.lastError) {
-        console.error('Error sending message to content script:', chrome.runtime.lastError);
+        console.error(
+          "Error sending message to content script:",
+          chrome.runtime.lastError,
+        );
       } else {
-        console.log('Data sent successfully to content script:', response);
+        console.log("Data sent successfully to content script:", response);
       }
-    });
+    },
+  );
 }
 // END: ================== MY VNPOST ==================
