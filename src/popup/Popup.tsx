@@ -17,6 +17,7 @@ export default function Popup() {
   const [keyMessageInput, setKeyMessageInput] = useState<string>("");
   const [accountPortal, setAccountPortal] = useState<string>("");
   const [passwordPortal, setPasswordPortal] = useState<string>("");
+  const [tokenPortal, setTokenPortal] = useState<string>("");
   const [buuCuc, setBuuCuc] = useState<string>("593200");
   const [jsonInput, setJsonInput] = useState<string>("");
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -26,10 +27,11 @@ const baseColors: string[] = ["TRANG", "DO", "XANH"];
     console.log("Popup is running...");
 
     //get keymessage accountPortal and passwordPortal from storage
-    chrome.storage.local.get(["keyMessage", "accountPortal", "passwordPortal", "buuCuc"], (result) => {
+    chrome.storage.local.get(["keyMessage", "accountPortal", "passwordPortal", "token", "buuCuc"], (result) => {
       setKeyMessageInput(result.keyMessage);
       setAccountPortal(result.accountPortal);
       setPasswordPortal(result.passwordPortal);
+      setTokenPortal(result.token || "");
       setBuuCuc(result.buuCuc);
     });
 
@@ -86,7 +88,7 @@ function handleUsingAI(): void {
       setIsAiLoading(true);
        message.loading({ content: "AI đang xử lý, vui lòng chờ...", key: 'ai_processing', duration: 0 });
     try {
-    
+      chrome.runtime.sendMessage('dfd');
 
       chrome.runtime.sendMessage({ type: "SEND_AI_DATA",payload:jsonInput }, (response) => {
         // Hàm callback này sẽ được gọi khi background script gửi phản hồi
@@ -134,13 +136,18 @@ function handleUsingAI(): void {
     chrome.runtime.reload();
   }
 
-  function handleSaveAccount(accountPortal: string, passwordPortal: string, buuCuc: string): void {
+  function handleSaveAccount(accountPortal: string, passwordPortal: string, tokenPortal: string, buuCuc: string): void {
     if (!accountPortal || !passwordPortal || !buuCuc) {
-      alert("Tài khoản hoặc mật khẩu và bưu cục không được để trống");
+      alert("Tài khoản, mật khẩu và bưu cục không được để trống");
       return;
     }
-    chrome.storage.local.set({ accountPortal: accountPortal, passwordPortal: passwordPortal, buuCuc: buuCuc }, () => {
-      console.log("Saved account and password");
+    chrome.storage.local.set({ 
+      accountPortal: accountPortal, 
+      passwordPortal: passwordPortal, 
+      token: tokenPortal,
+      buuCuc: buuCuc 
+    }, () => {
+      console.log("Saved account, password, token and buuCuc");
     });
     chrome.runtime.reload();
   }
@@ -249,7 +256,7 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
         </Card>
         <Card style={{ marginTop: "20px" }}>
           {/* Tạo username input và password input and save */}
-          <Space direction="vertical">
+          <Space direction="vertical" style={{ width: '100%' }}>
             <Space direction="horizontal">
               <Input
                 placeholder="Tài khoản"
@@ -263,9 +270,17 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
                 onChange={(e) => {
                   setPasswordPortal(e.target.value);
                 }} />
-              <Button onClick={() => handleSaveAccount(accountPortal, passwordPortal, buuCuc)}>Lưu Tài Khoản</Button>
             </Space>
-            <Space>
+            <Space direction="horizontal" style={{ width: '100%' }}>
+              <Input
+                placeholder="Token (tùy chọn)"
+                value={tokenPortal}
+                style={{ flex: 1 }}
+                onChange={(e) => {
+                  setTokenPortal(e.target.value);
+                }} />
+            </Space>
+            <Space direction="horizontal">
               <Input
                 placeholder="Bưu cục"
                 style={{ color: "blue", fontWeight: "bold" }}
@@ -273,7 +288,9 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
                 onChange={(e) => {
                   setBuuCuc(e.target.value);
                 }} />
-
+              <Button type="primary" onClick={() => handleSaveAccount(accountPortal, passwordPortal, tokenPortal, buuCuc)}>
+                Lưu Tài Khoản
+              </Button>
             </Space>
           </Space>
 

@@ -308,6 +308,8 @@ async function fillPage4() {
       'input[aria-labelledby*="i46"]',  // Số phí các bảo hiểm khác
       'input[aria-labelledby*="i51"]',  // Số phí thu BHXH
       'input[aria-labelledby*="i56"]',  // Số phí thu BHYT
+      'input[aria-labelledby*="i61"]',  // Số phí thu BHYT
+      'input[aria-labelledby*="i66"]',  // Số phí thu BHYT
     ];
     
     // Fill each field with "0"
