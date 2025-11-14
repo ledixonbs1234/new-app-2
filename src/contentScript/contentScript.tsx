@@ -448,6 +448,14 @@ async function processSinglePortalItem(
   isDeletePhone: boolean
 ): Promise<void> { // Trả về Promise để background biết khi nào xong, throw error nếu lỗi
   console.log("Processing Portal item:", buuGui.MaBuuGui);
+  
+  // === NOTIFY GIAO TICH SCRIPT: START PROCESSING ===
+  chrome.runtime.sendMessage({
+    event: "CONTENT",
+    message: "PROCESS_STATUS",
+    isProcessing: true,
+  }).catch(() => {});
+  
   try {
     const selector = await waitForElm("body > div.MuiDialog-root", 15); // Tăng timeout một chút
     const numberSearch = await waitForElm("#ttNumberSearch", 15);
@@ -681,8 +689,23 @@ async function processSinglePortalItem(
     // Hàm kết thúc thành công
     console.log(`Successfully processed ${buuGui.MaBuuGui}`);
 
+    // === NOTIFY GIAO TICH SCRIPT: STOP PROCESSING ===
+    chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "PROCESS_STATUS",
+      isProcessing: false,
+    }).catch(() => {});
+
   } catch (error: any) {
     console.error(`Error in processSinglePortalItem for ${buuGui?.MaBuuGui}:`, error);
+    
+    // === NOTIFY GIAO TICH SCRIPT: STOP PROCESSING (ON ERROR) ===
+    chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "PROCESS_STATUS",
+      isProcessing: false,
+    }).catch(() => {});
+    
     // **Quan trọng**: Ném lại lỗi để listener message bắt được và báo về background
     throw error;
   }

@@ -11,6 +11,7 @@ module.exports = {
         util:path.resolve('./src/background/util.ts'),
         contentScript:path.resolve('./src/contentScript/contentScript.tsx'),
         contentLoginPortal:path.resolve('./src/contentScript/contentLoginPortal.tsx'),
+        contentGiaoDich:path.resolve('./src/contentScript/contentGiaoDich.tsx'),
         contentCms:path.resolve('./src/contentScript/contentCms.tsx'),
         contentMy:path.resolve('./src/contentScript/contentMy.tsx'),
         contentGoogleForm:path.resolve('./src/contentScript/contentGoogleForm.tsx'),

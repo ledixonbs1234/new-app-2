@@ -61,6 +61,15 @@
         },
         {
             "matches": [
+                "https://portalkhl.vnpost.vn/itemdetail/?hdrId=*"
+            ],
+            "js": [
+                "contentGiaoDich.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
                 "https://portalkhl.vnpost.vn/*",
                 "https://example.com/",
                 "https://packnsend.vnpost.vn/*"
