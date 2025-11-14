@@ -881,13 +881,73 @@ async function handleDataChange(
   if (!commandsNoTokenRequired.includes(data.Lenh)) {
     const isOk: boolean = await checkToken();
     if (!isOk) {
-      const tokenTemp = await loginDirect(accountPortal, passwordPortal);
-      if (!tokenTemp) {
-        console.log("Token null");
+      console.log("Token không hợp lệ, đang thực hiện đăng nhập lại qua Portal...");
+      updateToPhone("message", "Đang đăng nhập lại vào Portal...");
+      
+      // Mở hoặc tìm tab Portal
+      const initialTab = await createOrActiveTab(
+        "https://portalkhl.vnpost.vn/search-order",
+        "portalkhl.vnpost.vn",
+        true
+      );
+      
+      if (!initialTab || !initialTab.id) {
+        console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
+        updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
         return;
       }
-      saveToken(tokenTemp);
-      token = tokenTemp;
+      const tabId = initialTab.id;
+
+      console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
+
+      // --- Sử dụng hàm ensurePortalLogin ---
+      const loginResult = await ensurePortalLogin(tabId);
+      const loginSuccess = loginResult.success;
+      // --- Kết thúc sử dụng hàm ensurePortalLogin ---
+
+      if (!loginSuccess) {
+        console.error("Đăng nhập Portal thất bại");
+        updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
+        return;
+      }
+
+      console.log("Đăng nhập Portal thành công, đang lấy token...");
+      
+      // Lấy token từ sessionStorage sau khi đăng nhập thành công
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          func: () => {
+            const accessToken = sessionStorage.getItem('accessToken');
+            if (accessToken) {
+              try {
+                const parsed = JSON.parse(accessToken);
+                return parsed.accessToken || null;
+              } catch (e) {
+                console.error('Lỗi parse authData:', e);
+                return null;
+              }
+            }
+            return null;
+          }
+        });
+        
+        if (results && results[0] && results[0].result) {
+          const tokenTemp = results[0].result;
+          console.log("Đã lấy được token từ sessionStorage thành công");
+          saveToken(tokenTemp);
+          token = tokenTemp;
+          updateToPhone("message", "Đăng nhập và lấy token thành công!");
+        } else {
+          console.error("Không lấy được token từ sessionStorage");
+          updateToPhone("message", "Lỗi: Không lấy được token từ Portal.");
+          return;
+        }
+      } catch (error: any) {
+        console.error("Lỗi khi lấy token:", error);
+        updateToPhone("message", `Lỗi khi lấy token: ${error.message}`);
+        return;
+      }
     }
   } else {
     //       await processWithGemini(`[21/06/2025 10:33:47] Kim Vân: 1.13 hoà hảo 299k 45n trắng dc 6 phùng hưng ph hàng mã hk hà nội dt 0974568086
@@ -906,6 +966,8 @@ async function handleDataChange(
     sendSubmit: async () => await handleSendSubmit(),
     printMaHieus: async (data: any) =>
       await printMaHieus(JSON.parse(data.DoiTuong)),
+    printARPages: async (data: any) =>
+      await printARPages(JSON.parse(data.DoiTuong)),
     xoabg: async (data: any) =>
       await handleXoaBuuGui(JSON.parse(data.DoiTuong)),
     xoanhieubg: async (data: any) => {
@@ -2640,6 +2702,63 @@ const printMaHieus = async (maHieus: string[]) => {
   chrome.action.setBadgeText({ text: "" });
 };
 
+const printARPages = async (maHieus: string[]) => {
+  chrome.action.setBadgeText({ text: "In AR..." });
+  chrome.action.setBadgeBackgroundColor({ color: "#0000FF" });
+
+  try {
+    // Lấy blobs từ mảng maHieus cho AR pages
+    var blobs: Blob[] | null = await getBlobsForAR(maHieus);
+    console.log("Đã lấy blobs AR:", blobs?.length || 0);
+
+    if (blobs == null || blobs.length === 0) {
+      console.error("Không lấy được blobs AR hoặc danh sách rỗng");
+      chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+      await delay(1000);
+      chrome.action.setBadgeText({ text: "" });
+      return;
+    }
+
+    // Kiểm tra xem offscreen document đã tồn tại chưa
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    });
+
+    // Nếu chưa có, tạo mới
+    if (existingContexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+        justification: "Print PDF files using DOM APIs",
+      });
+    }
+
+    var blob = await convertBlobsToBlob(blobs);
+    var base64String = await pdfBlobTo64(blob);
+
+    // Gửi message đến offscreen document để in
+    const response = await chrome.runtime.sendMessage({
+      type: "PRINT_PDF",
+      base64Data: base64String,
+    });
+
+    if (response && response.success) {
+      console.log("In PDF AR thành công");
+      chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
+    } else {
+      console.error("Lỗi khi in PDF AR:", response?.error);
+      chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+    }
+  } catch (error: any) {
+    console.error("Lỗi khi tạo/sử dụng offscreen document AR:", error);
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+  }
+
+  //waiting 1 s
+  await delay(1000);
+  chrome.action.setBadgeText({ text: "" });
+};
+
 const updateToPhone = async (
   lenh: String,
   doiTuong: String,
@@ -2713,8 +2832,52 @@ const getBlobs = async (maHieus: string[]) => {
   }
   return blobs;
 };
+
+const getBlobsForAR = async (maHieus: string[]) => {
+  var blobs: Blob[] = [];
+  var blobsTemp: BlobStruct[] = await loadTodaysBlobs();
+  for (let index = 0; index < maHieus.length; index++) {
+    try {
+      const element = maHieus[index];
+      updateToPhone(
+        "message",
+        `In AR ${index + 1}|${maHieus.length} MH ${element} `,
+      );
+      chrome.action.setBadgeText({ text: (index + 1).toString() });
+
+      var blob: Blob | null = null;
+      // Thêm "R" vào key để tránh trùng với mã hiệu thường
+      const arKey = element + "R";
+      if (blobsTemp.find((m) => m.maHieu === arKey) != null) {
+        blob = blobsTemp.find((m) => m.maHieu === arKey)?.blob!;
+      } else blob = await getBlobMaHieuForAR(element);
+
+      if (blob != null) {
+        //save blob to indexedDB với key có "R"
+        await saveBlob({
+          maHieu: arKey,
+          blob: blob,
+          dateCreated: Date.now(),
+        });
+        blobs.push(blob!);
+      } else {
+        updateToPhone("message", `Lỗi MH AR khi in ${element}`);
+        return null;
+      }
+    } catch {
+      break;
+    }
+  }
+  return blobs;
+};
 const getBlobMaHieu = async (maHieu: string): Promise<Blob | null> => {
   const res = await fetchPrintByMH(maHieu, token);
+  const base64String = res[0]; // your base64 string
+  return base64ToBlob(base64String, "application/pdf");
+};
+
+const getBlobMaHieuForAR = async (maHieu: string): Promise<Blob | null> => {
+  const res = await fetchPrintByMHForAR(maHieu, token);
   const base64String = res[0]; // your base64 string
   return base64ToBlob(base64String, "application/pdf");
 };
@@ -3247,6 +3410,7 @@ const handlePrintPage = async (data: any) => {
   await chrome.tabs.sendMessage(tab!.id!, { message: "PRINTBLOB" });
 };
 
+
 const API_BASE_URL = "https://api-pre-portalkhl.vnpost.vn";
 const PNS_BASE_URL = "https://packnsend.vnpost.vn";
 const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
@@ -3263,6 +3427,28 @@ const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
       body: JSON.stringify({
         ttNumber: maHieu,
         listReport: ["BD1New"],
+        lienNumbers: ["1"],
+        hiddenPrice: false,
+      }),
+    },
+  );
+  return res.json();
+};
+
+const fetchPrintByMHForAR = async (maHieu: string, token: string): Promise<any> => {
+  const res = await fetch(
+    `${API_BASE_URL}/khl-api/khl/jasper/printByTTNumber`,
+    {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json; charset=UTF-8",
+        authorization: `Bearer ${token}`,
+        capikey: "19001235",
+      },
+      body: JSON.stringify({
+        ttNumber: maHieu,
+        listReport: ["BD16"],
         lienNumbers: ["1"],
         hiddenPrice: false,
       }),

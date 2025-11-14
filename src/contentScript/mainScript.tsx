@@ -84,7 +84,12 @@ window.addEventListener("message", (event) => {
           const password: HTMLInputElement | null = document.querySelector("#password")
           password!.value = event.data.password
           password!.dispatchEvent(eventInput);
-
+          // var hasCapchar = document.querySelector("#formLogin > div.MuiGrid-root.MuiGrid-container > div:nth-child(6) > div > div:nth-child(1) > img")
+          // if(hasCapchar){
+          //   const capchar: HTMLInputElement | null = document.querySelector("#captcha")
+          //   capchar!.value = event.data.captcha
+          //   capchar!.dispatchEvent(eventInput);
+          // }
           //insert 'dfdf' into input with id username
           formLoginR.setState({
             // username: "593200_xonld",
