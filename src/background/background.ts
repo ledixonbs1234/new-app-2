@@ -2588,6 +2588,7 @@ const handleGetMaHieus = async (data: any) => {
         Name: n.receiverName,
         Date: n.createdDate,
         ProvinceCode: n.receiverProvinceCode,
+        Money:n.codAmount
       })),
     )
     .flat();

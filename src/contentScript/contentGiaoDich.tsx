@@ -16,6 +16,8 @@ let IsChooseSusget = false;
 let PhoneNumber = "";
 let Address = "";
 let isProcessingPortalItem = false; // Cờ để kiểm tra processSinglePortalItem đang chạy
+let isScriptActive = false; // Trạng thái script có đang hoạt động không
+let domObserver: MutationObserver | null = null; // Observer cho DOM changes
 
 // ID của các element thường dùng
 const ELEMENT_IDS = {
@@ -604,14 +606,140 @@ function findSuggestions(inputText: string): void {
 // Khởi tạo và Lắng nghe sự kiện
 // ==========================================================================
 
-async function initialize(): Promise<void> {
-  console.log("[GiaoTich] Bắt đầu khởi tạo...");
+/**
+ * Kiểm tra URL hiện tại có phải trang itemdetail không
+ */
+function isItemDetailPage(): boolean {
+  return window.location.href.includes("itemdetail");
+}
 
-  // Kiểm tra xem đây có phải trang itemdetail không
-  if (!window.location.href.includes("itemdetail")) {
-    console.log("[GiaoTich] Không phải trang itemdetail, dừng script");
+/**
+ * Bật script khi vào trang itemdetail
+ */
+function activateScript(): void {
+  if (isScriptActive) {
+    console.log("[GiaoTich] Script đã được bật rồi");
     return;
   }
+  
+  console.log("[GiaoTich] Bật script cho trang itemdetail");
+  isScriptActive = true;
+  
+  // Bắt đầu observe DOM để tìm receiverAddress input
+  observeDOMForAddressInput();
+  
+  // Gắn keydown listener
+  document.addEventListener("keydown", checkPress, false);
+}
+
+/**
+ * Tắt script khi rời khỏi trang itemdetail
+ */
+function deactivateScript(): void {
+  if (!isScriptActive) {
+    console.log("[GiaoTich] Script đã tắt rồi");
+    return;
+  }
+  
+  console.log("[GiaoTich] Tắt script vì rời khỏi trang itemdetail");
+  isScriptActive = false;
+  
+  // Dừng DOM observer
+  if (domObserver) {
+    domObserver.disconnect();
+    domObserver = null;
+  }
+  
+  // Xóa ghost input nếu có
+  const ghostInput = document.getElementById(ELEMENT_IDS.GHOST_INPUT);
+  if (ghostInput) {
+    ghostInput.remove();
+  }
+  
+  // Xóa keydown listener
+  document.removeEventListener("keydown", checkPress, false);
+  
+  // Xóa ResizeObservers
+  if ((window as any)._inputResizeObserversGiaoTich) {
+    (window as any)._inputResizeObserversGiaoTich = new WeakMap();
+  }
+}
+
+/**
+ * Theo dõi URL changes trong React SPA
+ */
+function monitorURLChanges(): void {
+  let lastUrl = window.location.href;
+  
+  console.log("[GiaoTich] Bắt đầu monitor URL changes. URL hiện tại:", lastUrl);
+  
+  // Kiểm tra URL ban đầu
+  if (isItemDetailPage()) {
+    console.log("[GiaoTich] URL ban đầu là itemdetail, activate script");
+    activateScript();
+  } else {
+    console.log("[GiaoTich] URL ban đầu không phải itemdetail");
+  }
+  
+  // Theo dõi pushState và replaceState
+  const originalPushState = history.pushState;
+  const originalReplaceState = history.replaceState;
+  
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    console.log("[GiaoTich] pushState detected");
+    handleURLChange();
+  };
+  
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    console.log("[GiaoTich] replaceState detected");
+    handleURLChange();
+  };
+  
+  // Theo dõi popstate (nút back/forward)
+  window.addEventListener('popstate', () => {
+    console.log("[GiaoTich] popstate detected");
+    handleURLChange();
+  });
+  
+  // Fallback: Polling để phát hiện URL change (cho trường hợp React Router không dùng History API)
+  setInterval(() => {
+    const currentUrl = window.location.href;
+    if (lastUrl !== currentUrl) {
+      console.log("[GiaoTich] URL changed detected by polling:", lastUrl, "->", currentUrl);
+      handleURLChange();
+    }
+  }, 500);
+  
+  function handleURLChange(): void {
+    const currentUrl = window.location.href;
+    const wasItemDetail = lastUrl.includes("itemdetail");
+    const isItemDetail = currentUrl.includes("itemdetail");
+    
+    console.log("[GiaoTich] handleURLChange - Last:", lastUrl, "Current:", currentUrl);
+    console.log("[GiaoTich] Was itemdetail:", wasItemDetail, "Is itemdetail:", isItemDetail);
+    
+    if (isItemDetail && !wasItemDetail) {
+      // Vừa vào trang itemdetail
+      console.log("[GiaoTich] ✅ URL changed TO itemdetail:", currentUrl);
+      activateScript();
+    } else if (!isItemDetail && wasItemDetail) {
+      // Vừa rời khỏi trang itemdetail
+      console.log("[GiaoTich] ❌ URL changed AWAY FROM itemdetail:", currentUrl);
+      deactivateScript();
+    } else if (isItemDetail && wasItemDetail) {
+      console.log("[GiaoTich] 🔄 Still on itemdetail page");
+    } else {
+      console.log("[GiaoTich] ⏭️ Still not on itemdetail page");
+    }
+    
+    lastUrl = currentUrl;
+  }
+}
+
+async function initialize(): Promise<void> {
+  console.log("[GiaoTich] Bắt đầu khởi tạo...");
 
   // Load localStorage settings nếu cần (hiện tại không dùng)
   // const storedUpperCase = localStorage.getItem(STORAGE_KEYS.IS_UPERCASE);
@@ -629,7 +757,6 @@ async function initialize(): Promise<void> {
     if (data && typeof data === "object" && Array.isArray(data.QuocGia)) {
       addressData = data.QuocGia;
       console.log("[GiaoTich] Dữ liệu địa chỉ đã load:", addressData.length, "items");
-      observeDOMForAddressInput();
     } else {
       console.error("[GiaoTich] Invalid address data format.");
     }
@@ -637,8 +764,11 @@ async function initialize(): Promise<void> {
     console.error("[GiaoTich] Lỗi khi tải data.json:", error);
   }
 
-  document.addEventListener("keydown", checkPress, false);
+  // Luôn monitor processing status (không phụ thuộc URL)
   monitorProcessingStatus();
+  
+  // Theo dõi URL changes và bật/tắt script
+  monitorURLChanges();
 }
 
 function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
@@ -820,8 +950,9 @@ function observeDOMForAddressInput(): void {
     }
   };
 
-  const observer = new MutationObserver(callback);
-  observer.observe(targetNode, config);
+  // Lưu observer vào biến global để có thể disconnect sau này
+  domObserver = new MutationObserver(callback);
+  domObserver.observe(targetNode, config);
   console.log("[GiaoTich] MutationObserver đang theo dõi sự thay đổi DOM...");
 
   const existingInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;

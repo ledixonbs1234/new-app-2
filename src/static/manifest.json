@@ -61,7 +61,7 @@
         },
         {
             "matches": [
-                "https://portalkhl.vnpost.vn/itemdetail/?hdrId=*"
+                "https://portalkhl.vnpost.vn/*"
             ],
             "js": [
                 "contentGiaoDich.js"

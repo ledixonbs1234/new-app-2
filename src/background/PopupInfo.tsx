@@ -34,6 +34,7 @@ type ItemDetailProp = {
   weight: string;
   receiverName:string;
   createdDate:string;
+  codAmount:string;
   dispatchNumber:string;
   receiverAddress:string;
   receiverProvinceCode:string
