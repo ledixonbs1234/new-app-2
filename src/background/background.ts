@@ -4509,6 +4509,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       handleCreateComplaint(msg.payload, sendResponse);
       return true; // Quan trọng: Luôn trả về true để xử lý bất đồng bộ
     }
+    
+    if (msg.type === "FETCH_CMS_DATA") {
+      handleFetchCMSData(msg.payload, sendResponse);
+      return true; // Xử lý bất đồng bộ
+    }
+    
+    if (msg.type === "OPEN_CMS_SEARCH") {
+      handleOpenCMSSearch(msg.payload, sendResponse);
+      return true; // Xử lý bất đồng bộ
+    }
   }
 });
 //END Ho Duy--------------------------------
@@ -4540,6 +4550,193 @@ async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
       }
     });
   });
+}
+
+/**
+ * Handler cho OPEN_CMS_SEARCH - Mở tab CMS và trigger automation
+ */
+async function handleOpenCMSSearch(payload: { itemCode: string }, sendResponse: (response: any) => void) {
+  const targetUrl = 'https://cms.vnpost.vn/admin/complaints/search';
+  const itemCode = payload.itemCode;
+  
+  try {
+    // Tìm tab CMS đã mở
+    const tabs = await chrome.tabs.query({});
+    let cmsTab = tabs.find(tab => tab.url?.startsWith('https://cms.vnpost.vn'));
+    
+    if (cmsTab && cmsTab.id) {
+      // Đã có tab CMS, update URL và focus
+      await chrome.tabs.update(cmsTab.id, { 
+        url: targetUrl,
+        active: true 
+      });
+      
+      // Đợi tab load xong rồi trigger automation
+      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        if (tabId === cmsTab!.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          
+          // Trigger automation sau khi page load
+          setTimeout(() => {
+            chrome.tabs.sendMessage(cmsTab!.id!, {
+              type: 'AUTO_SEARCH_CMS',
+              payload: { itemCode }
+            });
+          }, 1000);
+        }
+      });
+      
+      sendResponse({ status: 'success', action: 'updated' });
+    } else {
+      // Chưa có tab CMS, tạo mới
+      const newTab = await chrome.tabs.create({ 
+        url: targetUrl,
+        active: true 
+      });
+      
+      // Đợi tab load xong rồi trigger automation
+      chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+        if (tabId === newTab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          
+          // Trigger automation sau khi page load
+          setTimeout(() => {
+            chrome.tabs.sendMessage(newTab.id!, {
+              type: 'AUTO_SEARCH_CMS',
+              payload: { itemCode }
+            });
+          }, 1000);
+        }
+      });
+      
+      sendResponse({ status: 'success', action: 'created' });
+    }
+  } catch (error: any) {
+    console.error('[CMS] Error opening tab:', error);
+    sendResponse({ status: 'error', error: error.message });
+  }
+}
+
+/**
+ * Parse HTML table thành array actions
+ */
+function parseActionsFromHtml(html: string): any[] {
+  const actions: any[] = [];
+  
+  // Regex để tìm tất cả các <tr> chứa data
+  const trRegex = /<tr>\s*<td class="text-center">\s*(\d+)\s*<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>/gs;
+  
+  let match;
+  while ((match = trRegex.exec(html)) !== null) {
+    actions.push({
+      stt: match[1].trim(),
+      date: match[2].trim(),
+      unit: match[3].trim(),
+      content: match[4].trim().replace(/<[^>]*>/g, ''), // Remove HTML tags
+      relatedUnit: match[5].trim()
+    });
+  }
+  
+  return actions;
+}
+
+/**
+ * Hàm fetch CMS data qua background (bypass CORS)
+ */
+async function handleFetchCMSData(
+  payload: { maVanDon: string },
+  sendResponse: (response: any) => void,
+) {
+  const { maVanDon } = payload;
+  console.log(`[BG CMS] Fetching data for ${maVanDon}...`);
+
+  try {
+    // Bước 1: Search ticket
+    const searchUrl = `https://cms.vnpost.vn/api/admin/complaints/loaddatasearch?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&listRelationOrg=&relationOrg=&searchInfoCode=${maVanDon}&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&managedOrg=&managedUsr=&ttkCodeRef=&ttkContactNumber=&ttkContactEmail=&managedOrgComplaint=&createdOrgComplaint=&ttkSource=0&pageIndex=1&pageSize=20&column=ttkId&desending=1`;
+    
+    const searchResponse = await fetch(searchUrl, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'accept': '*/*',
+        'x-requested-with': 'XMLHttpRequest'
+      }
+    });
+    
+    if (!searchResponse.ok) {
+      console.error(`[BG CMS] Search failed: ${searchResponse.status}`);
+      sendResponse({ 
+        status: 'success', 
+        data: { hasData: false } 
+      });
+      return;
+    }
+    
+    const searchHtml = await searchResponse.text();
+    
+    // Check nếu không có dữ liệu
+    if (searchHtml.includes('Chưa có dữ liệu trong hệ thống')) {
+      console.log('[BG CMS] No data found');
+      sendResponse({ 
+        status: 'success', 
+        data: { hasData: false } 
+      });
+      return;
+    }
+    
+    // Extract data-id bằng regex
+    const dataIdMatch = searchHtml.match(/data-id="(\d+)"/);
+    if (!dataIdMatch) {
+      console.log('[BG CMS] Could not extract data-id');
+      sendResponse({ 
+        status: 'success', 
+        data: { hasData: false } 
+      });
+      return;
+    }
+    
+    const dataId = dataIdMatch[1];
+    console.log(`[BG CMS] Found data-id: ${dataId}`);
+    
+    // Bước 2: Fetch actions
+    const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${dataId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
+    
+    const actionsResponse = await fetch(actionsUrl, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        'accept': '*/*',
+        'x-requested-with': 'XMLHttpRequest'
+      }
+    });
+    
+    if (!actionsResponse.ok) {
+      console.error(`[BG CMS] Actions fetch failed: ${actionsResponse.status}`);
+      sendResponse({ 
+        status: 'success', 
+        data: { hasData: true, dataId, actions: [] } 
+      });
+      return;
+    }
+    
+    const actionsHtml = await actionsResponse.text();
+    
+    // Parse actions từ HTML
+    const actions = parseActionsFromHtml(actionsHtml);
+    console.log(`[BG CMS] Found ${actions.length} actions`);
+    
+    sendResponse({ 
+      status: 'success', 
+      data: { hasData: true, dataId, actions } 
+    });
+    
+  } catch (error: any) {
+    console.error('[BG CMS] Error:', error);
+    sendResponse({ 
+      status: 'error', 
+      error: error.message || 'Unknown error' 
+    });
+  }
 }
 
 /**

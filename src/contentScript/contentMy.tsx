@@ -1492,6 +1492,220 @@ function runOrderLogic() {
         console.log(`Đã thêm "Thông tin thêm" vào cuối table #custom-table-orderhdr-sender`);
     };
 
+    // ===== PHẦN MỚI: CMS INTEGRATION =====
+    
+    /**
+     * Fetch thông tin CMS từ API qua background script (bypass CORS)
+     */
+    async function fetchCMSData(maVanDon: string): Promise<{ hasData: boolean; dataId?: string; actions?: any[] }> {
+        try {
+            console.log(`[CMS] Fetching data for ${maVanDon}...`);
+            
+            // Gửi request đến background script để fetch CMS data
+            return new Promise((resolve) => {
+                chrome.runtime.sendMessage({
+                    event: "CONTENTMY",
+                    type: "FETCH_CMS_DATA",
+                    payload: { maVanDon }
+                }, (response) => {
+                    if (chrome.runtime.lastError) {
+                        console.error('[CMS] Chrome runtime error:', chrome.runtime.lastError);
+                        resolve({ hasData: false });
+                        return;
+                    }
+                    
+                    if (response && response.status === 'success') {
+                        console.log(`[CMS] Received data:`, response.data);
+                        resolve(response.data);
+                    } else {
+                        console.error('[CMS] Fetch failed:', response?.error);
+                        resolve({ hasData: false });
+                    }
+                });
+            });
+            
+        } catch (error) {
+            console.error('[CMS] Error fetching data:', error);
+            return { hasData: false };
+        }
+    }
+    
+    /**
+     * Thêm section CMS vào modal
+     */
+    async function addCMSInfoToModal(modalElement: Element, maVanDon: string) {
+        console.log(`[CMS] Adding CMS section for ${maVanDon}...`);
+        
+        // Tìm card "Người nhận"
+        const modalBody = modalElement.querySelector('.ant-modal-body');
+        if (!modalBody) return;
+        
+        const receiverCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
+            .find(el => el.textContent?.includes('Người nhận'))
+            ?.closest('.ant-card');
+        
+        if (!receiverCard) {
+            console.log('[CMS] Receiver card not found');
+            return;
+        }
+        
+        // Tìm ant-col chứa receiver card (ant-col-24)
+        const receiverCol = receiverCard.closest('.ant-col.ant-col-24');
+        if (!receiverCol) {
+            console.log('[CMS] Receiver column not found');
+            return;
+        }
+        
+        // Tìm ant-row container chứa các ant-col
+        const rowContainer = receiverCol.parentElement;
+        if (!rowContainer || !rowContainer.classList.contains('ant-row')) {
+            console.log('[CMS] Row container not found');
+            return;
+        }
+        
+        // Xóa card CMS cũ nếu có
+        const oldCMSCard = rowContainer.querySelector('#custom-cms-col');
+        if (oldCMSCard) {
+            oldCMSCard.remove();
+        }
+        
+        // Tạo ant-col wrapper cho CMS card
+        const cmsCol = document.createElement('div');
+        cmsCol.id = 'custom-cms-col';
+        cmsCol.className = 'ant-col ant-col-24';
+        cmsCol.style.paddingLeft = '4px';
+        cmsCol.style.paddingRight = '4px';
+        
+        // Tạo card CMS mới
+        const cmsCard = document.createElement('div');
+        cmsCard.className = 'ant-card ant-card-small';
+        cmsCard.style.width = '100%';
+        cmsCard.style.height = '100%';
+        cmsCard.style.marginTop = '8px';
+        
+        // Card header
+        const cardHead = document.createElement('div');
+        cardHead.className = 'ant-card-head';
+        cardHead.innerHTML = `
+            <div class="ant-card-head-wrapper">
+                <div class="ant-card-head-title">
+                    <div>
+                        <span role="img" aria-label="file-text" class="anticon anticon-file-text">
+                            <svg viewBox="64 64 896 896" focusable="false" width="1em" height="1em" fill="currentColor">
+                                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0042 42h216v494z"></path>
+                            </svg>
+                        </span> Thông tin CMS
+                    </div>
+                </div>
+                <div class="ant-card-extra">
+                    <button id="custom-cms-detail-btn" class="ant-btn ant-btn-primary ant-btn-sm" style="display: none;">
+                        <span>Chi tiết CMS</span>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Card body
+        const cardBody = document.createElement('div');
+        cardBody.className = 'ant-card-body';
+        cardBody.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">Đang tải dữ liệu CMS...</div>';
+        
+        cmsCard.appendChild(cardHead);
+        cmsCard.appendChild(cardBody);
+        cmsCol.appendChild(cmsCard);
+        
+        // Chèn cmsCol sau receiverCol trong rowContainer
+        rowContainer.insertBefore(cmsCol, receiverCol.nextSibling);
+        
+        // Fetch data và update UI
+        const cmsData = await fetchCMSData(maVanDon);
+        
+        if (!cmsData.hasData) {
+            cardBody.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <span style="display: inline-block; padding: 4px 12px; background: #f5f5f5; border: 1px solid #d9d9d9; border-radius: 4px; color: #999; font-size: 14px;">
+                        Chưa có CMS
+                    </span>
+                </div>
+            `;
+            return;
+        }
+        
+        if (!cmsData.actions || cmsData.actions.length === 0) {
+            cardBody.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <span style="display: inline-block; padding: 4px 12px; background: #fff7e6; border: 1px solid #ffd591; border-radius: 4px; color: #fa8c16; font-size: 14px;">
+                        Có ticket nhưng chưa có action
+                    </span>
+                </div>
+            `;
+            return;
+        }
+        
+        // Render table
+        let tableHtml = '<table id="custom-table-cms" style="width: 100%; border-collapse: collapse;">';
+        tableHtml += `
+            <thead>
+                <tr style="background: #fafafa; border-bottom: 1px solid #f0f0f0;">
+                    <th style="padding: 8px; text-align: center; font-weight: 600; width: 50px;">STT</th>
+                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 140px;">Ngày</th>
+                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị</th>
+                    <th style="padding: 8px; text-align: left; font-weight: 600;">Nội dung</th>
+                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị liên quan</th>
+                </tr>
+            </thead>
+            <tbody>
+        `;
+        
+        cmsData.actions.forEach((action, index) => {
+            const bgColor = index % 2 === 0 ? '#fff' : '#fafafa';
+            tableHtml += `
+                <tr style="background: ${bgColor}; border-bottom: 1px solid #f0f0f0;">
+                    <td style="padding: 8px; text-align: center;">${action.stt}</td>
+                    <td style="padding: 8px; font-size: 13px;">${action.date}</td>
+                    <td style="padding: 8px; font-size: 13px;">${action.unit}</td>
+                    <td style="padding: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${action.content}</td>
+                    <td style="padding: 8px; font-size: 13px;">${action.relatedUnit || '-'}</td>
+                </tr>
+            `;
+        });
+        
+        tableHtml += '</tbody></table>';
+        cardBody.innerHTML = tableHtml;
+        
+        // Hiện button Chi tiết CMS và gắn sự kiện
+        const detailButton = cmsCard.querySelector('#custom-cms-detail-btn') as HTMLButtonElement;
+        if (detailButton) {
+            detailButton.style.display = 'block';
+            detailButton.addEventListener('click', () => {
+                openCMSDetailTab(maVanDon);
+            });
+        }
+        
+        console.log('[CMS] CMS section added successfully');
+    }
+    
+    /**
+     * Mở tab CMS để search mã vận đơn
+     */
+    function openCMSDetailTab(maVanDon: string) {
+        console.log(`[CMS] Opening CMS detail for ${maVanDon}`);
+        
+        chrome.runtime.sendMessage({
+            event: "CONTENTMY",
+            type: "OPEN_CMS_SEARCH",
+            payload: { itemCode: maVanDon }
+        }, (response) => {
+            if (response?.status === 'success') {
+                console.log('[CMS] Tab opened successfully');
+            } else {
+                console.error('[CMS] Failed to open tab:', response?.error);
+            }
+        });
+    }
+    
+    // ===== KẾT THÚC PHẦN CMS =====
+
     // Hàm để xử lý khi modal xuất hiện
     const processModal = (modalElement: Element) => {
         // 1. Tìm nút "Đánh giá" để làm điểm neo
@@ -1503,6 +1717,29 @@ function runOrderLogic() {
 
         // 2. Luôn thêm "Thông tin thêm" vào dialog (hàm sẽ tự xóa cũ nếu có)
         addExtraInfoToDialog(modalElement);
+
+        // 2.5. Thêm CMS info
+        const getTextFromLabel = (container: Element, labelText: string): string => {
+            const allThs = container.querySelectorAll('th');
+            for (const th of allThs) {
+                if (th.textContent?.trim().includes(labelText)) {
+                    return th.nextElementSibling?.textContent?.trim() ?? '';
+                }
+            }
+            return '';
+        };
+        const modalBody = modalElement.querySelector('.ant-modal-body');
+        if (modalBody) {
+            const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
+                .find(el => el.textContent?.includes('Đơn hàng'))
+                ?.closest('.ant-card');
+            if (orderCard) {
+                const maVanDon = getTextFromLabel(orderCard, 'Mã vận đơn');
+                if (maVanDon) {
+                    addCMSInfoToModal(modalElement, maVanDon);
+                }
+            }
+        }
 
         // 3. Kiểm tra xem nút của chúng ta đã được thêm vào chưa
         const existingButton = modalElement.querySelector('#custom-copy-info-btn');

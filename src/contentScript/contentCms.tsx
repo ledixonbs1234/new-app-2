@@ -73,6 +73,56 @@ function waitForStyleChange(selector: string, styleProp: keyof CSSStyleDeclarati
 
 
 chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+    // Handler cho tự động search CMS
+    if (request.type === "AUTO_SEARCH_CMS") {
+        console.log('[CMS Auto] Received search request:', request.payload);
+        const { itemCode } = request.payload;
+        
+        try {
+            // 1. Chờ input searchInfoCode xuất hiện
+            console.log('[CMS Auto] Waiting for searchInfoCode input...');
+            const searchInput = await waitForElement('#searchInfoCode', 5000);
+            if (!searchInput) throw new Error('Không tìm thấy input #searchInfoCode');
+            
+            // 2. Điền mã vận đơn vào input
+            (searchInput as HTMLInputElement).value = itemCode;
+            console.log(`[CMS Auto] Filled itemCode: ${itemCode}`);
+            
+            // 3. Chờ và xử lý dropdown "ĐV cấp dưới chủ trì"
+            console.log('[CMS Auto] Looking for searchManagerOrg dropdown...');
+            const managerOrgSelect = document.getElementById('searchManagerOrg') as HTMLSelectElement;
+            if (managerOrgSelect) {
+                // Chọn option "Tất cả" (value rỗng)
+                const allOption = Array.from(managerOrgSelect.options).find(opt => opt.value === '');
+                if (allOption) {
+                    managerOrgSelect.value = '';
+                    managerOrgSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Trigger Chosen update
+                    const chosenUpdateEvent = new CustomEvent('chosen:updated', { bubbles: true });
+                    managerOrgSelect.dispatchEvent(chosenUpdateEvent);
+                    console.log('[CMS Auto] Selected "Tất cả" for manager org');
+                }
+            }
+            
+            // 4. Chờ button search và click
+            console.log('[CMS Auto] Waiting for search button...');
+            await delay(500); // Chờ UI update
+            const searchButton = document.getElementById('btnSearchComplaint') as HTMLButtonElement;
+            if (!searchButton) throw new Error('Không tìm thấy button #btnSearchComplaint');
+            
+            searchButton.click();
+            console.log('[CMS Auto] Clicked search button');
+            
+            sendResponse({ status: 'success' });
+        } catch (error: any) {
+            console.error('[CMS Auto] Error:', error);
+            sendResponse({ status: 'error', error: error.message });
+        }
+        
+        return true;
+    }
+    
     if (request.type === "PREPARE_COMPLAINT_FORM") {
         console.log("Nhận được dữ liệu khiếu nại:", request.payload);
         const { orgCode, serviceCode, itemCode, type } = request.payload;
