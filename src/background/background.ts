@@ -4618,6 +4618,33 @@ async function handleOpenCMSSearch(payload: { itemCode: string }, sendResponse: 
 }
 
 /**
+ * Parse HTML search result để lấy tất cả ticket IDs (loại bỏ trùng lặp)
+ */
+function parseTicketsFromSearch(html: string): Array<{ ticketId: string; ticketCode: string }> {
+  const tickets: Array<{ ticketId: string; ticketCode: string }> = [];
+  const uniqueIds = new Set<string>();
+  
+  // Regex để tìm tất cả data-id
+  const dataIdRegex = /data-id="(\d+)"/g;
+  
+  let match;
+  while ((match = dataIdRegex.exec(html)) !== null) {
+    const ticketId = match[1].trim();
+    
+    // Chỉ thêm nếu chưa tồn tại
+    if (!uniqueIds.has(ticketId)) {
+      uniqueIds.add(ticketId);
+      tickets.push({
+        ticketId,
+        ticketCode: `Ticket #${tickets.length + 1}`
+      });
+    }
+  }
+  
+  return tickets;
+}
+
+/**
  * Parse HTML table thành array actions
  */
 function parseActionsFromHtml(html: string): any[] {
@@ -4638,6 +4665,43 @@ function parseActionsFromHtml(html: string): any[] {
   }
   
   return actions;
+}
+
+/**
+ * Fetch ticket detail khi không có actions
+ */
+async function fetchTicketDetail(ticketId: string): Promise<any> {
+  const detailUrl = `https://cms.vnpost.vn/api/admin/complaints/getdetail/${ticketId}`;
+  
+  const response = await fetch(detailUrl, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'accept': '*/*',
+      'x-requested-with': 'XMLHttpRequest'
+    }
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch detail: ${response.status}`);
+  }
+  
+  const jsonData = await response.json();
+  
+  if (jsonData.result && jsonData.resultData) {
+    const data = jsonData.resultData;
+    return {
+      stt: '1',
+      date: data.createdDate || '',
+      unit: 'Shop Hỗ Trợ',
+      content: data.ttkContent || '',
+      relatedUnit: data.managedOrg && data.managedOrgName 
+        ? `${data.managedOrg} - ${data.managedOrgName}` 
+        : '-'
+    };
+  }
+  
+  return null;
 }
 
 /**
@@ -4684,10 +4748,11 @@ async function handleFetchCMSData(
       return;
     }
     
-    // Extract data-id bằng regex
-    const dataIdMatch = searchHtml.match(/data-id="(\d+)"/);
-    if (!dataIdMatch) {
-      console.log('[BG CMS] Could not extract data-id');
+    // Parse tất cả tickets từ search result
+    const tickets = parseTicketsFromSearch(searchHtml);
+    console.log(`[BG CMS] Found ${tickets.length} tickets:`, tickets);
+    
+    if (tickets.length === 0) {
       sendResponse({ 
         status: 'success', 
         data: { hasData: false } 
@@ -4695,39 +4760,61 @@ async function handleFetchCMSData(
       return;
     }
     
-    const dataId = dataIdMatch[1];
-    console.log(`[BG CMS] Found data-id: ${dataId}`);
+    // Bước 2: Fetch actions cho từng ticket
+    const ticketDataList = [];
     
-    // Bước 2: Fetch actions
-    const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${dataId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
-    
-    const actionsResponse = await fetch(actionsUrl, {
-      method: 'GET',
-      credentials: 'include',
-      headers: {
-        'accept': '*/*',
-        'x-requested-with': 'XMLHttpRequest'
-      }
-    });
-    
-    if (!actionsResponse.ok) {
-      console.error(`[BG CMS] Actions fetch failed: ${actionsResponse.status}`);
-      sendResponse({ 
-        status: 'success', 
-        data: { hasData: true, dataId, actions: [] } 
+    for (const ticket of tickets) {
+      console.log(`[BG CMS] Processing ticket ${ticket.ticketCode} (ID: ${ticket.ticketId})`);
+      
+      // Fetch actions
+      const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
+      
+      const actionsResponse = await fetch(actionsUrl, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          'accept': '*/*',
+          'x-requested-with': 'XMLHttpRequest'
+        }
       });
-      return;
+      
+      let actions = [];
+      
+      if (actionsResponse.ok) {
+        const actionsHtml = await actionsResponse.text();
+        actions = parseActionsFromHtml(actionsHtml);
+        console.log(`[BG CMS] Ticket ${ticket.ticketCode}: ${actions.length} actions`);
+      }
+      
+      // Fetch detail để lấy ttkContent (luôn fetch để có thêm thông tin)
+      let detailAction = null;
+      try {
+        detailAction = await fetchTicketDetail(ticket.ticketId);
+        console.log(`[BG CMS] Got detail for ${ticket.ticketCode}:`, detailAction);
+      } catch (error) {
+        console.error(`[BG CMS] Failed to fetch detail for ${ticket.ticketCode}:`, error);
+      }
+      
+      // Nếu detailAction có ttkContent không rỗng, thêm vào đầu actions
+      if (detailAction && detailAction.content && detailAction.content.trim() !== '') {
+        actions.unshift(detailAction); // Thêm vào đầu mảng
+        console.log(`[BG CMS] Added detail as first action for ${ticket.ticketCode}`);
+      }
+      
+      ticketDataList.push({
+        ticketId: ticket.ticketId,
+        ticketCode: ticket.ticketCode,
+        actions
+      });
     }
     
-    const actionsHtml = await actionsResponse.text();
-    
-    // Parse actions từ HTML
-    const actions = parseActionsFromHtml(actionsHtml);
-    console.log(`[BG CMS] Found ${actions.length} actions`);
-    
+    console.log(`[BG CMS] Completed processing all tickets`);
     sendResponse({ 
       status: 'success', 
-      data: { hasData: true, dataId, actions } 
+      data: { 
+        hasData: true, 
+        tickets: ticketDataList 
+      } 
     });
     
   } catch (error: any) {

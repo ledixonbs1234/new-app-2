@@ -1497,7 +1497,7 @@ function runOrderLogic() {
     /**
      * Fetch thông tin CMS từ API qua background script (bypass CORS)
      */
-    async function fetchCMSData(maVanDon: string): Promise<{ hasData: boolean; dataId?: string; actions?: any[] }> {
+    async function fetchCMSData(maVanDon: string): Promise<{ hasData: boolean; tickets?: any[] }> {
         try {
             console.log(`[CMS] Fetching data for ${maVanDon}...`);
             
@@ -1631,47 +1631,73 @@ function runOrderLogic() {
             return;
         }
         
-        if (!cmsData.actions || cmsData.actions.length === 0) {
+        if (!cmsData.tickets || cmsData.tickets.length === 0) {
             cardBody.innerHTML = `
                 <div style="text-align: center; padding: 20px;">
                     <span style="display: inline-block; padding: 4px 12px; background: #fff7e6; border: 1px solid #ffd591; border-radius: 4px; color: #fa8c16; font-size: 14px;">
-                        Có ticket nhưng chưa có action
+                        Không tìm thấy ticket
                     </span>
                 </div>
             `;
             return;
         }
         
-        // Render table
-        let tableHtml = '<table id="custom-table-cms" style="width: 100%; border-collapse: collapse;">';
-        tableHtml += `
-            <thead>
-                <tr style="background: #fafafa; border-bottom: 1px solid #f0f0f0;">
-                    <th style="padding: 8px; text-align: center; font-weight: 600; width: 50px;">STT</th>
-                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 140px;">Ngày</th>
-                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị</th>
-                    <th style="padding: 8px; text-align: left; font-weight: 600;">Nội dung</th>
-                    <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị liên quan</th>
-                </tr>
-            </thead>
-            <tbody>
-        `;
+        // Render nhiều bảng (mỗi ticket 1 bảng)
+        let allTablesHtml = '';
         
-        cmsData.actions.forEach((action, index) => {
-            const bgColor = index % 2 === 0 ? '#fff' : '#fafafa';
-            tableHtml += `
-                <tr style="background: ${bgColor}; border-bottom: 1px solid #f0f0f0;">
-                    <td style="padding: 8px; text-align: center;">${action.stt}</td>
-                    <td style="padding: 8px; font-size: 13px;">${action.date}</td>
-                    <td style="padding: 8px; font-size: 13px;">${action.unit}</td>
-                    <td style="padding: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${action.content}</td>
-                    <td style="padding: 8px; font-size: 13px;">${action.relatedUnit || '-'}</td>
-                </tr>
+        cmsData.tickets.forEach((ticket: any, ticketIndex: number) => {
+            // Header cho mỗi ticket
+            if (ticketIndex > 0) {
+                allTablesHtml += '<div style="margin-top: 16px; padding-top: 16px; border-top: 2px solid #1890ff;"></div>';
+            }
+            
+            allTablesHtml += `
+                <div style="margin-bottom: 8px;">
+                    <strong style="color: #1890ff; font-size: 14px;">📋 ${ticket.ticketCode}</strong>
+                </div>
             `;
+            
+            if (!ticket.actions || ticket.actions.length === 0) {
+                allTablesHtml += `
+                    <div style="padding: 12px; background: #fff7e6; border: 1px solid #ffd591; border-radius: 4px; margin-bottom: 12px;">
+                        <span style="color: #fa8c16; font-size: 13px;">Ticket này chưa có action</span>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Render table cho ticket này
+            allTablesHtml += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 12px;">';
+            allTablesHtml += `
+                <thead>
+                    <tr style="background: #fafafa; border-bottom: 1px solid #f0f0f0;">
+                        <th style="padding: 8px; text-align: center; font-weight: 600; width: 50px;">STT</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600; width: 140px;">Ngày</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600;">Nội dung</th>
+                        <th style="padding: 8px; text-align: left; font-weight: 600; width: 180px;">Đơn vị liên quan</th>
+                    </tr>
+                </thead>
+                <tbody>
+            `;
+            
+            ticket.actions.forEach((action: any, index: number) => {
+                const bgColor = index % 2 === 0 ? '#fff' : '#fafafa';
+                allTablesHtml += `
+                    <tr style="background: ${bgColor}; border-bottom: 1px solid #f0f0f0;">
+                        <td style="padding: 8px; text-align: center;">${action.stt}</td>
+                        <td style="padding: 8px; font-size: 13px;">${action.date}</td>
+                        <td style="padding: 8px; font-size: 13px;">${action.unit}</td>
+                        <td style="padding: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap;">${action.content}</td>
+                        <td style="padding: 8px; font-size: 13px;">${action.relatedUnit || '-'}</td>
+                    </tr>
+                `;
+            });
+            
+            allTablesHtml += '</tbody></table>';
         });
         
-        tableHtml += '</tbody></table>';
-        cardBody.innerHTML = tableHtml;
+        cardBody.innerHTML = allTablesHtml;
         
         // Hiện button Chi tiết CMS và gắn sự kiện
         const detailButton = cmsCard.querySelector('#custom-cms-detail-btn') as HTMLButtonElement;
