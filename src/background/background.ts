@@ -359,7 +359,7 @@ const handleChayDenCuoiVaIn = async () => {
   } else if (processingQueue.length === 0 && !currentItemBeingProcessed) {
     console.log("No remaining items to process. Triggering print.");
     updateToPhone("info", "Không còn mã nào để xử lý, chuẩn bị in.");
-    await triggerPrint();
+    // await triggerPrint();
     isFinalProcessingTriggered = false;
   } else {
     console.log(
@@ -396,18 +396,18 @@ function triggerProcessingCheck(): void {
       !processingQueue.includes(item.MaBuuGui),
   );
 
-  if (itemsReadyForQueue.length > BUFFER_SIZE) {
+  // if (itemsReadyForQueue.length > BUFFER_SIZE) {
     const nextItemMaBG = itemsReadyForQueue[0].MaBuuGui; // Lấy MaBuuGui (string) của item cũ nhất
     if (!processingQueue.includes(nextItemMaBG)) {
       console.log("Adding to queue based on buffer (MaBuuGui):", nextItemMaBG);
       processingQueue.push(nextItemMaBG); // Thêm MaBuuGui (string) vào queue
       processNextItemInBackground();
     }
-  } else if (isFinalProcessingTriggered && itemsReadyForQueue.length === 0) {
-    console.log("Final processing complete, queue is empty. Triggering print.");
-    triggerPrint();
-    isFinalProcessingTriggered = false;
-  }
+  // } else if (isFinalProcessingTriggered && itemsReadyForQueue.length === 0) {
+    // console.log("Final processing complete, queue is empty. Triggering print.");
+    // triggerPrint();
+    // isFinalProcessingTriggered = false;
+  // }
 }
 async function hardRefreshSpecificTab(
   tabId: number,
@@ -451,7 +451,7 @@ async function processNextItemInBackground(): Promise<void> {
       isFinalProcessingTriggered
     ) {
       console.log("Queue is now empty after processing. Triggering print.");
-      await triggerPrint();
+      // await triggerPrint();
       isFinalProcessingTriggered = false;
     }
     return;
@@ -754,9 +754,10 @@ async function findPortalTabId(
       const snapshot = await db!.ref("PORTAL/HopDongs/" + currentMaKH).get();
       const hopDong = snapshot.val();
       // Gọi hàm khởi tạo (trả về hdrId hoặc null)
-      const hdrId: string | null = await khoiTaoPortal(hopDong);
+      const result = await khoiTaoPortal(hopDong);
 
-      if (hdrId) {
+      if (result && result.hdrId) {
+        const { hdrId, tabId } = result;
         console.log(
           "handleSendAutoToPortal: Khởi tạo thành công. Mã hợp đồng:",
           hdrId,
@@ -777,11 +778,11 @@ async function findPortalTabId(
         // Sau khi khởi tạo thành công, tab đích đã sẵn sàng và active, gọi gửi dữ liệu
         // Thêm await nếu handleSendToPortal là async
         //get tabid Active
-        var tabs = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        }); // Lấy ID tab hiện tại (đã được kích hoạt)
-        return tabs[0].id;
+        // var tabs = await chrome.tabs.query({
+        //   active: true,
+        //   currentWindow: true,
+        // }); // Lấy ID tab hiện tại (đã được kích hoạt)
+        return tabId;
       } else {
         console.error("handleSendAutoToPortal: Khởi tạo Portal thất bại.");
         // handleKhoiTao đã gửi thông báo lỗi rồi, không cần gửi lại ở đây
@@ -883,6 +884,8 @@ async function handleDataChange(
     if (!isOk) {
       console.log("Token không hợp lệ, đang thực hiện đăng nhập lại qua Portal...");
       updateToPhone("message", "Đang đăng nhập lại vào Portal...");
+      accountPortal = data.username;
+      passwordPortal = data.password;
       
       // Mở hoặc tìm tab Portal
       const initialTab = await createOrActiveTab(
@@ -3123,7 +3126,9 @@ const resetCurrentHdrId = (): void => {
   currentHdrId = null;
 };
 
-const khoiTaoPortal = async (data: any): Promise<string | null> => {
+const khoiTaoPortal = async (
+  data: any,
+): Promise<{ hdrId: string; tabId: number } | null> => {
   try {
     console.log("Bắt đầu khởi tạo Portal...", data);
     // Reset hdrId khi bắt đầu khởi tạo mới
@@ -3185,17 +3190,20 @@ const khoiTaoPortal = async (data: any): Promise<string | null> => {
               "message",
               `Khởi tạo thành công. Mã hợp đồng: ${hdrId}`,
             );
+            return { hdrId, tabId: loadedTab.id };
           } else {
             console.warn("Không tìm thấy hdrId trong URL");
             currentHdrId = null;
             updateToPhone("message", "Khởi tạo thành công.");
+            // Vẫn trả về null vì không có hdrId
+            return null;
           }
         } catch (urlError: any) {
           console.error("Lỗi khi lấy URL:", urlError);
           currentHdrId = null;
           updateToPhone("message", "Khởi tạo thành công.");
+          return null;
         }
-        return currentHdrId; // Trả về hdrId nếu thành công (có thể là string hoặc null)
       } else {
         const errorMsg =
           response && response.data
@@ -3239,8 +3247,8 @@ const handleKhoiTao = async (data: any): Promise<boolean> => {
 
   const snapshot = await db!.ref("PORTAL/HopDongs/" + temp.maKH).get();
   const hopDong = snapshot.val();
-  const hdrId = await khoiTaoPortal(hopDong);
-  return hdrId !== null; // Trả về true nếu có hdrId, false nếu null
+  const result = await khoiTaoPortal(hopDong);
+  return result !== null; // Trả về true nếu có result, false nếu null
 };
 const handleGetDataFromPNS = async (
   dayLast: any,
@@ -3980,7 +3988,7 @@ async function handleXoaNhieuBuuGui(
         Referer: "https://portalkhl.vnpost.vn/",
         "Referrer-Policy": "strict-origin-when-cross-origin",
       },
-      body: id.toString(),
+      body: `[\"${id}\"]`,
       method: "POST",
     },
   );
