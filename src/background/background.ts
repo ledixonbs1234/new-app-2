@@ -26,7 +26,6 @@ import { delay, createOrActiveTab } from "./util";
 declare var XLSX: any;
 declare var firebase: any; // Khai báo firebase
 
-
 type FirebaseConfig = {
   apiKey: string;
   authDomain: string;
@@ -397,16 +396,16 @@ function triggerProcessingCheck(): void {
   );
 
   // if (itemsReadyForQueue.length > BUFFER_SIZE) {
-    const nextItemMaBG = itemsReadyForQueue[0].MaBuuGui; // Lấy MaBuuGui (string) của item cũ nhất
-    if (!processingQueue.includes(nextItemMaBG)) {
-      console.log("Adding to queue based on buffer (MaBuuGui):", nextItemMaBG);
-      processingQueue.push(nextItemMaBG); // Thêm MaBuuGui (string) vào queue
-      processNextItemInBackground();
-    }
+  const nextItemMaBG = itemsReadyForQueue[0].MaBuuGui; // Lấy MaBuuGui (string) của item cũ nhất
+  if (!processingQueue.includes(nextItemMaBG)) {
+    console.log("Adding to queue based on buffer (MaBuuGui):", nextItemMaBG);
+    processingQueue.push(nextItemMaBG); // Thêm MaBuuGui (string) vào queue
+    processNextItemInBackground();
+  }
   // } else if (isFinalProcessingTriggered && itemsReadyForQueue.length === 0) {
-    // console.log("Final processing complete, queue is empty. Triggering print.");
-    // triggerPrint();
-    // isFinalProcessingTriggered = false;
+  // console.log("Final processing complete, queue is empty. Triggering print.");
+  // triggerPrint();
+  // isFinalProcessingTriggered = false;
   // }
 }
 async function hardRefreshSpecificTab(
@@ -882,18 +881,20 @@ async function handleDataChange(
   if (!commandsNoTokenRequired.includes(data.Lenh)) {
     const isOk: boolean = await checkToken();
     if (!isOk) {
-      console.log("Token không hợp lệ, đang thực hiện đăng nhập lại qua Portal...");
+      console.log(
+        "Token không hợp lệ, đang thực hiện đăng nhập lại qua Portal...",
+      );
       updateToPhone("message", "Đang đăng nhập lại vào Portal...");
       accountPortal = data.username;
       passwordPortal = data.password;
-      
+
       // Mở hoặc tìm tab Portal
       const initialTab = await createOrActiveTab(
         "https://portalkhl.vnpost.vn/search-order",
         "portalkhl.vnpost.vn",
-        true
+        true,
       );
-      
+
       if (!initialTab || !initialTab.id) {
         console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
         updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
@@ -915,26 +916,26 @@ async function handleDataChange(
       }
 
       console.log("Đăng nhập Portal thành công, đang lấy token...");
-      
+
       // Lấy token từ sessionStorage sau khi đăng nhập thành công
       try {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tabId },
           func: () => {
-            const accessToken = sessionStorage.getItem('accessToken');
+            const accessToken = sessionStorage.getItem("accessToken");
             if (accessToken) {
               try {
                 const parsed = JSON.parse(accessToken);
                 return parsed.accessToken || null;
               } catch (e) {
-                console.error('Lỗi parse authData:', e);
+                console.error("Lỗi parse authData:", e);
                 return null;
               }
             }
             return null;
-          }
+          },
         });
-        
+
         if (results && results[0] && results[0].result) {
           const tokenTemp = results[0].result;
           console.log("Đã lấy được token từ sessionStorage thành công");
@@ -1374,7 +1375,7 @@ async function handleDeleteLastLineExtraInfo(
 ) {
   try {
     const { maVanDon } = payload;
-    
+
     console.log(`[BG] handleDeleteLastLineExtraInfo được gọi cho ${maVanDon}`);
 
     if (!db) {
@@ -1385,7 +1386,7 @@ async function handleDeleteLastLineExtraInfo(
     // Lấy log hiện tại từ Firebase
     const snapshot = await db.ref(`MYVNPOST/ExtraInfo/${maVanDon}`).get();
     const currentLog = snapshot.val() || "";
-    
+
     console.log(`[BG] Current log length: ${currentLog.length}`);
     console.log(`[BG] Current log:`, currentLog);
 
@@ -1396,7 +1397,9 @@ async function handleDeleteLastLineExtraInfo(
     }
 
     // Tách các dòng
-    const lines = currentLog.split('\n').filter((line: string) => line.trim() !== '');
+    const lines = currentLog
+      .split("\n")
+      .filter((line: string) => line.trim() !== "");
     console.log(`[BG] Số dòng hiện tại: ${lines.length}`);
 
     if (lines.length === 0) {
@@ -1413,7 +1416,7 @@ async function handleDeleteLastLineExtraInfo(
     console.log(`[BG] Số dòng còn lại: ${lines.length}`);
 
     // Tạo log mới
-    const updatedLog = lines.join('\n');
+    const updatedLog = lines.join("\n");
     console.log(`[BG] Updated log:`, updatedLog);
 
     if (updatedLog.trim() === "") {
@@ -2591,7 +2594,7 @@ const handleGetMaHieus = async (data: any) => {
         Name: n.receiverName,
         Date: n.createdDate,
         ProvinceCode: n.receiverProvinceCode,
-        Money:n.codAmount
+        Money: n.codAmount,
       })),
     )
     .flat();
@@ -3419,7 +3422,6 @@ const handlePrintPage = async (data: any) => {
   await chrome.tabs.sendMessage(tab!.id!, { message: "PRINTBLOB" });
 };
 
-
 const API_BASE_URL = "https://api-pre-portalkhl.vnpost.vn";
 const PNS_BASE_URL = "https://packnsend.vnpost.vn";
 const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
@@ -3444,7 +3446,10 @@ const fetchPrintByMH = async (maHieu: string, token: string): Promise<any> => {
   return res.json();
 };
 
-const fetchPrintByMHForAR = async (maHieu: string, token: string): Promise<any> => {
+const fetchPrintByMHForAR = async (
+  maHieu: string,
+  token: string,
+): Promise<any> => {
   const res = await fetch(
     `${API_BASE_URL}/khl-api/khl/jasper/printByTTNumber`,
     {
@@ -4517,12 +4522,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       handleCreateComplaint(msg.payload, sendResponse);
       return true; // Quan trọng: Luôn trả về true để xử lý bất đồng bộ
     }
-    
+
     if (msg.type === "FETCH_CMS_DATA") {
       handleFetchCMSData(msg.payload, sendResponse);
       return true; // Xử lý bất đồng bộ
     }
-    
+
     if (msg.type === "OPEN_CMS_SEARCH") {
       handleOpenCMSSearch(msg.payload, sendResponse);
       return true; // Xử lý bất đồng bộ
@@ -4563,92 +4568,99 @@ async function waitForTabToLoad(tabId: number): Promise<chrome.tabs.Tab> {
 /**
  * Handler cho OPEN_CMS_SEARCH - Mở tab CMS và trigger automation
  */
-async function handleOpenCMSSearch(payload: { itemCode: string }, sendResponse: (response: any) => void) {
-  const targetUrl = 'https://cms.vnpost.vn/admin/complaints/search';
+async function handleOpenCMSSearch(
+  payload: { itemCode: string },
+  sendResponse: (response: any) => void,
+) {
+  const targetUrl = "https://cms.vnpost.vn/admin/complaints/search";
   const itemCode = payload.itemCode;
-  
+
   try {
     // Tìm tab CMS đã mở
     const tabs = await chrome.tabs.query({});
-    let cmsTab = tabs.find(tab => tab.url?.startsWith('https://cms.vnpost.vn'));
-    
+    let cmsTab = tabs.find((tab) =>
+      tab.url?.startsWith("https://cms.vnpost.vn"),
+    );
+
     if (cmsTab && cmsTab.id) {
       // Đã có tab CMS, update URL và focus
-      await chrome.tabs.update(cmsTab.id, { 
+      await chrome.tabs.update(cmsTab.id, {
         url: targetUrl,
-        active: true 
+        active: true,
       });
-      
+
       // Đợi tab load xong rồi trigger automation
       chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-        if (tabId === cmsTab!.id && info.status === 'complete') {
+        if (tabId === cmsTab!.id && info.status === "complete") {
           chrome.tabs.onUpdated.removeListener(listener);
-          
+
           // Trigger automation sau khi page load
           setTimeout(() => {
             chrome.tabs.sendMessage(cmsTab!.id!, {
-              type: 'AUTO_SEARCH_CMS',
-              payload: { itemCode }
+              type: "AUTO_SEARCH_CMS",
+              payload: { itemCode },
             });
           }, 1000);
         }
       });
-      
-      sendResponse({ status: 'success', action: 'updated' });
+
+      sendResponse({ status: "success", action: "updated" });
     } else {
       // Chưa có tab CMS, tạo mới
-      const newTab = await chrome.tabs.create({ 
+      const newTab = await chrome.tabs.create({
         url: targetUrl,
-        active: true 
+        active: true,
       });
-      
+
       // Đợi tab load xong rồi trigger automation
       chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-        if (tabId === newTab.id && info.status === 'complete') {
+        if (tabId === newTab.id && info.status === "complete") {
           chrome.tabs.onUpdated.removeListener(listener);
-          
+
           // Trigger automation sau khi page load
           setTimeout(() => {
             chrome.tabs.sendMessage(newTab.id!, {
-              type: 'AUTO_SEARCH_CMS',
-              payload: { itemCode }
+              type: "AUTO_SEARCH_CMS",
+              payload: { itemCode },
             });
           }, 1000);
         }
       });
-      
-      sendResponse({ status: 'success', action: 'created' });
+
+      sendResponse({ status: "success", action: "created" });
     }
   } catch (error: any) {
-    console.error('[CMS] Error opening tab:', error);
-    sendResponse({ status: 'error', error: error.message });
+    console.error("[CMS] Error opening tab:", error);
+    sendResponse({ status: "error", error: error.message });
   }
 }
 
 /**
  * Parse HTML search result để lấy tất cả ticket IDs (loại bỏ trùng lặp)
  */
-function parseTicketsFromSearch(html: string): Array<{ ticketId: string; ticketCode: string }> {
+function parseTicketsFromSearch(
+  html: string,
+): Array<{ ticketId: string; ticketCode: string }> {
   const tickets: Array<{ ticketId: string; ticketCode: string }> = [];
   const uniqueIds = new Set<string>();
-  
+
   // Regex để tìm tất cả data-id
   const dataIdRegex = /data-id="(\d+)"/g;
-  
+
   let match;
   while ((match = dataIdRegex.exec(html)) !== null) {
     const ticketId = match[1].trim();
-    
+
     // Chỉ thêm nếu chưa tồn tại
     if (!uniqueIds.has(ticketId)) {
       uniqueIds.add(ticketId);
       tickets.push({
         ticketId,
-        ticketCode: `Ticket #${tickets.length + 1}`
+        ticketCode: `Ticket #${tickets.length + 1}`,
       });
     }
   }
-  
+
   return tickets;
 }
 
@@ -4657,21 +4669,22 @@ function parseTicketsFromSearch(html: string): Array<{ ticketId: string; ticketC
  */
 function parseActionsFromHtml(html: string): any[] {
   const actions: any[] = [];
-  
+
   // Regex để tìm tất cả các <tr> chứa data
-  const trRegex = /<tr>\s*<td class="text-center">\s*(\d+)\s*<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>/gs;
-  
+  const trRegex =
+    /<tr>\s*<td class="text-center">\s*(\d+)\s*<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>/gs;
+
   let match;
   while ((match = trRegex.exec(html)) !== null) {
     actions.push({
       stt: match[1].trim(),
       date: match[2].trim(),
       unit: match[3].trim(),
-      content: match[4].trim().replace(/<[^>]*>/g, ''), // Remove HTML tags
-      relatedUnit: match[5].trim()
+      content: match[4].trim().replace(/<[^>]*>/g, ""), // Remove HTML tags
+      relatedUnit: match[5].trim(),
     });
   }
-  
+
   return actions;
 }
 
@@ -4680,35 +4693,36 @@ function parseActionsFromHtml(html: string): any[] {
  */
 async function fetchTicketDetail(ticketId: string): Promise<any> {
   const detailUrl = `https://cms.vnpost.vn/api/admin/complaints/getdetail/${ticketId}`;
-  
+
   const response = await fetch(detailUrl, {
-    method: 'GET',
-    credentials: 'include',
+    method: "GET",
+    credentials: "include",
     headers: {
-      'accept': '*/*',
-      'x-requested-with': 'XMLHttpRequest'
-    }
+      accept: "*/*",
+      "x-requested-with": "XMLHttpRequest",
+    },
   });
-  
+
   if (!response.ok) {
     throw new Error(`Failed to fetch detail: ${response.status}`);
   }
-  
+
   const jsonData = await response.json();
-  
+
   if (jsonData.result && jsonData.resultData) {
     const data = jsonData.resultData;
     return {
-      stt: '1',
-      date: data.createdDate || '',
-      unit: 'Shop Hỗ Trợ',
-      content: data.ttkContent || '',
-      relatedUnit: data.managedOrg && data.managedOrgName 
-        ? `${data.managedOrg} - ${data.managedOrgName}` 
-        : '-'
+      stt: "1",
+      date: data.createdDate || "",
+      unit: "Shop Hỗ Trợ",
+      content: data.ttkContent || "",
+      relatedUnit:
+        data.managedOrg && data.managedOrgName
+          ? `${data.managedOrg} - ${data.managedOrgName}`
+          : "-",
     };
   }
-  
+
   return null;
 }
 
@@ -4725,111 +4739,126 @@ async function handleFetchCMSData(
   try {
     // Bước 1: Search ticket
     const searchUrl = `https://cms.vnpost.vn/api/admin/complaints/loaddatasearch?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&listRelationOrg=&relationOrg=&searchInfoCode=${maVanDon}&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&managedOrg=&managedUsr=&ttkCodeRef=&ttkContactNumber=&ttkContactEmail=&managedOrgComplaint=&createdOrgComplaint=&ttkSource=0&pageIndex=1&pageSize=20&column=ttkId&desending=1`;
-    
+
     const searchResponse = await fetch(searchUrl, {
-      method: 'GET',
-      credentials: 'include',
+      method: "GET",
+      credentials: "include",
       headers: {
-        'accept': '*/*',
-        'x-requested-with': 'XMLHttpRequest'
-      }
+        accept: "*/*",
+        "x-requested-with": "XMLHttpRequest",
+      },
     });
-    
+
     if (!searchResponse.ok) {
       console.error(`[BG CMS] Search failed: ${searchResponse.status}`);
-      sendResponse({ 
-        status: 'success', 
-        data: { hasData: false } 
+      sendResponse({
+        status: "success",
+        data: { hasData: false },
       });
       return;
     }
-    
+
     const searchHtml = await searchResponse.text();
-    
+
     // Check nếu không có dữ liệu
-    if (searchHtml.includes('Chưa có dữ liệu trong hệ thống')) {
-      console.log('[BG CMS] No data found');
-      sendResponse({ 
-        status: 'success', 
-        data: { hasData: false } 
+    if (searchHtml.includes("Chưa có dữ liệu trong hệ thống")) {
+      console.log("[BG CMS] No data found");
+      sendResponse({
+        status: "success",
+        data: { hasData: false },
       });
       return;
     }
-    
+
     // Parse tất cả tickets từ search result
     const tickets = parseTicketsFromSearch(searchHtml);
     console.log(`[BG CMS] Found ${tickets.length} tickets:`, tickets);
-    
+
     if (tickets.length === 0) {
-      sendResponse({ 
-        status: 'success', 
-        data: { hasData: false } 
+      sendResponse({
+        status: "success",
+        data: { hasData: false },
       });
       return;
     }
-    
+
     // Bước 2: Fetch actions cho từng ticket
     const ticketDataList = [];
-    
+
     for (const ticket of tickets) {
-      console.log(`[BG CMS] Processing ticket ${ticket.ticketCode} (ID: ${ticket.ticketId})`);
-      
+      console.log(
+        `[BG CMS] Processing ticket ${ticket.ticketCode} (ID: ${ticket.ticketId})`,
+      );
+
       // Fetch actions
       const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
-      
+
       const actionsResponse = await fetch(actionsUrl, {
-        method: 'GET',
-        credentials: 'include',
+        method: "GET",
+        credentials: "include",
         headers: {
-          'accept': '*/*',
-          'x-requested-with': 'XMLHttpRequest'
-        }
+          accept: "*/*",
+          "x-requested-with": "XMLHttpRequest",
+        },
       });
-      
+
       let actions = [];
-      
+
       if (actionsResponse.ok) {
         const actionsHtml = await actionsResponse.text();
         actions = parseActionsFromHtml(actionsHtml);
-        console.log(`[BG CMS] Ticket ${ticket.ticketCode}: ${actions.length} actions`);
+        console.log(
+          `[BG CMS] Ticket ${ticket.ticketCode}: ${actions.length} actions`,
+        );
       }
-      
+
       // Fetch detail để lấy ttkContent (luôn fetch để có thêm thông tin)
       let detailAction = null;
       try {
         detailAction = await fetchTicketDetail(ticket.ticketId);
-        console.log(`[BG CMS] Got detail for ${ticket.ticketCode}:`, detailAction);
+        console.log(
+          `[BG CMS] Got detail for ${ticket.ticketCode}:`,
+          detailAction,
+        );
       } catch (error) {
-        console.error(`[BG CMS] Failed to fetch detail for ${ticket.ticketCode}:`, error);
+        console.error(
+          `[BG CMS] Failed to fetch detail for ${ticket.ticketCode}:`,
+          error,
+        );
       }
-      
+
       // Nếu detailAction có ttkContent không rỗng, thêm vào đầu actions
-      if (detailAction && detailAction.content && detailAction.content.trim() !== '') {
+      if (
+        detailAction &&
+        detailAction.content &&
+        detailAction.content.trim() !== ""
+      ) {
         actions.unshift(detailAction); // Thêm vào đầu mảng
-        console.log(`[BG CMS] Added detail as first action for ${ticket.ticketCode}`);
+        console.log(
+          `[BG CMS] Added detail as first action for ${ticket.ticketCode}`,
+        );
       }
-      
+
       ticketDataList.push({
         ticketId: ticket.ticketId,
         ticketCode: ticket.ticketCode,
-        actions
+        actions,
       });
     }
-    
+
     console.log(`[BG CMS] Completed processing all tickets`);
-    sendResponse({ 
-      status: 'success', 
-      data: { 
-        hasData: true, 
-        tickets: ticketDataList 
-      } 
+    sendResponse({
+      status: "success",
+      data: {
+        hasData: true,
+        tickets: ticketDataList,
+      },
     });
-    
   } catch (error: any) {
-    console.error('[BG CMS] Error:', error);
-    sendResponse({ 
-      status: 'error', 
-      error: error.message || 'Unknown error' 
+    console.error("[BG CMS] Error:", error);
+    sendResponse({
+      status: "error",
+      error: error.message || "Unknown error",
     });
   }
 }
