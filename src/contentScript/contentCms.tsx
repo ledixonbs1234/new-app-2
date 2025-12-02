@@ -2,6 +2,9 @@ import { delay } from "./utils";
 
 console.log("CMS Content Script Loaded!");
 
+// Cờ để tránh xử lý message trùng lặp
+let isProcessingComplaint = false;
+
 /**
  * Hàm chờ một element xuất hiện trong DOM.
  * @param selector CSS selector của element
@@ -124,6 +127,14 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     }
     
     if (request.type === "PREPARE_COMPLAINT_FORM") {
+        // Kiểm tra cờ để tránh xử lý trùng lặp
+        if (isProcessingComplaint) {
+            console.log('[CMS] Đang xử lý complaint, bỏ qua message trùng lặp');
+            sendResponse({ status: 'duplicate', message: 'Already processing' });
+            return false; // Không cần giữ kênh mở vì đã response ngay
+        }
+
+        isProcessingComplaint = true;
         console.log("Nhận được dữ liệu khiếu nại:", request.payload);
         const { orgCode, serviceCode, itemCode, type } = request.payload;
 
@@ -225,11 +236,19 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
 
             console.log('Hoàn thành các bước tự động ban đầu!');
             sendResponse({ status: 'ok' });
+            
+            // Reset cờ sau khi hoàn thành
+            setTimeout(() => {
+                isProcessingComplaint = false;
+            }, 2000);
 
         } catch (error: any) {
             console.error('Lỗi trong quá trình tự động hóa form CMS:', error);
             alert(`Lỗi tự động hóa CMS: ${error.message}`);
             sendResponse({ status: 'error', error: error.message });
+            
+            // Reset cờ khi có lỗi
+            isProcessingComplaint = false;
         }
         return true; // Giữ kênh mở cho xử lý bất đồng bộ
     }

@@ -17,6 +17,7 @@ module.exports = {
         contentGoogleForm:path.resolve('./src/contentScript/contentGoogleForm.tsx'),
         offscreen:path.resolve('./src/offscreen/offscreen.ts'),
         mainScript:path.resolve('./src/contentScript/mainScript.tsx'),
+        options:path.resolve('./src/options/index.tsx'),
     },
     module:{
         rules:[
@@ -54,7 +55,7 @@ module.exports = {
           { from: path.resolve("src/static"), to: path.resolve("dist") },
         ],
       }),
-      ...getHtmlPlugins(['popup','offscreen']),
+      ...getHtmlPlugins(['popup','offscreen','options']),
     ],
     output:{
         filename:'[name].js'

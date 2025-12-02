@@ -26,6 +26,7 @@ const ELEMENT_IDS = {
   RECEIVER_PHONE: "receiverPhone",
   WEIGHT: "weight",
   TT_NUMBER: "ttNumber",
+  MONEY: "PROP0018",
   EXAMPLE_LIST: "exampleList",
   POPUP_VAS_OK_BUTTON_SELECTOR: "#popup-vas > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)",
   SAVE_AND_ADD_BUTTON_SELECTOR: "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button",
@@ -304,6 +305,13 @@ function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): v
       }
       e.preventDefault();
       break;
+    case ELEMENT_IDS.MONEY:
+      const okButton = document.querySelector(ELEMENT_IDS.POPUP_VAS_OK_BUTTON_SELECTOR) as HTMLElement | null;
+      if (okButton) {
+        okButton.click();
+      }
+      e.preventDefault(); // Ngăn tab tiếp nếu cần
+      break;
 
     case ELEMENT_IDS.WEIGHT:
       // Click vào dịch vụ input để mở popup
@@ -320,9 +328,35 @@ function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): v
             const row = button.closest('.rt-tr-group');
             if (row) {
               const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
-              if (checkbox && !checkbox.checked && !checkbox.disabled) {
-                checkbox.click();
-                console.log('[GiaoTich] Đã tự động check dịch vụ GTG021 (COD)');
+              if (checkbox && !checkbox.disabled) {
+                if (!checkbox.checked) {
+                  checkbox.click();
+                  console.log('[GiaoTich] Đã tự động check dịch vụ GTG021 (COD)');
+                } else {
+                  // Nếu đã check rồi: click ngay (để uncheck) rồi sau delay tìm lại và click lại
+                  console.log('[GiaoTich] Checkbox GTG021 đã checked, sẽ uncheck và check lại để refresh');
+                  checkbox.click();
+                  console.log('[GiaoTich] Đã uncheck GTG021');
+
+                  // Đợi lâu hơn và tìm lại checkbox để đảm bảo DOM đã update
+                  setTimeout(() => {
+                    const buttonsRefresh = document.querySelectorAll('.rt-tbody button.btn-link');
+                    buttonsRefresh.forEach((btn) => {
+                      if (btn.textContent?.trim() === 'GTG021') {
+                        const rowRefresh = btn.closest('.rt-tr-group');
+                        if (rowRefresh) {
+                          const checkboxRefresh = rowRefresh.querySelector('input[type="checkbox"]') as HTMLInputElement;
+                          if (checkboxRefresh && !checkboxRefresh.disabled && !checkboxRefresh.checked) {
+                            checkboxRefresh.click();
+                            console.log('[GiaoTich] ✅ Đã check lại GTG021 sau khi refresh');
+                          } else if (checkboxRefresh?.checked) {
+                            console.log('[GiaoTich] ⚠️ GTG021 vẫn đang checked, có thể chưa uncheck kịp');
+                          }
+                        }
+                      }
+                    });
+                  }, 300); // Tăng delay lên 1200ms
+                }
               }
             }
           }
@@ -354,6 +388,12 @@ function handleEnterKey(e: KeyboardEvent, _ele: HTMLInputElement, eleId: string)
       phoneInput?.dispatchEvent(new Event("blur"));
     }
     return;
+  } else if (eleId === ELEMENT_IDS.MONEY) {
+    e.preventDefault();
+    const okButton = document.querySelector(ELEMENT_IDS.POPUP_VAS_OK_BUTTON_SELECTOR) as HTMLElement | null;
+    if (okButton) {
+      okButton.click();
+    }
   }
 }
 
@@ -621,13 +661,13 @@ function activateScript(): void {
     console.log("[GiaoTich] Script đã được bật rồi");
     return;
   }
-  
+
   console.log("[GiaoTich] Bật script cho trang itemdetail");
   isScriptActive = true;
-  
+
   // Bắt đầu observe DOM để tìm receiverAddress input
   observeDOMForAddressInput();
-  
+
   // Gắn keydown listener
   document.addEventListener("keydown", checkPress, false);
 }
@@ -640,25 +680,25 @@ function deactivateScript(): void {
     console.log("[GiaoTich] Script đã tắt rồi");
     return;
   }
-  
+
   console.log("[GiaoTich] Tắt script vì rời khỏi trang itemdetail");
   isScriptActive = false;
-  
+
   // Dừng DOM observer
   if (domObserver) {
     domObserver.disconnect();
     domObserver = null;
   }
-  
+
   // Xóa ghost input nếu có
   const ghostInput = document.getElementById(ELEMENT_IDS.GHOST_INPUT);
   if (ghostInput) {
     ghostInput.remove();
   }
-  
+
   // Xóa keydown listener
   document.removeEventListener("keydown", checkPress, false);
-  
+
   // Xóa ResizeObservers
   if ((window as any)._inputResizeObserversGiaoTich) {
     (window as any)._inputResizeObserversGiaoTich = new WeakMap();
@@ -670,9 +710,9 @@ function deactivateScript(): void {
  */
 function monitorURLChanges(): void {
   let lastUrl = window.location.href;
-  
+
   console.log("[GiaoTich] Bắt đầu monitor URL changes. URL hiện tại:", lastUrl);
-  
+
   // Kiểm tra URL ban đầu
   if (isItemDetailPage()) {
     console.log("[GiaoTich] URL ban đầu là itemdetail, activate script");
@@ -680,29 +720,29 @@ function monitorURLChanges(): void {
   } else {
     console.log("[GiaoTich] URL ban đầu không phải itemdetail");
   }
-  
+
   // Theo dõi pushState và replaceState
   const originalPushState = history.pushState;
   const originalReplaceState = history.replaceState;
-  
-  history.pushState = function(...args) {
+
+  history.pushState = function (...args) {
     originalPushState.apply(this, args);
     console.log("[GiaoTich] pushState detected");
     handleURLChange();
   };
-  
-  history.replaceState = function(...args) {
+
+  history.replaceState = function (...args) {
     originalReplaceState.apply(this, args);
     console.log("[GiaoTich] replaceState detected");
     handleURLChange();
   };
-  
+
   // Theo dõi popstate (nút back/forward)
   window.addEventListener('popstate', () => {
     console.log("[GiaoTich] popstate detected");
     handleURLChange();
   });
-  
+
   // Fallback: Polling để phát hiện URL change (cho trường hợp React Router không dùng History API)
   setInterval(() => {
     const currentUrl = window.location.href;
@@ -711,15 +751,15 @@ function monitorURLChanges(): void {
       handleURLChange();
     }
   }, 500);
-  
+
   function handleURLChange(): void {
     const currentUrl = window.location.href;
     const wasItemDetail = lastUrl.includes("itemdetail");
     const isItemDetail = currentUrl.includes("itemdetail");
-    
+
     console.log("[GiaoTich] handleURLChange - Last:", lastUrl, "Current:", currentUrl);
     console.log("[GiaoTich] Was itemdetail:", wasItemDetail, "Is itemdetail:", isItemDetail);
-    
+
     if (isItemDetail && !wasItemDetail) {
       // Vừa vào trang itemdetail
       console.log("[GiaoTich] ✅ URL changed TO itemdetail:", currentUrl);
@@ -733,7 +773,7 @@ function monitorURLChanges(): void {
     } else {
       console.log("[GiaoTich] ⏭️ Still not on itemdetail page");
     }
-    
+
     lastUrl = currentUrl;
   }
 }
@@ -766,7 +806,7 @@ async function initialize(): Promise<void> {
 
   // Luôn monitor processing status (không phụ thuộc URL)
   monitorProcessingStatus();
-  
+
   // Theo dõi URL changes và bật/tắt script
   monitorURLChanges();
 }

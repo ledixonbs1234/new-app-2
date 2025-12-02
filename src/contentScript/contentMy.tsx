@@ -1911,31 +1911,15 @@ function runOrderLogic() {
             }
 
             console.log(`Bắt đầu quy trình Khiếu nại cho mã: ${itemCode}`);
-            complaintButton.textContent = 'Đang xử lý...';
-            complaintButton.disabled = true;
             const token = localStorage.getItem('accessToken');
 
-            // Gửi message tới background script
             chrome.runtime.sendMessage({
-                event: "CONTENTMY", // Event mới để phân biệt
+                event: "CONTENTMY",
                 type: "CREATE_COMPLAINT",
                 payload: {
                     itemCode: itemCode,
                     token: token,
-                    type: 'complaint' // Thêm loại khiếu nại
-                }
-            }, (response) => {
-                // Xử lý phản hồi từ background
-                if (response && response.status === 'success') {
-                    complaintButton.textContent = 'Đã gửi yêu cầu!';
-                    setTimeout(() => {
-                        complaintButton.textContent = 'Khiếu nại';
-                        complaintButton.disabled = false;
-                    }, 3000);
-                } else {
-                    alert(`Lỗi: ${response?.error || 'Không rõ nguyên nhân'}`);
-                    complaintButton.textContent = 'Khiếu nại';
-                    complaintButton.disabled = false;
+                    type: 'complaint'
                 }
             });
         };
@@ -1980,32 +1964,16 @@ function runOrderLogic() {
                 return;
             }
 
-            console.log(`Bắt đầu quy trình Khiếu nại cho mã: ${itemCode}`);
-            complaintButton1.textContent = 'Đang xử lý...';
-            complaintButton1.disabled = true;
+            console.log(`Bắt đầu quy trình Hỗ trợ cho mã: ${itemCode}`);
             const token = localStorage.getItem('accessToken');
 
-            // Gửi message tới background script
             chrome.runtime.sendMessage({
-                event: "CONTENTMY", // Event mới để phân biệt
+                event: "CONTENTMY",
                 type: "CREATE_COMPLAINT",
                 payload: {
                     itemCode: itemCode,
                     token: token,
-                    type: 'support' // Thêm loại hỗ trợ
-                }
-            }, (response) => {
-                // Xử lý phản hồi từ background
-                if (response && response.status === 'success') {
-                    complaintButton1.textContent = 'Đã gửi yêu cầu!';
-                    setTimeout(() => {
-                        complaintButton1.textContent = 'Hỗ trợ';
-                        complaintButton1.disabled = false;
-                    }, 3000);
-                } else {
-                    alert(`Lỗi: ${response?.error || 'Không rõ nguyên nhân'}`);
-                    complaintButton1.textContent = 'Hỗ trợ';
-                    complaintButton1.disabled = false;
+                    type: 'support'
                 }
             });
         };

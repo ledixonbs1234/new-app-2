@@ -1255,8 +1255,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         handleDeleteLastLineExtraInfo(request.payload, sendResponse);
         return;
       } else if (request.type === "CREATE_COMPLAINT") {
-        handleCreateComplaint(request.payload, sendResponse);
-        return;
+        // Fire-and-forget - chỉ cần mở tab CMS, không cần response
+        handleCreateComplaint(request.payload).catch(error => {
+          console.error('[BG] Error in CREATE_COMPLAINT (fire-and-forget):', error);
+        });
+        // Không sendResponse, không return true
       }
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
@@ -4519,8 +4522,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg.event === "CONTENTMY") {
     if (msg.type === "CREATE_COMPLAINT") {
-      handleCreateComplaint(msg.payload, sendResponse);
-      return true; // Quan trọng: Luôn trả về true để xử lý bất đồng bộ
+      // Fire-and-forget - không cần response
+      handleCreateComplaint(msg.payload).catch(error => {
+        console.error('[BG] Error in CREATE_COMPLAINT (fire-and-forget):', error);
+      });
+      // Không return true vì không cần response
     }
 
     if (msg.type === "FETCH_CMS_DATA") {
@@ -4868,7 +4874,6 @@ async function handleFetchCMSData(
  */
 async function handleCreateComplaint(
   payload: { itemCode: string; token: string | null; type: string },
-  sendResponse: (response: any) => void,
 ) {
   const { itemCode, token, type } = payload;
   console.log(`[BG] Bắt đầu xử lý khiếu nại cho: ${itemCode}`);
@@ -4927,31 +4932,50 @@ async function handleCreateComplaint(
     let cmsTab;
 
     if (cmsTabs.length > 0) {
-      console.log("[BG] Tìm thấy tab CMS. Kích hoạt nó...");
-      cmsTab = await chrome.tabs.update(cmsTabs[0].id!, {
-        active: true,
-        url: cmsUrl,
-      });
+      console.log("[BG] Tìm thấy tab CMS. Kiểm tra URL hiện tại...");
+      const currentTab = cmsTabs[0];
+      
+      // Chỉ update URL nếu khác với URL mong muốn (tránh refresh không cần thiết)
+      if (currentTab.url !== cmsUrl) {
+        console.log("[BG] URL khác nhau, đang chuyển hướng và đợi load...");
+        cmsTab = await chrome.tabs.update(currentTab.id!, {
+          active: true,
+          url: cmsUrl,
+        });
+        // Chờ tab load xong khi có navigation
+        await waitForTabToLoad(cmsTab.id!);
+      } else {
+        console.log("[BG] URL đã đúng, chỉ kích hoạt tab...");
+        cmsTab = await chrome.tabs.update(currentTab.id!, {
+          active: true,
+        });
+        // Không cần đợi load vì tab đã sẵn sàng
+        await delay(300); // Chỉ đợi ngắn để đảm bảo tab được focus
+      }
     } else {
       console.log("[BG] Không tìm thấy tab CMS. Tạo tab mới...");
       cmsTab = await chrome.tabs.create({ url: cmsUrl, active: true });
+      // Chờ tab mới load xong
+      await waitForTabToLoad(cmsTab.id!);
     }
 
-    // Chờ tab load xong
-    await waitForTabToLoad(cmsTab.id!);
-    console.log(`[BG] Tab CMS (ID: ${cmsTab.id}) đã sẵn sàng. Gửi dữ liệu...`);
+    console.log(`[BG] Tab CMS (ID: ${cmsTab.id}) đã sẵn sàng. Đợi content script...`);
 
-    // 5. Gửi dữ liệu sang tab CMS
-    chrome.tabs.sendMessage(cmsTab.id!, {
-      type: "PREPARE_COMPLAINT_FORM",
-      payload: complaintData,
-    });
+    // Đợi thêm để đảm bảo content script đã inject xong
+    await delay(800);
 
-    // 6. Phản hồi thành công về cho content script ban đầu
-    sendResponse({ status: "success" });
+    // 5. Gửi dữ liệu sang tab CMS - fire and forget, không cần chờ response
+    chrome.tabs.sendMessage(
+      cmsTab.id!,
+      {
+        type: "PREPARE_COMPLAINT_FORM",
+        payload: complaintData,
+      }
+    );
+    
+    console.log('[BG] Đã gửi message tới CMS, không chờ response');
   } catch (error: any) {
     console.error("[BG] Lỗi trong quá trình tạo khiếu nại:", error);
-    sendResponse({ status: "error", error: error.message });
   }
 }
 // Định nghĩa kiểu cho dữ liệu file

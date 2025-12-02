@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    background-color: #f0f2f5;
+    padding: 20px;
+}
+
+.ant-table-cell {
+    vertical-align: top;
+}
+
+/* Fix Ant Design Button Primary Colors */
+.ant-btn-primary {
+    background-color: #1677ff !important;
+    border-color: #1677ff !important;
+    color: #fff !important;
+}
+
+.ant-btn-primary:hover {
+    background-color: #4096ff !important;
+    border-color: #4096ff !important;
+}
+
+.ant-btn-primary:active {
+    background-color: #0958d9 !important;
+    border-color: #0958d9 !important;
+}
+
+.ant-btn-primary[disabled] {
+    background-color: rgba(0, 0, 0, 0.04) !important;
+    border-color: #d9d9d9 !important;
+    color: rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Fix Ant Design Button Danger */
+.ant-btn-dangerous.ant-btn-primary {
+    background-color: #ff4d4f !important;
+    border-color: #ff4d4f !important;
+}
+
+.ant-btn-dangerous.ant-btn-primary:hover {
+    background-color: #ff7875 !important;
+    border-color: #ff7875 !important;
+}
+
+/* Modern Table Styles */
+.modern-table .ant-table {
+    border-radius: 12px;
+}
+
+.modern-table .ant-table-thead > tr > th {
+    background: linear-gradient(to right, #f0f9ff, #e0f2fe) !important;
+    font-weight: 600;
+    color: #1e40af;
+}
+
+.modern-table .ant-table-tbody > tr:hover > td {
+    background: #f0f9ff !important;
+}
+
+/* Modern Modal */
+.modern-modal .ant-modal-header {
+    background: linear-gradient(to right, #eff6ff, #dbeafe);
+    border-bottom: 2px solid #3b82f6;
+}
+
+.modern-modal .ant-modal-content {
+    border-radius: 16px;
+    overflow: hidden;
+}
