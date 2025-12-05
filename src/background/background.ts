@@ -1254,6 +1254,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       } else if (request.type === "DELETE_LAST_LINE_EXTRA_INFO") {
         handleDeleteLastLineExtraInfo(request.payload, sendResponse);
         return;
+      } else if (request.type === "GET_CMS_TEMPLATES") {
+        handleGetCMSTemplates(sendResponse);
+        return;
+      } else if (request.type === "SAVE_CMS_TEMPLATES") {
+        handleSaveCMSTemplates(request.payload, sendResponse);
+        return;
       } else if (request.type === "CREATE_COMPLAINT") {
         // Fire-and-forget - chỉ cần mở tab CMS, không cần response
         handleCreateComplaint(request.payload).catch(error => {
@@ -1440,6 +1446,60 @@ async function handleDeleteLastLineExtraInfo(
     sendResponse({ status: "error", error: error.message });
   }
 }
+
+/**
+ * Lấy danh sách mẫu CMS từ Firebase (chung cho tất cả người dùng)
+ */
+async function handleGetCMSTemplates(
+  sendResponse: (response: any) => void,
+) {
+  try {
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lấy templates từ Firebase path chung
+    const snapshot = await db.ref('CMS_TEMPLATES').get();
+    const templates = snapshot.val() || [];
+
+    console.log(`[BG] Đã tải ${templates.length} mẫu CMS từ Firebase`);
+    sendResponse({ status: "success", templates: templates });
+  } catch (error: any) {
+    console.error("[BG] Lỗi khi lấy mẫu CMS:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+
+/**
+ * Lưu danh sách mẫu CMS lên Firebase (chung cho tất cả người dùng)
+ */
+async function handleSaveCMSTemplates(
+  payload: { templates: string[] },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { templates } = payload;
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lọc bỏ các template rỗng
+    const validTemplates = templates.filter(t => t && t.trim() !== '');
+
+    // Lưu vào Firebase path chung
+    await db.ref('CMS_TEMPLATES').set(validTemplates);
+
+    console.log(`[BG] Đã lưu ${validTemplates.length} mẫu CMS lên Firebase`);
+    sendResponse({ status: "success", templates: validTemplates });
+  } catch (error: any) {
+    console.error("[BG] Lỗi khi lưu mẫu CMS:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+
 async function handleCheckPortal() {
   try {
     updateToPhone("message", "Đang gửi yêu cầu lấy danh sách mã hiệu tồn...");
@@ -3977,7 +4037,7 @@ async function handleXoaNhieuBuuGui(
   console.log(id);
 
   var res = await fetch(
-    "https://api-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail",
+    "https://api-pre-portalkhl.vnpost.vn/khl-api/khl/portalItem/deleteItemDetail",
     {
       headers: {
         accept: "application/json, text/plain, */*",
@@ -3996,7 +4056,7 @@ async function handleXoaNhieuBuuGui(
         Referer: "https://portalkhl.vnpost.vn/",
         "Referrer-Policy": "strict-origin-when-cross-origin",
       },
-      body: `[\"${id}\"]`,
+      body: `${id}`,
       method: "POST",
     },
   );
@@ -4771,7 +4831,7 @@ async function handleFetchCMSData(
       console.log("[BG CMS] No data found");
       sendResponse({
         status: "success",
-        data: { hasData: false },
+        data: { tickets: [] },
       });
       return;
     }
@@ -4783,7 +4843,7 @@ async function handleFetchCMSData(
     if (tickets.length === 0) {
       sendResponse({
         status: "success",
-        data: { hasData: false },
+        data: { tickets: [] },
       });
       return;
     }

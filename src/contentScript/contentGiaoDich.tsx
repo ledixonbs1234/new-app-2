@@ -192,6 +192,13 @@ function checkPress(e: KeyboardEvent): void {
       case KEY_CODES.ENTER:
         handleEnterKey(e, ele, eleId);
         break;
+      case KEY_CODES.F4:
+        var btnLuu= document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button") as HTMLElement;
+        if (btnLuu) {
+          btnLuu.click();
+        }
+        break;
+
     }
   }
 }
@@ -298,6 +305,8 @@ function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): v
       break;
 
     case ELEMENT_IDS.TT_NUMBER:
+
+
       const receiverNameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
       if (receiverNameInput) {
         receiverNameInput.focus();
