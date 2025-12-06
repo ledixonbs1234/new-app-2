@@ -160,7 +160,7 @@ const ImagePanel: React.FC<ImagePanelProps> = ({ isOpen, onClose, currentFieldGr
 
   if (!isOpen) return null;
 
-  const currentImage = images[currentIndex];
+  const currentImage = images[currentIndex] || null;
 
   return (
     <div 

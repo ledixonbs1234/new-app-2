@@ -11,7 +11,8 @@ import ImagePanel from './ImagePanel';
 import { imageDB } from './imageDB';
 import { UploadedImage, UploadedImagesData, FieldGroup } from '../types/imagePanel';
 import { initializeApp } from "firebase/app";
-import { getDatabase, ref, onValue, off } from "firebase/database";
+import { getDatabase, ref, onValue } from "firebase/database";
+import { firebaseConfig } from '../config/firebaseConfig';
 
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
@@ -159,18 +160,6 @@ function monitorProcessingStatus(): void {
 // ==========================================================================
 // Image Panel Functions
 // ==========================================================================
-
-// Note: Firebase config is duplicated from background.ts for content script use
-// TODO: Consider moving to a shared config file or environment variables
-const firebaseConfig = {
-  apiKey: "AIzaSyAs9RtsXMRPeD5vpORJcWLDb1lEJZ3nUWI",
-  authDomain: "xonapp.firebaseapp.com",
-  databaseURL: "https://xonapp-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "xonapp",
-  storageBucket: "xonapp.appspot.com",
-  messagingSenderId: "892472148061",
-  appId: "1:892472148061:web:f22a5c4ffd25858726cdb4",
-};
 
 function initializeImagePanel(): void {
   // Create container for image panel

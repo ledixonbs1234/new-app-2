@@ -13,6 +13,16 @@ const ZOOM_SETTINGS_STORE = 'zoomSettings';
 class ImageDB {
   private db: IDBDatabase | null = null;
 
+  private async ensureInitialized(): Promise<void> {
+    if (!this.db) {
+      await this.init();
+    }
+    
+    if (!this.db) {
+      throw new Error('Failed to initialize database');
+    }
+  }
+
   async init(): Promise<void> {
     // Return early if already initialized
     if (this.db) {
@@ -50,13 +60,7 @@ class ImageDB {
   }
 
   async saveImages(images: UploadedImage[]): Promise<void> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([IMAGES_STORE], 'readwrite');
@@ -72,13 +76,7 @@ class ImageDB {
   }
 
   async getImages(): Promise<UploadedImage[]> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([IMAGES_STORE], 'readonly');
@@ -96,13 +94,7 @@ class ImageDB {
   }
 
   async getImageByQrCode(qrCode: string): Promise<UploadedImage | null> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([IMAGES_STORE], 'readonly');
@@ -116,13 +108,7 @@ class ImageDB {
   }
 
   async saveZoomSetting(setting: ImageZoomSettings): Promise<void> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([ZOOM_SETTINGS_STORE], 'readwrite');
@@ -140,13 +126,7 @@ class ImageDB {
   }
 
   async getZoomSetting(imageUrl: string, fieldGroup: FieldGroup): Promise<ZoomPreset | null> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([ZOOM_SETTINGS_STORE], 'readonly');
@@ -163,13 +143,7 @@ class ImageDB {
   }
 
   async getZoomSettingByQrCode(qrCode: string, fieldGroup: FieldGroup): Promise<ZoomPreset | null> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([ZOOM_SETTINGS_STORE], 'readonly');
@@ -195,13 +169,7 @@ class ImageDB {
   }
 
   async clearImages(): Promise<void> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([IMAGES_STORE], 'readwrite');
@@ -214,13 +182,7 @@ class ImageDB {
   }
 
   async clearZoomSettings(): Promise<void> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([ZOOM_SETTINGS_STORE], 'readwrite');
@@ -233,13 +195,7 @@ class ImageDB {
   }
 
   async deleteImagesByUrls(urls: string[]): Promise<void> {
-    if (!this.db) {
-      await this.init();
-    }
-    
-    if (!this.db) {
-      throw new Error('Failed to initialize database');
-    }
+    await this.ensureInitialized();
 
     return new Promise((resolve, reject) => {
       const transaction = this.db!.transaction([IMAGES_STORE, ZOOM_SETTINGS_STORE], 'readwrite');
