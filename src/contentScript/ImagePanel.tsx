@@ -87,6 +87,9 @@ const ImagePanel: React.FC<ImagePanelProps> = ({ isOpen, onClose, currentFieldGr
 
     saveTimeoutRef.current = setTimeout(async () => {
       if (images.length === 0 || !currentFieldGroup) return;
+      
+      // Bounds check for currentIndex
+      if (currentIndex >= images.length || currentIndex < 0) return;
 
       const currentImage = images[currentIndex];
       if (!currentImage) return;

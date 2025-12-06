@@ -160,6 +160,8 @@ function monitorProcessingStatus(): void {
 // Image Panel Functions
 // ==========================================================================
 
+// Note: Firebase config is duplicated from background.ts for content script use
+// TODO: Consider moving to a shared config file or environment variables
 const firebaseConfig = {
   apiKey: "AIzaSyAs9RtsXMRPeD5vpORJcWLDb1lEJZ3nUWI",
   authDomain: "xonapp.firebaseapp.com",
