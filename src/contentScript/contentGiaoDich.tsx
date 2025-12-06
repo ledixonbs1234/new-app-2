@@ -6,6 +6,13 @@
  * Nếu đang chạy, script này sẽ tạm dừng hoạt động
  */
 
+import { createRoot, Root } from 'react-dom/client';
+import ImagePanel from './ImagePanel';
+import { imageDB } from './imageDB';
+import { UploadedImage, UploadedImagesData, FieldGroup } from '../types/imagePanel';
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, onValue, off } from "firebase/database";
+
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
 // ==========================================================================
@@ -18,6 +25,12 @@ let Address = "";
 let isProcessingPortalItem = false; // Cờ để kiểm tra processSinglePortalItem đang chạy
 let isScriptActive = false; // Trạng thái script có đang hoạt động không
 let domObserver: MutationObserver | null = null; // Observer cho DOM changes
+
+// Image Panel state
+let imagePanelRoot: Root | null = null;
+let imagePanelContainer: HTMLDivElement | null = null;
+let isImagePanelOpen = false;
+let currentFieldGroup: FieldGroup | null = null;
 
 // ID của các element thường dùng
 const ELEMENT_IDS = {
@@ -144,6 +157,145 @@ function monitorProcessingStatus(): void {
 }
 
 // ==========================================================================
+// Image Panel Functions
+// ==========================================================================
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAs9RtsXMRPeD5vpORJcWLDb1lEJZ3nUWI",
+  authDomain: "xonapp.firebaseapp.com",
+  databaseURL: "https://xonapp-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "xonapp",
+  storageBucket: "xonapp.appspot.com",
+  messagingSenderId: "892472148061",
+  appId: "1:892472148061:web:f22a5c4ffd25858726cdb4",
+};
+
+function initializeImagePanel(): void {
+  // Create container for image panel
+  if (!imagePanelContainer) {
+    imagePanelContainer = document.createElement('div');
+    imagePanelContainer.id = 'image-panel-container';
+    document.body.appendChild(imagePanelContainer);
+    
+    imagePanelRoot = createRoot(imagePanelContainer);
+  }
+  
+  renderImagePanel();
+}
+
+function renderImagePanel(): void {
+  if (!imagePanelRoot) return;
+  
+  imagePanelRoot.render(
+    <ImagePanel
+      isOpen={isImagePanelOpen}
+      onClose={() => toggleImagePanel(false)}
+      currentFieldGroup={currentFieldGroup}
+    />
+  );
+}
+
+function toggleImagePanel(open?: boolean): void {
+  isImagePanelOpen = open !== undefined ? open : !isImagePanelOpen;
+  renderImagePanel();
+  console.log('[GiaoTich] Image panel:', isImagePanelOpen ? 'opened' : 'closed');
+}
+
+async function setupFirebaseListener(): Promise<void> {
+  try {
+    // Get keyMessage from chrome storage
+    const result = await new Promise<any>((resolve) => {
+      chrome.storage.local.get(['keyMessage'], resolve);
+    });
+    
+    const keyMessage = result.keyMessage || 'maychu';
+    console.log('[GiaoTich] Setting up Firebase listener for keyMessage:', keyMessage);
+    
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+    const uploadedImagesRef = ref(database, `PORTAL/CHILD/${keyMessage}/uploaded_images`);
+    
+    // Listen for changes
+    onValue(uploadedImagesRef, async (snapshot) => {
+      const data = snapshot.val() as UploadedImagesData | null;
+      
+      if (data && data.images) {
+        console.log('[GiaoTich] Received uploaded images from Firebase:', Object.keys(data.images).length);
+        
+        // Convert to array
+        const imagesArray: UploadedImage[] = Object.values(data.images);
+        
+        // Save to IndexedDB
+        try {
+          await imageDB.saveImages(imagesArray);
+          console.log('[GiaoTich] Images saved to IndexedDB');
+        } catch (error) {
+          console.error('[GiaoTich] Error saving images to IndexedDB:', error);
+        }
+      } else if (data === null) {
+        // Images deleted from Firebase, clear IndexedDB
+        console.log('[GiaoTich] No images in Firebase, clearing IndexedDB');
+        try {
+          await imageDB.clearImages();
+          await imageDB.clearZoomSettings();
+        } catch (error) {
+          console.error('[GiaoTich] Error clearing IndexedDB:', error);
+        }
+      }
+    });
+    
+    // Store unsubscribe function (for future cleanup if needed)
+    // firebaseUnsubscribe = () => off(uploadedImagesRef);
+  } catch (error) {
+    console.error('[GiaoTich] Error setting up Firebase listener:', error);
+  }
+}
+
+function getFieldGroup(elementId: string): FieldGroup | null {
+  switch (elementId) {
+    case ELEMENT_IDS.TT_NUMBER:
+      return 'TT_NUMBER';
+    case ELEMENT_IDS.RECEIVER_NAME:
+    case ELEMENT_IDS.RECEIVER_PHONE:
+    case ELEMENT_IDS.RECEIVER_ADDRESS:
+      return 'RECEIVER_INFO';
+    case ELEMENT_IDS.WEIGHT:
+      return 'WEIGHT';
+    case ELEMENT_IDS.MONEY:
+      return 'MONEY';
+    default:
+      return null;
+  }
+}
+
+function setupFieldFocusListeners(): void {
+  const fieldIds = [
+    ELEMENT_IDS.TT_NUMBER,
+    ELEMENT_IDS.RECEIVER_NAME,
+    ELEMENT_IDS.RECEIVER_PHONE,
+    ELEMENT_IDS.RECEIVER_ADDRESS,
+    ELEMENT_IDS.WEIGHT,
+    ELEMENT_IDS.MONEY,
+  ];
+  
+  fieldIds.forEach(fieldId => {
+    const element = document.getElementById(fieldId);
+    if (element) {
+      element.addEventListener('focus', () => {
+        const fieldGroup = getFieldGroup(fieldId);
+        if (fieldGroup) {
+          currentFieldGroup = fieldGroup;
+          renderImagePanel();
+          console.log('[GiaoTich] Field focused, field group:', fieldGroup);
+        }
+      });
+    }
+  });
+}
+
+
+// ==========================================================================
 // Xử lý Sự kiện và Logic Chính
 // ==========================================================================
 
@@ -175,6 +327,13 @@ function normalizeText(str: string): string {
 }
 
 function checkPress(e: KeyboardEvent): void {
+  // Check for Ctrl+Shift+I to toggle image panel
+  if (e.ctrlKey && e.shiftKey && e.key === 'I') {
+    e.preventDefault();
+    toggleImagePanel();
+    return;
+  }
+
   if (checkIfProcessingActive()) {
     console.log("[GiaoTich] Processing active, skipping key handler");
     return;
@@ -668,6 +827,11 @@ function activateScript(): void {
   // Bắt đầu observe DOM để tìm receiverAddress input
   observeDOMForAddressInput();
 
+  // Setup field focus listeners for image panel
+  setTimeout(() => {
+    setupFieldFocusListeners();
+  }, 1000); // Delay to ensure DOM elements are loaded
+
   // Gắn keydown listener
   document.addEventListener("keydown", checkPress, false);
 }
@@ -688,6 +852,11 @@ function deactivateScript(): void {
   if (domObserver) {
     domObserver.disconnect();
     domObserver = null;
+  }
+
+  // Close image panel
+  if (isImagePanelOpen) {
+    toggleImagePanel(false);
   }
 
   // Xóa ghost input nếu có
@@ -806,6 +975,10 @@ async function initialize(): Promise<void> {
 
   // Luôn monitor processing status (không phụ thuộc URL)
   monitorProcessingStatus();
+
+  // Initialize image panel and Firebase listener
+  initializeImagePanel();
+  setupFirebaseListener();
 
   // Theo dõi URL changes và bật/tắt script
   monitorURLChanges();
