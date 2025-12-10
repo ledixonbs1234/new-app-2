@@ -115,6 +115,68 @@ let isFinalProcessingTriggered: boolean = false;
 const BUFFER_SIZE = 5;
 // --- KẾT THÚC TRẠNG THÁI CỤC BỘ MỚI ---
 
+// --- SIDE PANEL HELPER FUNCTIONS ---
+/**
+ * Mở side panel cho window hiện tại
+ */
+async function openSidePanel(windowId: number): Promise<void> {
+  try {
+    await chrome.sidePanel.open({ windowId });
+    console.log("Side panel opened successfully");
+  } catch (error) {
+    console.error("Failed to open side panel:", error);
+  }
+}
+
+const GOOGLE_ORIGIN = 'https://www.google.com';
+
+chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+  if (!tab.url) return;
+  const url = new URL(tab.url);
+  // Enables the side panel on google.com
+  if (url.origin === GOOGLE_ORIGIN) {
+    await chrome.sidePanel.setOptions({
+      tabId,
+      path: 'sidepanel.html',
+      enabled: true
+    });
+  } else {
+    // Disables the side panel on all other sites
+    await chrome.sidePanel.setOptions({
+      tabId,
+      enabled: false
+    });
+  }
+});
+
+/**
+ * Mở side panel cho tab cụ thể
+ */
+async function openSidePanelForTab(tabId: number): Promise<void> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.windowId) {
+      await chrome.sidePanel.open({ windowId: tab.windowId });
+      console.log("Side panel opened for tab:", tabId);
+    }
+  } catch (error) {
+    console.error("Failed to open side panel for tab:", error);
+  }
+}
+
+/**
+ * Đóng side panel (nếu cần)
+ */
+async function closeSidePanel(windowId: number): Promise<void> {
+  try {
+    // Chrome API không có close trực tiếp, user phải đóng thủ công
+    console.log("Side panel can only be closed by user");
+  } catch (error) {
+    console.error("Failed to close side panel:", error);
+  }
+}
+// --- END SIDE PANEL HELPER FUNCTIONS ---
+
 // Helper function for safe JSON parsing from fetch responses
 const safeFetch = async (url: string, options?: RequestInit): Promise<any> => {
   try {
@@ -170,6 +232,12 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Gọi với App của tôi",
     contexts: ["selection"], // Chỉ hiện khi có bôi đen văn bản
   });
+  
+  chrome.contextMenus.create({
+    id: "openImagePanel",
+    title: "📦 Mở Panel Hình Ảnh",
+    contexts: ["page", "action"], // Hiện ở page và extension icon
+  });
 });
 
 // 2. Lắng nghe sự kiện click vào menu
@@ -178,6 +246,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     const phoneNumber = info.selectionText.trim();
 
     await updateToPhone("phonecall", phoneNumber);
+  }
+  
+  if (info.menuItemId === "openImagePanel") {
+    // Click context menu là user gesture hợp lệ
+    if (tab?.windowId) {
+      await openSidePanel(tab.windowId);
+    }
   }
 });
 
@@ -1254,6 +1329,9 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       } else if (request.type === "DELETE_LAST_LINE_EXTRA_INFO") {
         handleDeleteLastLineExtraInfo(request.payload, sendResponse);
         return;
+      } else if (request.type === "CLEAR_ALL_IMAGES") {
+        handleClearAllImages(sendResponse);
+        return;
       } else if (request.type === "GET_CMS_TEMPLATES") {
         handleGetCMSTemplates(sendResponse);
         return;
@@ -1444,6 +1522,52 @@ async function handleDeleteLastLineExtraInfo(
   } catch (error: any) {
     console.error("[BG] Lỗi khi xóa dòng cuối:", error);
     sendResponse({ status: "error", error: error.message });
+  }
+}
+
+/**
+ * Clear all images from Firebase Realtime Database
+ * Xóa toàn bộ ảnh từ Firebase (imported_images node)
+ */
+async function handleClearAllImages(
+  sendResponse: (response: any) => void,
+) {
+  try {
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Get keyMessage from chrome.storage.local
+    const keyMessage = await new Promise<string>((resolve) => {
+      chrome.storage.local.get("keyMessage", (result) => {
+        resolve(result.keyMessage || "maychu");
+      });
+    });
+
+    const firebasePath = `PORTAL/CHILD/${keyMessage}/imported_images`;
+    
+    console.log(`[BG] Clearing all images from Firebase path: ${firebasePath}`);
+
+    // Get count before deletion (for response)
+    const snapshot = await db.ref(firebasePath).get();
+    const imageCount = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+
+    // Remove entire imported_images node
+    await db.ref(firebasePath).remove();
+
+    console.log(`[BG] Successfully deleted ${imageCount} images from Firebase`);
+    sendResponse({ 
+      status: "success", 
+      deletedCount: imageCount,
+      message: `Đã xóa ${imageCount} hình ảnh thành công`
+    });
+  } catch (error: any) {
+    console.error("[BG] Error clearing all images:", error);
+    sendResponse({ 
+      status: "error", 
+      error: error.message || "Không thể xóa hình ảnh"
+    });
   }
 }
 
@@ -4532,6 +4656,77 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       broadcastUpdate(emptyData);
       sendResponse({ status: "cleared" });
     });
+    return true;
+  }
+
+  if (msg.type === "OPEN_SIDE_PANEL") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs[0]?.windowId) {
+          await openSidePanel(tabs[0].windowId);
+          sendResponse({ status: "success", message: "Side panel opened" });
+        } else {
+          sendResponse({ status: "error", message: "No active window found" });
+        }
+      } catch (error) {
+        console.error("Error opening side panel:", error);
+        sendResponse({ status: "error", message: (error as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "QUERY_SIDEPANEL_STATUS") {
+    console.log("[Background] 📨 Received QUERY_SIDEPANEL_STATUS from content script");
+    
+    // Check if side panel is open by trying to send a message to it
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_PING" }, (response) => {
+      const isOpen = !chrome.runtime.lastError;
+      console.log("[Background] Side panel status:", isOpen ? "OPEN" : "CLOSED");
+      sendResponse({ isOpen });
+    });
+    
+    return true; // Async response
+  }
+
+  if (msg.type === "SIDEPANEL_SMART_ZOOM") {
+    console.log("[Background] 📨 Received SIDEPANEL_SMART_ZOOM from content script:", msg.payload);
+    
+    // Forward message to all side panel contexts
+    const forwardedMessage = {
+      type: "APPLY_SMART_ZOOM",
+      payload: msg.payload
+    };
+    
+    console.log("[Background] 📤 Forwarding as APPLY_SMART_ZOOM:", forwardedMessage);
+    
+    chrome.runtime.sendMessage(forwardedMessage, (response) => {
+      if (chrome.runtime.lastError) {
+        console.log("[Background] ❌ Error forwarding to side panel:", chrome.runtime.lastError.message);
+      } else {
+        console.log("[Background] ✅ Message forwarded successfully. Response:", response);
+      }
+    });
+    
+    sendResponse({ status: "forwarded" });
+    return true;
+  }
+
+  if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
+    console.log("[Background] 📨 Received SIDEPANEL_NEXT_IMAGE from content script");
+    
+    // Forward to side panel
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.log("[Background] ❌ Error forwarding next image request:", chrome.runtime.lastError.message);
+        sendResponse({ status: "error", message: chrome.runtime.lastError.message });
+      } else {
+        console.log("[Background] ✅ Next image request forwarded");
+        sendResponse({ status: "success" });
+      }
+    });
+    
     return true;
   }
 

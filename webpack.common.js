@@ -18,6 +18,7 @@ module.exports = {
         offscreen:path.resolve('./src/offscreen/offscreen.ts'),
         mainScript:path.resolve('./src/contentScript/mainScript.tsx'),
         options:path.resolve('./src/options/index.tsx'),
+        sidepanel:path.resolve('./src/sidepanel/index.tsx'),
     },
     module:{
         rules:[
@@ -55,7 +56,7 @@ module.exports = {
           { from: path.resolve("src/static"), to: path.resolve("dist") },
         ],
       }),
-      ...getHtmlPlugins(['popup','offscreen','options']),
+      ...getHtmlPlugins(['popup','offscreen','options','sidepanel']),
     ],
     output:{
         filename:'[name].js'

@@ -98,3 +98,18 @@ export interface ExtraInfo {
     content: string;
     updatedAt: number;
 }
+
+export interface ImportedImage {
+    imageId: string;
+    thumbnailUrl: string;
+    maHieu: string;
+    processed: boolean;
+    timestamp: number;
+    uploadedAt: number;
+    url: string;
+}
+
+export interface StoredImage extends ImportedImage {
+    blob?: Blob;
+    objectUrl?: string;
+}

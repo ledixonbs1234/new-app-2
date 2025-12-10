@@ -18,6 +18,8 @@ let Address = "";
 let isProcessingPortalItem = false; // Cờ để kiểm tra processSinglePortalItem đang chạy
 let isScriptActive = false; // Trạng thái script có đang hoạt động không
 let domObserver: MutationObserver | null = null; // Observer cho DOM changes
+let isSidePanelOpen = false; // Trạng thái side panel có đang mở không
+let lastParcelIndexValue = -1; // Theo dõi giá trị parcelIndex để phát hiện khi tăng
 
 // ID của các element thường dùng
 const ELEMENT_IDS = {
@@ -40,6 +42,18 @@ const STORAGE_KEYS = {
   IS_UPERCASE: "isUperCase",
   IS_FULL_TEXT_ADDRESS: "isfulltextaddress",
   PROCESSING_FLAG: "processingPortalItem", // Cờ để kiểm tra xem contentScript có đang xử lý không
+};
+
+// Field groups cho smart zoom
+type FieldGroup = "TT_NUMBER" | "RECEIVER_INFO" | "WEIGHT" | "MONEY" | "NONE";
+
+const FIELD_GROUPS: Record<string, FieldGroup> = {
+  [ELEMENT_IDS.TT_NUMBER]: "TT_NUMBER",
+  [ELEMENT_IDS.RECEIVER_NAME]: "RECEIVER_INFO",
+  [ELEMENT_IDS.RECEIVER_PHONE]: "RECEIVER_INFO",
+  [ELEMENT_IDS.RECEIVER_ADDRESS]: "RECEIVER_INFO",
+  [ELEMENT_IDS.WEIGHT]: "WEIGHT",
+  [ELEMENT_IDS.MONEY]: "MONEY",
 };
 
 // Key codes
@@ -133,6 +147,154 @@ function checkIfProcessingActive(): boolean {
   return isProcessingPortalItem;
 }
 
+/**
+ * Gửi thông báo đến side panel để zoom vào field group tương ứng
+ */
+function notifySidePanelZoom(fieldGroup: FieldGroup): void {
+  console.log("[GiaoTich] 📤 notifySidePanelZoom called:", {
+    fieldGroup,
+    isSidePanelOpen
+  });
+  
+  if (fieldGroup === "NONE" || !isSidePanelOpen) {
+    console.log("[GiaoTich] ❌ Not sending - fieldGroup is NONE or panel closed");
+    return;
+  }
+  
+  const message = {
+    type: "SIDEPANEL_SMART_ZOOM",
+    payload: { fieldGroup }
+  };
+  
+  console.log("[GiaoTich] 📨 Sending message to background:", message);
+  
+  chrome.runtime.sendMessage(message, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log("[GiaoTich] ❌ Error sending smart zoom:", chrome.runtime.lastError.message);
+    } else {
+      console.log("[GiaoTich] ✅ Smart zoom message sent successfully. Response:", response);
+    }
+  });
+}
+
+/**
+ * Gửi message đến side panel để chuyển sang ảnh tiếp theo
+ */
+function requestNextImage(): void {
+  if (!isSidePanelOpen) {
+    console.log("[GiaoTich] Side panel not open, skip next image request");
+    return;
+  }
+  
+  console.log("[GiaoTich] 🖼️ Requesting side panel to show next image");
+  chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log("[GiaoTich] Error requesting next image:", chrome.runtime.lastError.message);
+    } else {
+      console.log("[GiaoTich] Next image request sent successfully");
+    }
+  });
+}
+
+/**
+ * Monitor parcelIndex input để tự động chuyển ảnh khi hoàn thành đơn
+ */
+function monitorParcelIndex(): void {
+  const parcelIndexInput = document.querySelector('input[name="parcelIndex"]') as HTMLInputElement;
+  
+  if (!parcelIndexInput) {
+    console.log("[GiaoTich] parcelIndex input not found, will retry...");
+    return;
+  }
+  
+  console.log("[GiaoTich] 👀 Started monitoring parcelIndex input");
+  
+  // Lấy giá trị ban đầu
+  const initialValue = parseInt(parcelIndexInput.value) || 0;
+  lastParcelIndexValue = initialValue;
+  console.log(`[GiaoTich] Initial parcelIndex value: ${lastParcelIndexValue}`);
+  
+  // Observer để theo dõi thay đổi value
+  const observer = new MutationObserver(() => {
+    const currentValue = parseInt(parcelIndexInput.value) || 0;
+    
+    if (currentValue > lastParcelIndexValue) {
+      console.log(`[GiaoTich] 📈 parcelIndex increased: ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue;
+      
+      // Đợi một chút để đảm bảo form đã lưu xong
+      setTimeout(() => {
+        requestNextImage();
+      }, 300);
+    } else if (currentValue !== lastParcelIndexValue) {
+      // Giá trị thay đổi nhưng không tăng (có thể reset hoặc giảm)
+      console.log(`[GiaoTich] parcelIndex changed: ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue;
+    }
+  });
+  
+  // Observe attributes thay đổi
+  observer.observe(parcelIndexInput, {
+    attributes: true,
+    attributeFilter: ['value']
+  });
+  
+  // Cũng listen cho input event (React controlled inputs)
+  parcelIndexInput.addEventListener('input', () => {
+    const currentValue = parseInt(parcelIndexInput.value) || 0;
+    
+    if (currentValue > lastParcelIndexValue) {
+      console.log(`[GiaoTich] 📈 parcelIndex increased (input event): ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue;
+      
+      setTimeout(() => {
+        requestNextImage();
+      }, 300);
+    } else if (currentValue !== lastParcelIndexValue) {
+      lastParcelIndexValue = currentValue;
+    }
+  });
+  
+  // Store observer để cleanup sau
+  (window as any)._parcelIndexObserver = observer;
+}
+
+/**
+ * Điền mã hiệu vào ttNumber field
+ */
+function fillTtNumber(maHieu: string): void {
+  if (!maHieu) return;
+  
+  const ttNumberInput = document.getElementById(ELEMENT_IDS.TT_NUMBER) as HTMLInputElement;
+  if (!ttNumberInput) {
+    console.warn("[GiaoTich] ttNumber input not found");
+    return;
+  }
+  
+  // Set value
+  ttNumberInput.value = maHieu;
+  
+  // Trigger React events to ensure the value is recognized
+  ttNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
+  ttNumberInput.dispatchEvent(new Event('change', { bubbles: true }));
+  ttNumberInput.dispatchEvent(new Event('blur'));
+  
+  console.log(`[GiaoTich] Filled ttNumber with: ${maHieu}`);
+}
+
+/**
+ * Attach focus listener cho một input field để trigger smart zoom
+ */
+function attachSmartZoomListener(input: HTMLElement, fieldId: string): void {
+  const fieldGroup = FIELD_GROUPS[fieldId] || "NONE";
+  if (fieldGroup === "NONE") return;
+
+  input.addEventListener("focus", () => {
+    console.log(`[GiaoTich] Focus vào ${fieldId}, trigger zoom: ${fieldGroup}`);
+    notifySidePanelZoom(fieldGroup);
+  });
+}
+
 function monitorProcessingStatus(): void {
   // Lắng nghe tin nhắn từ contentScript.tsx để cập nhật trạng thái
   chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
@@ -140,7 +302,53 @@ function monitorProcessingStatus(): void {
       isProcessingPortalItem = msg.isProcessing;
       console.log("[GiaoTich] Processing status updated:", isProcessingPortalItem);
     }
+    
+    // Lắng nghe trạng thái side panel
+    if (msg.type === "SIDEPANEL_STATUS") {
+      isSidePanelOpen = msg.isOpen;
+      console.log("[GiaoTich] Side panel status updated:", isSidePanelOpen);
+    }
+    
+    // Lắng nghe yêu cầu điền ttNumber từ side panel
+    if (msg.type === "FILL_TT_NUMBER" && msg.payload?.maHieu) {
+      fillTtNumber(msg.payload.maHieu);
+    }
   });
+}
+
+/**
+ * Query trạng thái side panel khi content script init (xử lý trường hợp refresh trang)
+ */
+function querySidePanelStatus(): void {
+  let retryCount = 0;
+  const maxRetries = 5;
+  const retryDelay = 500; // 500ms
+
+  const attemptQuery = () => {
+    console.log(`[GiaoTich] Querying side panel status (attempt ${retryCount + 1}/${maxRetries})...`);
+    
+    chrome.runtime.sendMessage({ type: "QUERY_SIDEPANEL_STATUS" }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.log("[GiaoTich] Query failed:", chrome.runtime.lastError.message);
+        
+        // Retry if not exceeded max attempts
+        if (retryCount < maxRetries - 1) {
+          retryCount++;
+          setTimeout(attemptQuery, retryDelay);
+        } else {
+          console.log("[GiaoTich] ⚠️ Max retries reached. Side panel might not be open. Will listen for SIDEPANEL_STATUS broadcast.");
+        }
+        return;
+      }
+      
+      if (response?.isOpen !== undefined) {
+        isSidePanelOpen = response.isOpen;
+        console.log(`[GiaoTich] ✅ Side panel status confirmed: ${isSidePanelOpen}`);
+      }
+    });
+  };
+
+  attemptQuery();
 }
 
 // ==========================================================================
@@ -679,6 +887,11 @@ function activateScript(): void {
 
   // Gắn keydown listener
   document.addEventListener("keydown", checkPress, false);
+  
+  // Monitor parcelIndex để tự động chuyển ảnh
+  setTimeout(() => {
+    monitorParcelIndex();
+  }, 1000); // Đợi DOM render xong
 }
 
 /**
@@ -712,6 +925,15 @@ function deactivateScript(): void {
   if ((window as any)._inputResizeObserversGiaoTich) {
     (window as any)._inputResizeObserversGiaoTich = new WeakMap();
   }
+  
+  // Dừng parcelIndex observer
+  if ((window as any)._parcelIndexObserver) {
+    (window as any)._parcelIndexObserver.disconnect();
+    (window as any)._parcelIndexObserver = null;
+  }
+  
+  // Reset lastParcelIndexValue
+  lastParcelIndexValue = -1;
 }
 
 /**
@@ -816,8 +1038,40 @@ async function initialize(): Promise<void> {
   // Luôn monitor processing status (không phụ thuộc URL)
   monitorProcessingStatus();
 
+  // Query side panel status khi init
+  querySidePanelStatus();
+
   // Theo dõi URL changes và bật/tắt script
   monitorURLChanges();
+
+  // Attach smart zoom listeners cho các field quan trọng
+  attachSmartZoomListenersToAllFields();
+}
+
+/**
+ * Attach smart zoom listeners cho tất cả các field có trong FIELD_GROUPS
+ */
+function attachSmartZoomListenersToAllFields(): void {
+  // Đợi DOM ready
+  const attachWhenReady = () => {
+    Object.keys(FIELD_GROUPS).forEach((fieldId) => {
+      const input = document.getElementById(fieldId);
+      if (input) {
+        attachSmartZoomListener(input, fieldId);
+        console.log(`[GiaoTich] Attached smart zoom listener to #${fieldId}`);
+      }
+    });
+  };
+
+  // Thử attach ngay
+  attachWhenReady();
+
+  // Và observe để attach khi các field được thêm vào DOM
+  const observer = new MutationObserver(() => {
+    attachWhenReady();
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true });
 }
 
 function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {

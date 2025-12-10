@@ -76,7 +76,23 @@ const baseColors: string[] = ["TRANG", "DO", "XANH"];
       message.success(`Đã lưu thành công ${data.length} đơn hàng!`);
       setJsonInput('');
     } catch (e: any) {
-      message.error("Lỗi JSON không hợp lệ: " + e.message);
+      message.error(`Lỗi: ${e.message}`);
+    }
+  };
+
+  const handleOpenSidePanel = async () => {
+    try {
+      // Query để lấy window hiện tại
+      const currentWindow = await chrome.windows.getCurrent();
+      if (currentWindow.id) {
+        await chrome.sidePanel.open({ windowId: currentWindow.id });
+        message.success("Đã mở Side Panel");
+      } else {
+        message.error("Không tìm thấy window hiện tại");
+      }
+    } catch (error) {
+      console.error("Error opening side panel:", error);
+      message.error("Không thể mở Side Panel: " + (error as Error).message);
     }
   };
   
@@ -249,6 +265,9 @@ function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, numbe
               </Button>
             </Space.Compact>
             <Space direction="horizontal">
+              <Button type="default" onClick={handleOpenSidePanel}>
+                📦 Mở Panel Hình Ảnh
+              </Button>
             </Space>
           </Space>
 

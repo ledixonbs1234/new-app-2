@@ -16,6 +16,9 @@
         "page": "options.html",
         "open_in_tab": true
     },
+    "side_panel": {
+        "default_path": "sidepanel.html"
+    },
     "background": {
         "service_worker": "background.js"
     },
