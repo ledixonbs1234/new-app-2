@@ -112,7 +112,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
         }
         else if (msg.message === "CHANGEKL") {
-          changeKL(msg.kl);
+          await changeKL(msg.kl);
+          callback({ status: "success", message: "Đã thay đổi khối lượng thành công" });
         }
         else
           if (msg.message === "ADD") {
@@ -448,14 +449,14 @@ async function processSinglePortalItem(
   isDeletePhone: boolean
 ): Promise<void> { // Trả về Promise để background biết khi nào xong, throw error nếu lỗi
   console.log("Processing Portal item:", buuGui.MaBuuGui);
-  
+
   // === NOTIFY GIAO TICH SCRIPT: START PROCESSING ===
   chrome.runtime.sendMessage({
     event: "CONTENT",
     message: "PROCESS_STATUS",
     isProcessing: true,
-  }).catch(() => {});
-  
+  }).catch(() => { });
+
   try {
     const selector = await waitForElm("body > div.MuiDialog-root", 15); // Tăng timeout một chút
     const numberSearch = await waitForElm("#ttNumberSearch", 15);
@@ -694,18 +695,18 @@ async function processSinglePortalItem(
       event: "CONTENT",
       message: "PROCESS_STATUS",
       isProcessing: false,
-    }).catch(() => {});
+    }).catch(() => { });
 
   } catch (error: any) {
     console.error(`Error in processSinglePortalItem for ${buuGui?.MaBuuGui}:`, error);
-    
+
     // === NOTIFY GIAO TICH SCRIPT: STOP PROCESSING (ON ERROR) ===
     chrome.runtime.sendMessage({
       event: "CONTENT",
       message: "PROCESS_STATUS",
       isProcessing: false,
-    }).catch(() => {});
-    
+    }).catch(() => { });
+
     // **Quan trọng**: Ném lại lỗi để listener message bắt được và báo về background
     throw error;
   }
@@ -899,7 +900,7 @@ const startSendCurrentCode = async (
     // Xử lý nút tìm kiếm
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
-    , 30);
+      , 30);
     if (!findAndSearchBtn) return (sharedState.isRunning = false);
     if (!sharedState.isRunning) return;
 
@@ -953,17 +954,38 @@ async function changeKL(kl: any) {
     await delay(1000);
     const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
     if (weightThucTe) {
-      window.postMessage({
-        type: "CONTENT",
-        message: "ADDWEIGHT",
-        kl: kl,
-      });
+      // window.postMessage({
+      //   type: "CONTENT",
+      //   message: "ADDWEIGHT",
+      //   kl: kl,
+      // });
+
+      // var form: HTMLElement | null = document.querySelector(
+      //     "#content > div > div > div.sub-content.multiple-item-no-footer > form"
+      //   );
+      //   const formR: any = FindReact(form);
+      //   //change "5000" to "5.000"
+      //   var klTemp = event.data.kl.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
+
+      //   formR.setState({
+      //     formValue: { ...formR.state.formValue, weight: klTemp },
+      //   });
+      const buttons = document.querySelector('.rt-tbody button.btn-link');
+      await waitForElm('.rt-tbody button.btn-link')
+
+      await delay(100);
+
+      weightThucTe.value = kl.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
+      weightThucTe.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      weightThucTe.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      weightThucTe.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
       await delay(400);
+
     }
     // Xử lý nút tìm kiếm
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button"
-    ,30);
+      , 30);
 
     (findAndSearchBtn as HTMLElement).click();
     await delay(500);

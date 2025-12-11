@@ -38,22 +38,25 @@ const SidePanel: React.FC = () => {
     getCurrentZoom: () => ZoomPreset;
     resetToDefault: () => void;
   }>(null);
-  
+
+  // Ref để track request focus cho ảnh cuối cùng
+  const focusRequestIdRef = useRef(0);
+
   // Track current focused field to save preset when losing focus
   const currentFocusedFieldRef = useRef<FieldGroup>("NONE");
-  
+
   // Track the initial preset applied (to compare if user actually changed it)
   const appliedPresetRef = useRef<ZoomPreset | null>(null);
-  
+
   // Auto zoom toggle state
   const [autoZoomEnabled, setAutoZoomEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("sidepanel_auto_zoom_enabled");
     return saved !== null ? JSON.parse(saved) : true; // Default: enabled
   });
-  
+
   // Control scroll behavior - only scroll when user actively selects
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState<boolean>(false);
-  
+
   // Saved presets per field group
   const [savedPresets, setSavedPresets] = useState<Record<FieldGroup, ZoomPreset>>(() => {
     // Load from localStorage if available
@@ -273,7 +276,77 @@ const SidePanel: React.FC = () => {
     const selectedImg = images[index];
     if (selectedImg?.maHieu) {
       sendMaHieuToPortal(selectedImg.maHieu);
+    } else {
+      // Nếu không có maHieu, thực hiện focus ttNumber cho ảnh cuối cùng
+      focusRequestIdRef.current += 1;
+      const currentRequestId = focusRequestIdRef.current;
+      focusTtNumberInPortal(currentRequestId);
     }
+  };
+
+  // Hàm gửi message focus ttNumber, retry tối đa 3 lần, chỉ thực hiện cho requestId mới nhất
+  const focusTtNumberInPortal = (requestId: number, attempt: number = 1) => {
+    setTimeout(async () => {
+      if (focusRequestIdRef.current !== requestId) {
+        console.log(`[SidePanel] [FOCUS_TT_NUMBER] Cancelled (requestId ${requestId}) - newer image selected.`);
+        return;
+      }
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.id || !tab.url) {
+          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Tab not found (attempt ${attempt})`);
+          return;
+        }
+        if (!tab.url.startsWith("https://portalkhl.vnpost.vn/")) {
+          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Not a portal page (attempt ${attempt})`);
+          return;
+        }
+        // Before focusing, query the content script to see which input is currently focused
+        const tabId = tab.id!;
+        chrome.tabs.sendMessage(tabId, { type: "QUERY_FOCUSED_ELEMENT" }, (queryResponse) => {
+          if (chrome.runtime.lastError) {
+            // If query fails, fall back to old behavior and try to send focus
+            console.log(`[SidePanel] [FOCUS_TT_NUMBER] QUERY_FOCUSED_ELEMENT failed: ${chrome.runtime.lastError.message}`);
+            attemptSendFocus();
+            return;
+          }
+
+          const activeId = queryResponse?.activeElementId as string | null;
+          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Active element on portal: ${activeId}`);
+
+          // If user is focusing receiverName, do not override focus
+          if (activeId === "receiverName" || activeId === "receiverAddress" || activeId === "receiverPhone") {
+            console.log(`[SidePanel] [FOCUS_TT_NUMBER] Skipping focus because user is editing ${activeId}`);
+            return;
+          }
+
+          // Otherwise, send focus message
+          attemptSendFocus();
+        });
+
+        function attemptSendFocus() {
+          chrome.tabs.sendMessage(tabId, { type: "FOCUS_TT_NUMBER" }, (_response) => {
+            if (chrome.runtime.lastError) {
+              console.log(`[SidePanel] [FOCUS_TT_NUMBER] Retry ${attempt} failed: ${chrome.runtime.lastError.message}`);
+              if (attempt < 3 && focusRequestIdRef.current === requestId) {
+                focusTtNumberInPortal(requestId, attempt + 1);
+              } else if (attempt >= 3) {
+                console.log(`[SidePanel] [FOCUS_TT_NUMBER] Max retries reached for requestId ${requestId}`);
+              }
+            } else {
+                  console.log(`[SidePanel] [FOCUS_TT_NUMBER] Sent to portal (attempt ${attempt})`, _response);
+            }
+          });
+        }
+      } catch (error) {
+        console.log(`[SidePanel] [FOCUS_TT_NUMBER] Exception (attempt ${attempt}):`, error);
+        if (attempt < 3 && focusRequestIdRef.current === requestId) {
+          focusTtNumberInPortal(requestId, attempt + 1);
+        } else if (attempt >= 3) {
+          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Max retries reached for requestId ${requestId}`);
+        }
+      }
+    }, 500);
   };
 
   const sendMaHieuToPortal = async (maHieu: string) => {
@@ -292,7 +365,7 @@ const SidePanel: React.FC = () => {
       chrome.tabs.sendMessage(tab.id, {
         type: "FILL_TT_NUMBER",
         payload: { maHieu }
-      }, (response) => {
+      }, (_response) => {
         if (chrome.runtime.lastError) {
           console.log("[SidePanel] Could not send maHieu:", chrome.runtime.lastError.message);
         } else {
@@ -392,7 +465,7 @@ const SidePanel: React.FC = () => {
 
   // Listen for smart zoom messages from content script
   useEffect(() => {
-    const handleMessage = (msg: any, sender: any, sendResponse: any) => {
+    const handleMessage = (msg: any, _sender: any, sendResponse: any) => {
       console.log("[SidePanel] ✉️ Received message:", msg.type, msg);
       
       // Respond to ping (for status check)

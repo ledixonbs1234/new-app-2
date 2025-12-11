@@ -6,6 +6,8 @@
  * Nếu đang chạy, script này sẽ tạm dừng hoạt động
  */
 
+import { delay } from "./utils";
+
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
 // ==========================================================================
@@ -155,19 +157,19 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
     fieldGroup,
     isSidePanelOpen
   });
-  
+
   if (fieldGroup === "NONE" || !isSidePanelOpen) {
     console.log("[GiaoTich] ❌ Not sending - fieldGroup is NONE or panel closed");
     return;
   }
-  
+
   const message = {
     type: "SIDEPANEL_SMART_ZOOM",
     payload: { fieldGroup }
   };
-  
+
   console.log("[GiaoTich] 📨 Sending message to background:", message);
-  
+
   chrome.runtime.sendMessage(message, (response) => {
     if (chrome.runtime.lastError) {
       console.log("[GiaoTich] ❌ Error sending smart zoom:", chrome.runtime.lastError.message);
@@ -185,7 +187,7 @@ function requestNextImage(): void {
     console.log("[GiaoTich] Side panel not open, skip next image request");
     return;
   }
-  
+
   console.log("[GiaoTich] 🖼️ Requesting side panel to show next image");
   chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
     if (chrome.runtime.lastError) {
@@ -201,27 +203,27 @@ function requestNextImage(): void {
  */
 function monitorParcelIndex(): void {
   const parcelIndexInput = document.querySelector('input[name="parcelIndex"]') as HTMLInputElement;
-  
+
   if (!parcelIndexInput) {
     console.log("[GiaoTich] parcelIndex input not found, will retry...");
     return;
   }
-  
+
   console.log("[GiaoTich] 👀 Started monitoring parcelIndex input");
-  
+
   // Lấy giá trị ban đầu
   const initialValue = parseInt(parcelIndexInput.value) || 0;
   lastParcelIndexValue = initialValue;
   console.log(`[GiaoTich] Initial parcelIndex value: ${lastParcelIndexValue}`);
-  
+
   // Observer để theo dõi thay đổi value
   const observer = new MutationObserver(() => {
     const currentValue = parseInt(parcelIndexInput.value) || 0;
-    
+
     if (currentValue > lastParcelIndexValue) {
       console.log(`[GiaoTich] 📈 parcelIndex increased: ${lastParcelIndexValue} → ${currentValue}`);
       lastParcelIndexValue = currentValue;
-      
+
       // Đợi một chút để đảm bảo form đã lưu xong
       setTimeout(() => {
         requestNextImage();
@@ -232,21 +234,21 @@ function monitorParcelIndex(): void {
       lastParcelIndexValue = currentValue;
     }
   });
-  
+
   // Observe attributes thay đổi
   observer.observe(parcelIndexInput, {
     attributes: true,
     attributeFilter: ['value']
   });
-  
+
   // Cũng listen cho input event (React controlled inputs)
   parcelIndexInput.addEventListener('input', () => {
     const currentValue = parseInt(parcelIndexInput.value) || 0;
-    
+
     if (currentValue > lastParcelIndexValue) {
       console.log(`[GiaoTich] 📈 parcelIndex increased (input event): ${lastParcelIndexValue} → ${currentValue}`);
       lastParcelIndexValue = currentValue;
-      
+
       setTimeout(() => {
         requestNextImage();
       }, 300);
@@ -254,7 +256,7 @@ function monitorParcelIndex(): void {
       lastParcelIndexValue = currentValue;
     }
   });
-  
+
   // Store observer để cleanup sau
   (window as any)._parcelIndexObserver = observer;
 }
@@ -264,28 +266,37 @@ function monitorParcelIndex(): void {
  */
 function fillTtNumber(maHieu: string): void {
   if (!maHieu) return;
-  
+
   const ttNumberInput = document.getElementById(ELEMENT_IDS.TT_NUMBER) as HTMLInputElement;
   if (!ttNumberInput) {
     console.warn("[GiaoTich] ttNumber input not found");
     return;
   }
-  
+
   // Set value
   ttNumberInput.value = maHieu;
-  
+
   // Trigger React events to ensure the value is recognized
   ttNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
   ttNumberInput.dispatchEvent(new Event('change', { bubbles: true }));
   ttNumberInput.dispatchEvent(new Event('blur'));
-  
+
   console.log(`[GiaoTich] Filled ttNumber with: ${maHieu}`);
+  const recei = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
+  if (recei) {
+    recei.value = "";
+    recei.focus();
+  }
+
 }
 
 /**
  * Attach focus listener cho một input field để trigger smart zoom
  */
 function attachSmartZoomListener(input: HTMLElement, fieldId: string): void {
+  // Prevent attaching multiple listeners
+  if ((input as any)._smartZoomAttached) return;
+
   const fieldGroup = FIELD_GROUPS[fieldId] || "NONE";
   if (fieldGroup === "NONE") return;
 
@@ -293,25 +304,51 @@ function attachSmartZoomListener(input: HTMLElement, fieldId: string): void {
     console.log(`[GiaoTich] Focus vào ${fieldId}, trigger zoom: ${fieldGroup}`);
     notifySidePanelZoom(fieldGroup);
   });
+  (input as any)._smartZoomAttached = true;
 }
 
 function monitorProcessingStatus(): void {
   // Lắng nghe tin nhắn từ contentScript.tsx để cập nhật trạng thái
-  chrome.runtime.onMessage.addListener((msg, _sender, _sendResponse) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.event === "CONTENT" && msg.message === "PROCESS_STATUS") {
       isProcessingPortalItem = msg.isProcessing;
       console.log("[GiaoTich] Processing status updated:", isProcessingPortalItem);
     }
-    
+
     // Lắng nghe trạng thái side panel
     if (msg.type === "SIDEPANEL_STATUS") {
       isSidePanelOpen = msg.isOpen;
       console.log("[GiaoTich] Side panel status updated:", isSidePanelOpen);
     }
-    
+
     // Lắng nghe yêu cầu điền ttNumber từ side panel
     if (msg.type === "FILL_TT_NUMBER" && msg.payload?.maHieu) {
       fillTtNumber(msg.payload.maHieu);
+    }
+    // Lắng nghe yêu cầu query focused element trên portal
+    if (msg.type === "QUERY_FOCUSED_ELEMENT") {
+      try {
+        const activeElement = document.activeElement as HTMLElement | null;
+        const id = activeElement?.id || null;
+        sendResponse({ activeElementId: id });
+      } catch (err) {
+        console.log('[GiaoTich] QUERY_FOCUSED_ELEMENT error', err);
+        sendResponse({ activeElementId: null });
+      }
+      // synchronous response
+      return false;
+    }
+    // Lắng nghe yêu cầu focus ttNumber từ side panel
+    if (msg.type === "FOCUS_TT_NUMBER") {
+      const ttNumberInput = document.getElementById(ELEMENT_IDS.TT_NUMBER) as HTMLInputElement;
+      if (ttNumberInput) {
+        //bỏ focus các input khác
+        ttNumberInput.blur();
+        ttNumberInput.focus();
+        console.log("[GiaoTich] [FOCUS_TT_NUMBER] Focused ttNumber input");
+      } else {
+        console.log("[GiaoTich] [FOCUS_TT_NUMBER] ttNumber input not found");
+      }
     }
   });
 }
@@ -326,11 +363,11 @@ function querySidePanelStatus(): void {
 
   const attemptQuery = () => {
     console.log(`[GiaoTich] Querying side panel status (attempt ${retryCount + 1}/${maxRetries})...`);
-    
+
     chrome.runtime.sendMessage({ type: "QUERY_SIDEPANEL_STATUS" }, (response) => {
       if (chrome.runtime.lastError) {
         console.log("[GiaoTich] Query failed:", chrome.runtime.lastError.message);
-        
+
         // Retry if not exceeded max attempts
         if (retryCount < maxRetries - 1) {
           retryCount++;
@@ -340,7 +377,7 @@ function querySidePanelStatus(): void {
         }
         return;
       }
-      
+
       if (response?.isOpen !== undefined) {
         isSidePanelOpen = response.isOpen;
         console.log(`[GiaoTich] ✅ Side panel status confirmed: ${isSidePanelOpen}`);
@@ -401,7 +438,7 @@ function checkPress(e: KeyboardEvent): void {
         handleEnterKey(e, ele, eleId);
         break;
       case KEY_CODES.F4:
-        var btnLuu= document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button") as HTMLElement;
+        var btnLuu = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button") as HTMLElement;
         if (btnLuu) {
           btnLuu.click();
         }
@@ -411,9 +448,25 @@ function checkPress(e: KeyboardEvent): void {
   }
 }
 
-function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): void {
+async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): Promise<void> {
   switch (eleId) {
     case ELEMENT_IDS.RECEIVER_NAME:
+      var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
+      if (phoneSender) {
+        if (phoneSender.textContent.includes("2412279")) {
+          var info = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea") as HTMLTextAreaElement;
+          if (info) {
+            // nếu info trống
+            if (info.value.trim() === "") {
+              info.value = `Cho xem hàng.
+KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP mới xử lý  Shop sẽ không đồng ý yc bồi thường 100% giá trị`;
+              info.dispatchEvent(new Event('input', { bubbles: true }));
+              info.dispatchEvent(new Event('change', { bubbles: true }))
+            }
+          }
+
+        }
+      }
       const receiverName = ele.value;
       if (receiverName) {
         const tenKhongDau = removeAccents(receiverName).toLowerCase();
@@ -513,6 +566,49 @@ function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): v
       break;
 
     case ELEMENT_IDS.TT_NUMBER:
+      var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
+      if (phoneSender && phoneSender.textContent.includes("14159")) {
+        const serviceInfo = document.getElementsByName("serviceCode")[0] as HTMLInputElement | undefined;
+        const firstChar = ele.value.charAt(0).toUpperCase();
+
+        if (serviceInfo) {
+          const serviceValue = serviceInfo.value;
+          let targetCode = "";
+          if (firstChar === "C" && serviceValue !== "CTN009") {
+            targetCode = "CTN009";
+          } else if (firstChar === "E" && serviceValue !== "ETN048") {
+            targetCode = "ETN048";
+          }
+
+          if (targetCode) {
+            const input = document.getElementById("serviceCode") as HTMLInputElement;
+            if (!input) {
+              console.log("[GiaoTich] Không tìm thấy input serviceCode");
+              return;
+            }
+            e.preventDefault();
+            input.focus();
+            input.value = targetCode;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+
+            // Đợi gợi ý hiện ra
+            await delay(400);
+
+            // Tìm và chọn gợi ý đúng mã
+            const suggestionSelector = 'div[id^="react-select-"][tabindex="-1"]';
+            const suggestions = Array.from(document.querySelectorAll(suggestionSelector)) as HTMLElement[];
+            const option = suggestions.find(el => el.textContent?.trim().startsWith(targetCode));
+            if (option) {
+              option.click();
+              console.log(`[GiaoTich] Đã chọn ${targetCode} từ gợi ý (react-select)`);
+            } else {
+              console.log(`[GiaoTich] Không tìm thấy gợi ý ${targetCode} (react-select)`);
+            }
+
+          }
+        }
+      }
 
 
       const receiverNameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
@@ -887,7 +983,7 @@ function activateScript(): void {
 
   // Gắn keydown listener
   document.addEventListener("keydown", checkPress, false);
-  
+
   // Monitor parcelIndex để tự động chuyển ảnh
   setTimeout(() => {
     monitorParcelIndex();
@@ -925,13 +1021,13 @@ function deactivateScript(): void {
   if ((window as any)._inputResizeObserversGiaoTich) {
     (window as any)._inputResizeObserversGiaoTich = new WeakMap();
   }
-  
+
   // Dừng parcelIndex observer
   if ((window as any)._parcelIndexObserver) {
     (window as any)._parcelIndexObserver.disconnect();
     (window as any)._parcelIndexObserver = null;
   }
-  
+
   // Reset lastParcelIndexValue
   lastParcelIndexValue = -1;
 }

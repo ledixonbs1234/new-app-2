@@ -53,7 +53,7 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
         if (image.blob) {
           const url = createImageObjectURL(image.blob);
           urlMap.set(image.imageId, url);
-        } else if (image.url) {
+        } else if (image.thumbnailUrl) {
           urlMap.set(image.imageId, image.thumbnailUrl);
         }
       });
