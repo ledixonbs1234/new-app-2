@@ -49,7 +49,10 @@
                 "worker.js",
                 "xlsx.full.min.js",
                 "tinhthanh.json",
-                "data.json"
+                "data.json",
+                "sidepanel.html",
+                "sidepanel.css",
+                "sidepanel.js"
             ],
             "matches": [
                 "<all_urls>"

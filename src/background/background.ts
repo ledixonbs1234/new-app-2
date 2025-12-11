@@ -165,6 +165,177 @@ async function openSidePanelForTab(tabId: number): Promise<void> {
 }
 
 /**
+ * Inject sidepanel as an iframe into a specific tab's page.
+ * Uses chrome.scripting.executeScript to run a DOM script in the tab.
+ */
+async function openSidePanelInPage(tabId: number): Promise<void> {
+  try {
+    const url = chrome.runtime.getURL('sidepanel.html');
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (url: string) => {
+        try {
+          const existing = document.getElementById('inpage-sidepanel-container');
+          if (existing) {
+            // If already injected, focus it
+            (existing as HTMLElement).style.display = 'block';
+            return true;
+          }
+
+          const container = document.createElement('div');
+          container.id = 'inpage-sidepanel-container';
+          container.style.position = 'fixed';
+          container.style.top = '0';
+          container.style.right = '0';
+          container.style.height = '100vh';
+          container.style.width = '360px';
+          container.style.zIndex = '2147483647';
+          container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.2)';
+          container.style.backgroundColor = '#ffffff';
+          container.style.display = 'flex';
+          container.style.flexDirection = 'column';
+
+          // Header with close button
+          const header = document.createElement('div');
+          header.style.display = 'flex';
+          header.style.justifyContent = 'flex-end';
+          header.style.alignItems = 'center';
+          header.style.height = '36px';
+          header.style.padding = '4px 6px';
+          header.style.flex = '0 0 auto';
+          header.style.background = '#fff';
+          header.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
+          header.style.boxSizing = 'border-box';
+
+          const closeBtn = document.createElement('button');
+          closeBtn.textContent = '✕';
+          closeBtn.style.border = 'none';
+          closeBtn.style.background = 'transparent';
+          closeBtn.style.cursor = 'pointer';
+          closeBtn.style.fontSize = '16px';
+          closeBtn.style.padding = '4px 8px';
+          closeBtn.style.lineHeight = '16px';
+          closeBtn.setAttribute('aria-label', 'Đóng Side Panel');
+          header.appendChild(closeBtn);
+          container.appendChild(header);
+
+          // Iframe
+          const iframe = document.createElement('iframe');
+          iframe.src = url;
+          iframe.style.border = 'none';
+          iframe.style.width = '100%';
+          iframe.style.flex = '1 1 auto';
+          iframe.style.height = 'calc(100% - 36px)';
+          iframe.setAttribute('title', 'Side Panel');
+          iframe.setAttribute('allow', 'clipboard-read; clipboard-write;');
+          container.appendChild(iframe);
+
+          // Resizer
+          const resizer = document.createElement('div');
+          resizer.style.position = 'absolute';
+          resizer.style.left = '-6px';
+          resizer.style.top = '0';
+          resizer.style.bottom = '0';
+          resizer.style.width = '6px';
+          resizer.style.cursor = 'ew-resize';
+          resizer.style.touchAction = 'none';
+          resizer.setAttribute('role', 'separator');
+          resizer.style.zIndex = '2147483648';
+          container.appendChild(resizer);
+
+          // Append to body
+          document.body.appendChild(container);
+
+          let isResizing = false;
+          const onMove = (ev: PointerEvent) => {
+            if (!isResizing) return;
+            const dx = window.innerWidth - ev.clientX;
+            const newWidth = Math.max(320, Math.min(900, dx));
+            container.style.width = newWidth + 'px';
+          };
+
+          const stopResize = (ev?: PointerEvent) => {
+            if (!isResizing) return;
+            isResizing = false;
+            (document.body.style as any).cursor = '';
+            try {
+              if (ev && (ev as any).pointerId && (resizer as any).releasePointerCapture) {
+                try { (resizer as any).releasePointerCapture((ev as any).pointerId); } catch(e) {}
+              }
+            } catch (e) {
+              // ignore
+            }
+            // detach move handler
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', stopResize);
+            document.removeEventListener('pointercancel', stopResize);
+          };
+
+          const startResize = (ev: PointerEvent) => {
+            // Only start resizing on primary button
+            if (ev.button !== 0) return;
+            isResizing = true;
+            (document.body.style as any).cursor = 'ew-resize';
+            ev.preventDefault();
+            try {
+              if ((resizer as any).setPointerCapture) {
+                (resizer as any).setPointerCapture((ev as any).pointerId);
+              }
+            } catch (e) {
+              // ignore
+            }
+            // attach move handler dynamically so hover doesn't resize
+            document.addEventListener('pointermove', onMove);
+            // attach pointerup and pointercancel to stop
+            document.addEventListener('pointerup', stopResize);
+            document.addEventListener('pointercancel', stopResize);
+          };
+
+          resizer.addEventListener('pointerdown', startResize, false);
+
+          // Close handler
+          closeBtn.addEventListener('click', () => {
+            container.remove();
+          });
+
+          // Mark as injected for re-use detection
+          container.setAttribute('data-extension-sidepanel', '1');
+          return true;
+        } catch (e) {
+          console.error('Failed to inject sidepanel iframe:', e);
+          return false;
+        }
+      },
+      args: [url]
+    });
+  } catch (err) {
+    console.error('Failed to inject side panel into page:', err);
+    throw err;
+  }
+}
+
+/**
+ * Remove sidepanel iframe from page if exists
+ */
+async function closeSidePanelInPage(tabId: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const existing = document.getElementById('inpage-sidepanel-container');
+        if (existing) {
+          existing.remove();
+        }
+        return true;
+      }
+    });
+  } catch (err) {
+    console.error('Failed to close side panel in page:', err);
+    // Silently ignore
+  }
+}
+
+/**
  * Đóng side panel (nếu cần)
  */
 async function closeSidePanel(windowId: number): Promise<void> {
@@ -250,8 +421,8 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   
   if (info.menuItemId === "openImagePanel") {
     // Click context menu là user gesture hợp lệ
-    if (tab?.windowId) {
-      await openSidePanel(tab.windowId);
+    if (tab?.id) {
+      await openSidePanelInPage(tab.id);
     }
   }
 });
@@ -4672,6 +4843,44 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       } catch (error) {
         console.error("Error opening side panel:", error);
         sendResponse({ status: "error", message: (error as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "OPEN_SIDE_PANEL_INPAGE") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = tabs?.[0];
+        if (tab?.id) {
+          await openSidePanelInPage(tab.id);
+          sendResponse({ status: 'success', message: 'In-page side panel injected' });
+        } else {
+          sendResponse({ status: 'error', message: 'No active tab' });
+        }
+      } catch (error) {
+        console.error('Error injecting in-page side panel:', error);
+        sendResponse({ status: 'error', message: (error as Error).message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === "CLOSE_SIDE_PANEL_INPAGE") {
+    (async () => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = tabs?.[0];
+        if (tab?.id) {
+          await closeSidePanelInPage(tab.id);
+          sendResponse({ status: 'success', message: 'In-page side panel removed' });
+        } else {
+          sendResponse({ status: 'error', message: 'No active tab' });
+        }
+      } catch (error) {
+        console.error('Error closing in-page side panel:', error);
+        sendResponse({ status: 'error', message: (error as Error).message });
       }
     })();
     return true;

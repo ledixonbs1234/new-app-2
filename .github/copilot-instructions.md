@@ -249,5 +249,42 @@ When implementing features:
 3. Check timing delays on slow connections
 5. Validate React state persistence through page navigation
 
+### Developer Workflows & Quick Start
+- Dev build (watch): `npm run dev` (webpack --watch --config webpack.dev.js) → load unpacked extension from `dist/` in Chrome.
+- Build for packaging: run `npm run build` after removing `--watch` from `scripts.build` (or run `webpack --config webpack.prod.js` directly).
+- Load/unload extension: `chrome://extensions/` → Developer mode → Load unpacked → select `dist/`.
+
+### Important Files (quick map)
+- Background orchestration: [src/background/background.ts](src/background/background.ts#L1)
+- Background helpers: [src/background/util.ts](src/background/util.ts#L1)
+- Core portal processing: [src/contentScript/contentScript.tsx](src/contentScript/contentScript.tsx#L1)
+- MyPost (batch add, Order Manager): [src/contentScript/contentMy.tsx](src/contentScript/contentMy.tsx#L1)
+- Main world React interactions: [src/contentScript/mainScript.tsx](src/contentScript/mainScript.tsx#L1)
+- Popup/UI + state: [src/popup/Popup.tsx](src/popup/Popup.tsx#L1), [src/popup/popup.slice.tsx](src/popup/popup.slice.tsx#L1)
+- Webpack entries & manifest: [webpack.common.js](webpack.common.js#L1), [src/static/manifest.json](src/static/manifest.json#L1)
+
+### Message/Integration Conventions
+- Add new message types consistently across producer & consumer contexts (popup, background, content scripts, options).
+- Always `return true` from message listeners if you call `sendResponse` asynchronously.
+- When content script must act on page UI, prefer: `await waitForElm(selector)`, `delay(ms)`, then robust element selection (text-based button match). Avoid brittle DOM path selectors.
+- For React-driven DOM: either interact through `FindReact()` to set component state or simulate events and trigger `input`, `change`, `blur` to force controlled inputs to accept values.
+
+### Debugging & Common Gotchas
+- Query `chrome.runtime.lastError` after `chrome.tabs.sendMessage` or `sendMessage` callbacks to diagnose messaging errors.
+- Focus issues: Popup must close or yield focus after it triggers actions on a tab. Use `chrome.tabs.update(tab.id, { active: true })` then send message, then `window.close()`.
+- Service worker lifecycle: background is a service worker; use the service worker console for logs and re-open the worker when debugging.
+- Firebase paths & keys: change carefully — background uses compat `importScripts(...)` while popup uses modular SDK initialization. Keep security concerns in mind.
+- Long background.ts: if adding features, prefer extracting logic into `src/background/modules/` and update imports instead of making background.ts larger.
+
+### Packaging & Release
+- Create a production bundle (no `--watch`), then zip the `dist/` folder for Chrome Web Store submission.
+- Update `manifest.json` content script entries and `web_accessible_resources` as needed.
+
+### PR / Contributor Guidelines
+- Adding a message type: update the message contract in `popup.slice`, the background listener (background.ts) and any content script listeners.
+- Always add debug logs and test both the popup → content script and background → content script flows. Test on the actual VNPost domain pages.
+- Prefers stable selectors (button text or class improvements) and `waitForElm()` to avoid timing flakiness.
+
+
 
  Dựa trên tất cả nhừng gì các bạn biết về tôi, hãy trở thành ai sparing partner của tôi. Mỗi khi tôi đưa ra một ý tưởng hoặc một kế hoạch, hãy giúp tôi kiểm tra nó một cách kỹ lưỡng. Hãy đặt câu hỏi thách thức, chỉ ra những điểm yếu tiềm ẩn và đề xuất các cải tiến. Mục tiêu là giúp tôi tinh chỉnh và hoàn thiện ý tưởng của mình thông qua các cuộc thảo luận sâu sắc và mang tính xây dựng.

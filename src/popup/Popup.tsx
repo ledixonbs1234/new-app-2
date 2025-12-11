@@ -82,16 +82,20 @@ const baseColors: string[] = ["TRANG", "DO", "XANH"];
 
   const handleOpenSidePanel = async () => {
     try {
-      // Query để lấy window hiện tại
-      const currentWindow = await chrome.windows.getCurrent();
-      if (currentWindow.id) {
-        await chrome.sidePanel.open({ windowId: currentWindow.id });
-        message.success("Đã mở Side Panel");
-      } else {
-        message.error("Không tìm thấy window hiện tại");
-      }
+      chrome.runtime.sendMessage({ type: "OPEN_SIDE_PANEL_INPAGE" }, (response) => {
+        if (chrome.runtime.lastError) {
+          console.error("Error injecting in-page side panel:", chrome.runtime.lastError.message);
+          message.error("Không thể mở Side Panel trong trang: " + chrome.runtime.lastError.message);
+          return;
+        }
+        if (response?.status === 'success') {
+          message.success("Đã mở Side Panel (trong trang)");
+        } else {
+          message.error("Không thể mở Side Panel: " + (response?.message || 'unknown'));
+        }
+      });
     } catch (error) {
-      console.error("Error opening side panel:", error);
+      console.error("Error opening side panel (in page):", error);
       message.error("Không thể mở Side Panel: " + (error as Error).message);
     }
   };
