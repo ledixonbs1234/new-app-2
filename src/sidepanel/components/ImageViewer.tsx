@@ -10,22 +10,26 @@ import {
 import { StoredImage } from "../../types/vnpost";
 import { createImageObjectURL, revokeImageObjectURL } from "../utils/imageDB";
 
-interface ImageViewerProps {
-  image: StoredImage | null;
-}
-
+// Định nghĩa cấu trúc Preset
 interface ZoomPreset {
   zoom: number;
   pan: { x: number; y: number };
   rotation: number;
 }
 
+interface ImageViewerProps {
+  image: StoredImage | null;
+  // Callback bắn lên cha khi user thay đổi góc nhìn
+  onTransformChange?: (preset: ZoomPreset) => void;
+}
+
 export interface ImageViewerHandle {
   applyZoomPreset: (preset: ZoomPreset) => void;
   getCurrentZoom: () => ZoomPreset;
+  resetToDefault: () => void;
 }
 
-const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, ref) => {
+const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, onTransformChange }, ref) => {
   const [zoom, setZoom] = useState<number>(1);
   const [rotation, setRotation] = useState<number>(0);
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -33,8 +37,12 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // Cờ để chặn callback onTransformChange khi đang apply preset bằng code
+  // Tránh việc vừa apply xong lại trigger lưu đè lại
+  const isApplyingPresetRef = useRef<boolean>(false);
 
-  // Create object URL from blob ONLY (never use Firebase URL directly)
+  // 1. Tạo Object URL từ Blob
   useEffect(() => {
     if (image?.blob) {
       const url = createImageObjectURL(image.blob);
@@ -44,69 +52,65 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
         revokeImageObjectURL(url);
       };
     } else {
-      // Don't use image.url - wait for blob to download
       setImageUrl(null);
     }
   }, [image]);
 
-  // Note: Image change reset is now controlled by parent (SidePanel)
-  // based on autoZoomEnabled state
+  // 2. THEO DÕI THAY ĐỔI VÀ GỌI CALLBACK LÊN CHA
+  useEffect(() => {
+    if (onTransformChange && !isApplyingPresetRef.current) {
+      onTransformChange({ zoom, pan, rotation });
+    }
+  }, [zoom, pan, rotation, onTransformChange]);
 
-  // Expose methods to parent via ref
+  // 3. Public methods ra ngoài qua Ref
   useImperativeHandle(ref, () => ({
     applyZoomPreset: (preset: ZoomPreset) => {
+      isApplyingPresetRef.current = true; // Bật cờ chặn
       setZoom(preset.zoom);
       setPan(preset.pan);
       setRotation(preset.rotation);
-      console.log("[ImageViewer] Applied zoom preset:", preset);
+      
+      // Tắt cờ chặn sau 1 khoảng thời gian ngắn
+      setTimeout(() => {
+        isApplyingPresetRef.current = false;
+      }, 200);
     },
     getCurrentZoom: () => {
       return { zoom, pan, rotation };
     },
     resetToDefault: () => {
+      isApplyingPresetRef.current = true;
       setZoom(1);
       setRotation(0);
       setPan({ x: 0, y: 0 });
-      console.log("[ImageViewer] Reset to default view");
+      setTimeout(() => {
+        isApplyingPresetRef.current = false;
+      }, 200);
     }
   }), [zoom, pan, rotation]);
 
-  // Zoom in/out
-  const handleZoomIn = () => {
-    setZoom((prev) => Math.min(prev + 0.2, 5));
-  };
-
-  const handleZoomOut = () => {
-    setZoom((prev) => Math.max(prev - 0.2, 1));
-  };
-
-  // Rotate
-  const handleRotateLeft = () => {
-    setRotation((prev) => (prev - 90) % 360);
-  };
-
-  const handleRotateRight = () => {
-    setRotation((prev) => (prev + 90) % 360);
-  };
-
-  // Reset view
+  // --- Logic Zoom/Pan/Rotate ---
+  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.2, 5));
+  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.2, 1));
+  const handleRotateLeft = () => setRotation((prev) => (prev - 90) % 360);
+  const handleRotateRight = () => setRotation((prev) => (prev + 90) % 360);
+  
   const handleReset = () => {
     setZoom(1);
     setRotation(0);
     setPan({ x: 0, y: 0 });
   };
 
-  // Mouse wheel zoom
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? -0.2 : 0.2;
     setZoom((prev) => Math.max(1, Math.min(5, prev + delta)));
   };
 
-  // Mouse drag to pan
   const handleMouseDown = (e: React.MouseEvent) => {
     if (zoom > 1) {
-      e.preventDefault(); // Ngăn default drag behavior
+      e.preventDefault();
       setIsDragging(true);
       setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
@@ -114,7 +118,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging && zoom > 1) {
-      e.preventDefault(); // Ngăn default drag behavior
+      e.preventDefault();
       setPan({
         x: e.clientX - dragStart.x,
         y: e.clientY - dragStart.y,
@@ -122,31 +126,14 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
     }
   };
 
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
+  const handleMouseUp = () => setIsDragging(false);
+  const handleMouseLeave = () => setIsDragging(false);
+  const handleDragStart = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
 
-  const handleMouseLeave = () => {
-    setIsDragging(false);
-  };
-
-  // Ngăn chặn drag event mặc định của browser
-  const handleDragStart = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
+  // --- Render ---
   if (!image || !imageUrl) {
     return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "100%",
-          color: "#8c8c8c",
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#8c8c8c" }}>
         Chọn hình ảnh để xem
       </div>
     );
@@ -178,20 +165,10 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
       >
         <Space direction="vertical" size="small">
           <Tooltip title="Phóng to" placement="left">
-            <Button
-              icon={<ZoomInOutlined />}
-              onClick={handleZoomIn}
-              size="small"
-              disabled={zoom >= 5}
-            />
+            <Button icon={<ZoomInOutlined />} onClick={handleZoomIn} size="small" disabled={zoom >= 5} />
           </Tooltip>
           <Tooltip title="Thu nhỏ" placement="left">
-            <Button
-              icon={<ZoomOutOutlined />}
-              onClick={handleZoomOut}
-              size="small"
-              disabled={zoom <= 1}
-            />
+            <Button icon={<ZoomOutOutlined />} onClick={handleZoomOut} size="small" disabled={zoom <= 1} />
           </Tooltip>
           <Tooltip title="Xoay trái" placement="left">
             <Button icon={<RotateLeftOutlined />} onClick={handleRotateLeft} size="small" />
@@ -205,7 +182,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
         </Space>
       </div>
 
-      {/* Image info */}
+      {/* Info Overlay */}
       <div
         style={{
           position: "absolute",
@@ -220,15 +197,13 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image }, 
           maxWidth: "calc(100% - 24px)",
         }}
       >
-        <div style={{ fontWeight: 600 }}>
-          {image.maHieu || "Chưa xử lý"}
-        </div>
+        <div style={{ fontWeight: 600 }}>{image.maHieu || "Chưa xử lý"}</div>
         <div style={{ opacity: 0.8, marginTop: 4 }}>
           Zoom: {(zoom * 100).toFixed(0)}% | Xoay: {rotation}°
         </div>
       </div>
 
-      {/* Image container */}
+      {/* Image Container */}
       <div
         style={{
           width: "100%",

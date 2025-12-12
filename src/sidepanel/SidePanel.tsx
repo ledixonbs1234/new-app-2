@@ -1,9 +1,8 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal } from "antd";
 import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined } from "@ant-design/icons";
 import { StoredImage } from "../types/vnpost";
 import { syncAllImages, SyncProgress, listenToFirebaseImages } from "./utils/firebaseSync";
-
 import { getAllImages, initDB } from "./utils/imageDB";
 import ImageViewer from "./components/ImageViewer";
 import ThumbnailGallery from "./components/ThumbnailGallery";
@@ -17,58 +16,44 @@ interface ZoomPreset {
 }
 
 const SidePanel: React.FC = () => {
+  // State
   const [images, setImages] = useState<StoredImage[]>([]);
   const [selectedIndex, setSelectedIndex] = useState<number>(() => {
-    // Load saved index from localStorage
     const saved = localStorage.getItem("sidepanel_selected_index");
     return saved !== null ? parseInt(saved, 10) : 0;
   });
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<SyncProgress>({
-    total: 0,
-    downloaded: 0,
-    failed: 0,
-    status: "idle",
+    total: 0, downloaded: 0, failed: 0, status: "idle",
   });
-  
-  // Ref to trigger zoom in ImageViewer
+  const [autoZoomEnabled, setAutoZoomEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem("sidepanel_auto_zoom_enabled");
+    return saved !== null ? JSON.parse(saved) : true;
+  });
+  const [shouldScrollToSelected, setShouldScrollToSelected] = useState<boolean>(false);
+
+  // Refs
   const imageViewerRef = useRef<{ 
     applyZoomPreset: (preset: ZoomPreset) => void; 
     getCurrentZoom: () => ZoomPreset;
     resetToDefault: () => void;
   }>(null);
 
-  // Ref để track request focus cho ảnh cuối cùng
   const focusRequestIdRef = useRef(0);
-
-  // Track current focused field to save preset when losing focus
+  
+  // Ref quan trọng để theo dõi Field nào đang được Active
   const currentFocusedFieldRef = useRef<FieldGroup>("NONE");
+  
+  // Ref cho Timer Debounce (chờ user dừng thao tác mới lưu)
+  const saveDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Track the initial preset applied (to compare if user actually changed it)
-  const appliedPresetRef = useRef<ZoomPreset | null>(null);
-
-  // Auto zoom toggle state
-  const [autoZoomEnabled, setAutoZoomEnabled] = useState<boolean>(() => {
-    const saved = localStorage.getItem("sidepanel_auto_zoom_enabled");
-    return saved !== null ? JSON.parse(saved) : true; // Default: enabled
-  });
-
-  // Control scroll behavior - only scroll when user actively selects
-  const [shouldScrollToSelected, setShouldScrollToSelected] = useState<boolean>(false);
-
-  // Saved presets per field group
+  // State Presets
   const [savedPresets, setSavedPresets] = useState<Record<FieldGroup, ZoomPreset>>(() => {
-    // Load from localStorage if available
     const saved = localStorage.getItem("sidepanel_zoom_presets");
     if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Failed to parse saved presets:", e);
-      }
+      try { return JSON.parse(saved); } catch (e) { console.error(e); }
     }
-    // Default presets
     return {
       TT_NUMBER: { zoom: 2, pan: { x: -100, y: -150 }, rotation: 0 },
       RECEIVER_INFO: { zoom: 2.5, pan: { x: 0, y: 0 }, rotation: 0 },
@@ -78,102 +63,97 @@ const SidePanel: React.FC = () => {
     };
   });
 
-  // Initialize and load images
+  // =================================================================
+  // LOGIC LƯU PRESET MỚI (CHỦ ĐỘNG + DEBOUNCE)
+  // =================================================================
+
+  const handleTransformChange = useCallback((newTransform: ZoomPreset) => {
+    // 1. Nếu tắt AutoZoom thì không lưu đè
+    // 2. Nếu chưa focus vào field nào (đang ở NONE) thì không lưu
+    if (!autoZoomEnabled || currentFocusedFieldRef.current === "NONE") return;
+
+    // Clear timer cũ
+    if (saveDebounceTimerRef.current) {
+      clearTimeout(saveDebounceTimerRef.current);
+    }
+
+    // Set timer mới: chờ 1000ms
+    saveDebounceTimerRef.current = setTimeout(() => {
+      const fieldToSave = currentFocusedFieldRef.current;
+      
+      // Kiểm tra lại lần nữa trong timeout
+      if (fieldToSave === "NONE") return;
+
+      console.log(`[SidePanel] 💾 Auto-saving preset for ${fieldToSave}:`, newTransform);
+
+      setSavedPresets(prev => {
+        const currentPreset = prev[fieldToSave];
+        
+        // So sánh để tránh update state nếu không đổi (tránh render lại không cần thiết)
+        if (
+             Math.abs(currentPreset.zoom - newTransform.zoom) < 0.001 &&
+             Math.abs(currentPreset.pan.x - newTransform.pan.x) < 1 &&
+             Math.abs(currentPreset.pan.y - newTransform.pan.y) < 1 &&
+             currentPreset.rotation === newTransform.rotation
+        ) {
+             return prev;
+        }
+
+        const newPresets = { ...prev, [fieldToSave]: newTransform };
+        localStorage.setItem("sidepanel_zoom_presets", JSON.stringify(newPresets));
+        return newPresets;
+      });
+      
+    }, 1000); 
+  }, [autoZoomEnabled]);
+
+
+  // =================================================================
+  // INIT & LOAD DATA
+  // =================================================================
+
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     
-    // Initial load
+    // Initial Load
     loadImages();
     
-    // Setup realtime listener for Firebase changes
+    // Setup Listener
     const setupRealtimeListener = async () => {
       try {
-        console.log("[SidePanel] Setting up Firebase realtime listener...");
-        unsubscribe = await listenToFirebaseImages(async (firebaseImages) => {
-          const imageCount = Object.keys(firebaseImages).length;
-          console.log(`[SidePanel] Firebase data changed: ${imageCount} images`);
-          
-          // Re-sync when Firebase data changes (with progressive batch updates)
+        unsubscribe = await listenToFirebaseImages(async () => {
+          // Re-sync khi có thay đổi
           await syncAllImages({
-            onProgress: (progress) => {
-              setSyncProgress(progress);
-            },
-            onImageDownloaded: async (_batchImage) => {
-              // Update UI per batch to reduce re-renders
-              const updatedImages = await getAllImages();
-              setImages(updatedImages);
-              console.log(`[SidePanel] 📥 Batch updated from Firebase, total: ${updatedImages.length}`);
+            onProgress: (p) => setSyncProgress(p),
+            onImageDownloaded: async () => {
+              const updated = await getAllImages();
+              setImages(updated);
             }
           });
-          
-          // Reload from IndexedDB
-          const updatedImages = await getAllImages();
-          setImages(updatedImages);
-          
-          if (updatedImages.length === 0) {
-            setError("Không có hình ảnh nào được tìm thấy");
-          } else {
-            setError(null);
-            
-            // Validate and restore selected index after Firebase update
-            const savedIndex = localStorage.getItem("sidepanel_selected_index");
-            if (savedIndex !== null) {
-              const index = parseInt(savedIndex, 10);
-              if (index >= 0 && index < updatedImages.length) {
-                // Keep current selection if still valid
-                if (index !== selectedIndex) {
-                  setSelectedIndex(index);
-                  console.log(`[SidePanel] 🔄 Revalidated selected index after Firebase update: ${index}`);
-                }
-              } else {
-                // Reset if out of bounds
-                console.log(`[SidePanel] ⚠️ Selected index ${index} out of bounds after update, resetting to 0`);
-                setSelectedIndex(0);
-                localStorage.setItem("sidepanel_selected_index", "0");
-              }
+          const updated = await getAllImages();
+          setImages(updated);
+          // Logic revalidate index...
+          const savedIndex = localStorage.getItem("sidepanel_selected_index");
+          if (savedIndex !== null) {
+            const index = parseInt(savedIndex, 10);
+            if (index >= 0 && index < updated.length) {
+              if (index !== selectedIndex) setSelectedIndex(index);
+            } else {
+              setSelectedIndex(0);
             }
           }
         });
-        console.log("[SidePanel] Realtime listener setup complete");
-      } catch (err) {
-        console.error("[SidePanel] Failed to setup realtime listener:", err);
-      }
+      } catch (err) { console.error(err); }
     };
-    
     setupRealtimeListener();
-    
-    // Notify content scripts that side panel is open
-    console.log("[SidePanel] 📢 Broadcasting SIDEPANEL_STATUS: open");
-    chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: true }, () => {
-      // Ignore errors - content script might not be loaded yet
-      if (chrome.runtime.lastError) {
-        console.log("[SidePanel] Broadcast failed (expected if no listeners):", chrome.runtime.lastError.message);
-      }
-    });
-    
-    // Also broadcast to all tabs (in case content scripts are already loaded)
-    chrome.tabs.query({}, (tabs) => {
-      tabs.forEach(tab => {
-        if (tab.id) {
-          chrome.tabs.sendMessage(tab.id, { type: "SIDEPANEL_STATUS", isOpen: true }, () => {
-            // Ignore errors - not all tabs have content script
-            chrome.runtime.lastError; // Just consume the error
-          });
-        }
-      });
-      console.log("[SidePanel] 📢 Broadcasted to all tabs");
-    });
-    
-    // Cleanup: notify when side panel closes and unsubscribe listener
+
+    // Broadcast Status
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: true });
+
     return () => {
-      console.log("[SidePanel] Cleaning up realtime listener...");
-      if (unsubscribe) {
-        unsubscribe();
-      }
-      console.log("[SidePanel] 📢 Broadcasting SIDEPANEL_STATUS: closed");
-      chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: false }, () => {
-        chrome.runtime.lastError; // Consume error
-      });
+      if (unsubscribe) unsubscribe();
+      if (saveDebounceTimerRef.current) clearTimeout(saveDebounceTimerRef.current);
+      chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: false });
     };
   }, []);
 
@@ -181,268 +161,117 @@ const SidePanel: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
-
-      // Initialize IndexedDB
       await initDB();
-
-      // Check if images exist locally
-      const localImages = await getAllImages();
-
-      if (localImages.length > 0) {
-        // Load from IndexedDB first for instant display
-        setImages(localImages);
+      const local = await getAllImages();
+      if (local.length > 0) {
+        setImages(local);
         setLoading(false);
       }
-
-      // Sync from Firebase - this will:
-      // 1. Fetch metadata immediately → show all thumbnails
-      // 2. Download blobs progressively in batches
+      
       await syncAllImages({
-        onProgress: (progress) => {
-          setSyncProgress(progress);
-        },
-        onImageDownloaded: async (_batchImage) => {
-          // Progressively update UI per batch (not per image)
-          // This reduces re-renders from 50x to ~17x for 50 images
-          const updatedImages = await getAllImages();
-          setImages(updatedImages);
-          console.log(`[SidePanel] 📥 Batch updated, total: ${updatedImages.length} images`);
+        onProgress: (p) => setSyncProgress(p),
+        onImageDownloaded: async () => {
+          const updated = await getAllImages();
+          setImages(updated);
         }
       });
-
-      // Final reload from IndexedDB after sync completes
-      const updatedImages = await getAllImages();
-      setImages(updatedImages);
+      
+      const final = await getAllImages();
+      setImages(final);
       setLoading(false);
 
-      if (updatedImages.length === 0) {
-        setError("Không có hình ảnh nào được tìm thấy");
-      } else {
-        // Restore selected index if valid
+      if (final.length > 0) {
         const savedIndex = localStorage.getItem("sidepanel_selected_index");
         if (savedIndex !== null) {
           const index = parseInt(savedIndex, 10);
-          if (index >= 0 && index < updatedImages.length) {
-            setSelectedIndex(index);
-            console.log(`[SidePanel] 📂 Restored selected index: ${index}`);
-            
-            // Send maHieu to portal if available
-            const selectedImg = updatedImages[index];
-            if (selectedImg?.maHieu) {
-              sendMaHieuToPortal(selectedImg.maHieu);
-            }
-          } else {
-            console.log(`[SidePanel] ⚠️ Saved index ${index} out of bounds (${updatedImages.length} images), resetting to 0`);
-            setSelectedIndex(0);
-            localStorage.setItem("sidepanel_selected_index", "0");
-          }
+          if (index >= 0 && index < final.length) setSelectedIndex(index);
         }
+      } else {
+        setError("Không có hình ảnh nào được tìm thấy");
       }
-    } catch (err) {
-      console.error("Failed to load images:", err);
-      setError(
-        err instanceof Error ? err.message : "Không thể tải hình ảnh"
-      );
+    } catch (err: any) {
+      setError(err.message || "Lỗi tải ảnh");
       setLoading(false);
     }
   };
 
-  const handleRefresh = () => {
-    loadImages();
-  };
+  const handleRefresh = () => loadImages();
 
   const handleSelectImage = (index: number) => {
     setSelectedIndex(index);
-    setShouldScrollToSelected(true); // Enable scroll for user selection
-    
-    // Reset scroll flag after a short delay to prevent interference with progressive updates
+    setShouldScrollToSelected(true);
     setTimeout(() => setShouldScrollToSelected(false), 500);
-    
-    // Save to localStorage to persist across side panel reopens
     localStorage.setItem("sidepanel_selected_index", index.toString());
-    console.log(`[SidePanel] 💾 Saved selected index: ${index}`);
     
-    // Reset tracking when changing images to prevent false saves
+    // Reset context
     currentFocusedFieldRef.current = "NONE";
-    appliedPresetRef.current = null;
-    
-    // If auto zoom enabled, reset to default view when changing images
-    // If disabled, keep current zoom state
+    if (saveDebounceTimerRef.current) clearTimeout(saveDebounceTimerRef.current);
+
     if (autoZoomEnabled && imageViewerRef.current) {
       imageViewerRef.current.resetToDefault();
     }
     
-    // If has maHieu, send to portal page to fill ttNumber
     const selectedImg = images[index];
     if (selectedImg?.maHieu) {
       sendMaHieuToPortal(selectedImg.maHieu);
     } else {
-      // Nếu không có maHieu, thực hiện focus ttNumber cho ảnh cuối cùng
       focusRequestIdRef.current += 1;
-      const currentRequestId = focusRequestIdRef.current;
-      focusTtNumberInPortal(currentRequestId);
+      focusTtNumberInPortal(focusRequestIdRef.current);
     }
   };
 
-  // Hàm gửi message focus ttNumber, retry tối đa 3 lần, chỉ thực hiện cho requestId mới nhất
   const focusTtNumberInPortal = (requestId: number, attempt: number = 1) => {
     setTimeout(async () => {
-      if (focusRequestIdRef.current !== requestId) {
-        console.log(`[SidePanel] [FOCUS_TT_NUMBER] Cancelled (requestId ${requestId}) - newer image selected.`);
-        return;
-      }
+      if (focusRequestIdRef.current !== requestId) return;
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.id || !tab.url) {
-          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Tab not found (attempt ${attempt})`);
-          return;
-        }
-        if (!tab.url.startsWith("https://portalkhl.vnpost.vn/")) {
-          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Not a portal page (attempt ${attempt})`);
-          return;
-        }
-        // Before focusing, query the content script to see which input is currently focused
-        const tabId = tab.id!;
-        chrome.tabs.sendMessage(tabId, { type: "QUERY_FOCUSED_ELEMENT" }, (queryResponse) => {
-          if (chrome.runtime.lastError) {
-            // If query fails, fall back to old behavior and try to send focus
-            console.log(`[SidePanel] [FOCUS_TT_NUMBER] QUERY_FOCUSED_ELEMENT failed: ${chrome.runtime.lastError.message}`);
-            attemptSendFocus();
-            return;
-          }
+        if (!tab?.id || !tab.url?.includes("portalkhl.vnpost.vn")) return;
 
-          const activeId = queryResponse?.activeElementId as string | null;
-          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Active element on portal: ${activeId}`);
-
-          // If user is focusing receiverName, do not override focus
-          if (activeId === "receiverName" || activeId === "receiverAddress" || activeId === "receiverPhone") {
-            console.log(`[SidePanel] [FOCUS_TT_NUMBER] Skipping focus because user is editing ${activeId}`);
-            return;
-          }
-
-          // Otherwise, send focus message
+        chrome.tabs.sendMessage(tab.id, { type: "QUERY_FOCUSED_ELEMENT" }, (res) => {
+          if (chrome.runtime.lastError) { attemptSendFocus(); return; }
+          const activeId = res?.activeElementId;
+          // Nếu đang nhập liệu thông tin người nhận thì không giật focus
+          if (activeId === "receiverName" || activeId === "receiverAddress" || activeId === "receiverPhone") return;
           attemptSendFocus();
         });
 
         function attemptSendFocus() {
-          chrome.tabs.sendMessage(tabId, { type: "FOCUS_TT_NUMBER" }, (_response) => {
-            if (chrome.runtime.lastError) {
-              console.log(`[SidePanel] [FOCUS_TT_NUMBER] Retry ${attempt} failed: ${chrome.runtime.lastError.message}`);
-              if (attempt < 3 && focusRequestIdRef.current === requestId) {
-                focusTtNumberInPortal(requestId, attempt + 1);
-              } else if (attempt >= 3) {
-                console.log(`[SidePanel] [FOCUS_TT_NUMBER] Max retries reached for requestId ${requestId}`);
-              }
-            } else {
-                  console.log(`[SidePanel] [FOCUS_TT_NUMBER] Sent to portal (attempt ${attempt})`, _response);
+          chrome.tabs.sendMessage(tab.id!, { type: "FOCUS_TT_NUMBER" }, () => {
+            if (chrome.runtime.lastError && attempt < 3) {
+              focusTtNumberInPortal(requestId, attempt + 1);
             }
           });
         }
-      } catch (error) {
-        console.log(`[SidePanel] [FOCUS_TT_NUMBER] Exception (attempt ${attempt}):`, error);
-        if (attempt < 3 && focusRequestIdRef.current === requestId) {
-          focusTtNumberInPortal(requestId, attempt + 1);
-        } else if (attempt >= 3) {
-          console.log(`[SidePanel] [FOCUS_TT_NUMBER] Max retries reached for requestId ${requestId}`);
-        }
-      }
+      } catch (e) { console.error(e); }
     }, 500);
   };
 
   const sendMaHieuToPortal = async (maHieu: string) => {
-    try {
-      // Get active tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id || !tab.url) return;
-      
-      // Check if it's a portal page
-      if (!tab.url.startsWith("https://portalkhl.vnpost.vn/")) {
-        console.log("[SidePanel] Not a portal page, skipping ttNumber fill");
-        return;
-      }
-      
-      // Send message to content script
-      chrome.tabs.sendMessage(tab.id, {
-        type: "FILL_TT_NUMBER",
-        payload: { maHieu }
-      }, (_response) => {
-        if (chrome.runtime.lastError) {
-          console.log("[SidePanel] Could not send maHieu:", chrome.runtime.lastError.message);
-        } else {
-          console.log(`[SidePanel] Sent maHieu to portal: ${maHieu}`);
-        }
-      });
-    } catch (error) {
-      console.error("[SidePanel] Error sending maHieu:", error);
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id && tab.url?.includes("portalkhl.vnpost.vn")) {
+      chrome.tabs.sendMessage(tab.id, { type: "FILL_TT_NUMBER", payload: { maHieu } });
     }
   };
 
   const handleClearAllImages = () => {
     Modal.confirm({
-      title: "⚠️ Xác nhận xóa toàn bộ hình ảnh",
-      content: `Bạn có chắc chắn muốn xóa vĩnh viễn ${images.length} hình ảnh từ cả local và Firebase?`,
-      okText: "Xóa tất cả",
-      okType: "danger",
-      cancelText: "Không",
+      title: "Xác nhận xóa",
+      content: "Xóa toàn bộ hình ảnh?",
       onOk: () => {
-        return executeDeleteAllImages();
-      },
-    });
-  };
-
-  const executeDeleteAllImages = (): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const hideLoading = message.loading("Đang xóa toàn bộ hình ảnh...", 0);
-      
-      chrome.runtime.sendMessage(
-        {
-          event: "CONTENTMY",
-          type: "CLEAR_ALL_IMAGES",
-        },
-        (response) => {
-          hideLoading();
-          
-          if (chrome.runtime.lastError) {
-            const errorMsg = "Lỗi kết nối: " + chrome.runtime.lastError.message;
-            message.error(errorMsg);
-            console.error("[SidePanel]", errorMsg);
-            reject(new Error(errorMsg));
-            return;
-          }
-
-          if (response && response.status === "success") {
-            message.success(response.message || "Đã xóa toàn bộ hình ảnh thành công");
-            console.log(`[SidePanel] Cleared ${response.deletedCount} images from Firebase`);
-            
-            // Reset UI state
+        chrome.runtime.sendMessage({ event: "CONTENTMY", type: "CLEAR_ALL_IMAGES" }, (res) => {
+          if (res?.status === "success") {
             setImages([]);
             setSelectedIndex(0);
-            localStorage.setItem("sidepanel_selected_index", "0");
-            
-            resolve();
-          } else {
-            const errorMsg = response?.error || "Không thể xóa hình ảnh";
-            message.error("Lỗi: " + errorMsg);
-            console.error("[SidePanel]", errorMsg);
-            reject(new Error(errorMsg));
+            message.success("Đã xóa thành công");
           }
-        }
-      );
+        });
+      }
     });
   };
 
-  const handlePreviousImage = () => {
-    if (selectedIndex > 0) {
-      handleSelectImage(selectedIndex - 1);
-    }
-  };
-
-  const handleNextImage = () => {
-    if (selectedIndex < images.length - 1) {
-      handleSelectImage(selectedIndex + 1);
-    }
-  };
-
+  const handlePreviousImage = () => { if (selectedIndex > 0) handleSelectImage(selectedIndex - 1); };
+  const handleNextImage = () => { if (selectedIndex < images.length - 1) handleSelectImage(selectedIndex + 1); };
+  
   const handleResetPresets = () => {
     const defaultPresets: Record<FieldGroup, ZoomPreset> = {
       TT_NUMBER: { zoom: 2, pan: { x: -100, y: -150 }, rotation: 0 },
@@ -453,300 +282,116 @@ const SidePanel: React.FC = () => {
     };
     setSavedPresets(defaultPresets);
     localStorage.setItem("sidepanel_zoom_presets", JSON.stringify(defaultPresets));
-    console.log("[SidePanel] Reset all zoom presets to defaults");
+    message.success("Đã đặt lại vị trí mặc định");
   };
 
   const handleToggleAutoZoom = (checked: boolean) => {
     setAutoZoomEnabled(checked);
     localStorage.setItem("sidepanel_auto_zoom_enabled", JSON.stringify(checked));
-    message.info(checked ? "Đã bật tự động zoom" : "Đã tắt tự động zoom", 1.5);
-    console.log("[SidePanel] Auto zoom:", checked ? "enabled" : "disabled");
+    if (!checked) currentFocusedFieldRef.current = "NONE";
   };
 
-  // Listen for smart zoom messages from content script
+  // =================================================================
+  // LISTEN MESSAGES (APPLY ZOOM)
+  // =================================================================
+
   useEffect(() => {
     const handleMessage = (msg: any, _sender: any, sendResponse: any) => {
-      console.log("[SidePanel] ✉️ Received message:", msg.type, msg);
+      if (msg.type === "SIDEPANEL_PING") { sendResponse({ status: "alive" }); return false; }
       
-      // Respond to ping (for status check)
-      if (msg.type === "SIDEPANEL_PING") {
-        sendResponse({ status: "alive" });
-        return false;
-      }
-      
-      // Handle next image request from content script
       if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
-        console.log("[SidePanel] 🖼️ Processing next image request");
-        
         if (selectedIndex < images.length - 1) {
-          const nextIndex = selectedIndex + 1;
-          console.log(`[SidePanel] ✅ Moving to next image: ${selectedIndex} → ${nextIndex}`);
-          handleSelectImage(nextIndex);
-          sendResponse({ status: "success", newIndex: nextIndex });
+          handleSelectImage(selectedIndex + 1);
+          sendResponse({ status: "success" });
         } else {
-          console.log("[SidePanel] ⚠️ Already at last image");
-          sendResponse({ status: "already_at_end", currentIndex: selectedIndex });
+          sendResponse({ status: "end" });
         }
         return false;
       }
-      
-      // Respond to status query (deprecated - now handled by background)
-      if (msg.type === "QUERY_SIDEPANEL_STATUS") {
-        console.log("[SidePanel] Responding to status query");
-        sendResponse({ isOpen: true });
-        return false; // Synchronous response, don't keep channel open
-      }
-      
-      // Handle smart zoom request
+
+      // XỬ LÝ ZOOM THÔNG MINH
       if (msg.type === "APPLY_SMART_ZOOM") {
-        console.log("[SidePanel] Processing APPLY_SMART_ZOOM:", {
-          fieldGroup: msg.payload?.fieldGroup,
-          autoZoomEnabled,
-          hasPayload: !!msg.payload,
-          hasFieldGroup: !!msg.payload?.fieldGroup
-        });
-        
         if (msg.payload?.fieldGroup && autoZoomEnabled) {
           const fieldGroup: FieldGroup = msg.payload.fieldGroup;
-          console.log(`[SidePanel] ✅ Applying smart zoom for: ${fieldGroup}`);
+          console.log(`[SidePanel] Received focus signal: ${fieldGroup}`);
           applySmartZoom(fieldGroup);
-        } else {
-          console.log("[SidePanel] ❌ Smart zoom NOT applied:", {
-            reason: !msg.payload?.fieldGroup ? "No fieldGroup" : "Auto zoom disabled"
-          });
         }
-        return false; // No response needed
+        return false;
       }
-      
-      return false; // Default: no response
+      return false;
     };
-
-    console.log("[SidePanel] 📡 Message listener registered (autoZoomEnabled:", autoZoomEnabled, ")");
     chrome.runtime.onMessage.addListener(handleMessage);
-    return () => {
-      console.log("[SidePanel] 📡 Message listener removed");
-      chrome.runtime.onMessage.removeListener(handleMessage);
-    };
-  }, [savedPresets, autoZoomEnabled, selectedIndex, images.length, handleSelectImage]);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
+  }, [savedPresets, autoZoomEnabled, selectedIndex, images.length]); // Bỏ handleSelectImage khỏi deps
 
-  // Listen for window blur (side panel losing focus) to save current preset
-  useEffect(() => {
-    const handleWindowBlur = () => {
-      const currentField = currentFocusedFieldRef.current;
-      if (currentField !== "NONE" && imageViewerRef.current && appliedPresetRef.current) {
-        const currentZoom = imageViewerRef.current.getCurrentZoom();
-        const appliedPreset = appliedPresetRef.current;
-        
-        // Check if user actually changed the zoom/pan (compare with applied preset)
-        const hasChanged = 
-          Math.abs(currentZoom.zoom - appliedPreset.zoom) > 0.01 ||
-          Math.abs(currentZoom.pan.x - appliedPreset.pan.x) > 1 ||
-          Math.abs(currentZoom.pan.y - appliedPreset.pan.y) > 1 ||
-          currentZoom.rotation !== appliedPreset.rotation;
-        
-        if (!hasChanged) {
-          console.log(`[SidePanel] No changes detected for ${currentField}, skipping save`);
-          currentFocusedFieldRef.current = "NONE";
-          appliedPresetRef.current = null;
-          return;
-        }
-        
-        console.log(`[SidePanel] Saving preset for ${currentField}:`, currentZoom);
-        
-        const newPresets = {
-          ...savedPresets,
-          [currentField]: currentZoom,
-        };
-        
-        setSavedPresets(newPresets);
-        localStorage.setItem("sidepanel_zoom_presets", JSON.stringify(newPresets));
-        
-        // Show notification
-        const fieldNames: Record<FieldGroup, string> = {
-          TT_NUMBER: "Số TT",
-          RECEIVER_INFO: "Thông tin người nhận",
-          WEIGHT: "Khối lượng",
-          MONEY: "Tiền COD",
-          NONE: ""
-        };
-        message.success(`Đã lưu vị trí zoom cho trường "${fieldNames[currentField]}"`, 2);
-        
-        // Reset focused field
-        currentFocusedFieldRef.current = "NONE";
-        appliedPresetRef.current = null;
-      }
-    };
-
-    window.addEventListener("blur", handleWindowBlur);
-    return () => window.removeEventListener("blur", handleWindowBlur);
-  }, [savedPresets]);
-
-  // Apply zoom based on field group (use saved presets)
   const applySmartZoom = (fieldGroup: FieldGroup) => {
-    // Track current focused field
+    // 1. Cập nhật field hiện tại
     currentFocusedFieldRef.current = fieldGroup;
+    
+    // 2. Clear timer debounce cũ (nếu có)
+    if (saveDebounceTimerRef.current) clearTimeout(saveDebounceTimerRef.current);
 
     const preset = savedPresets[fieldGroup];
     if (preset && imageViewerRef.current) {
-      console.log("[SidePanel] Applying smart zoom for:", fieldGroup, preset);
+      console.log(`[SidePanel] Applying preset for ${fieldGroup}:`, preset);
       imageViewerRef.current.applyZoomPreset(preset);
-      // Save the applied preset to compare later
-      appliedPresetRef.current = { ...preset };
     }
   };
 
-  // Render loading state
-  if (loading && images.length === 0) {
-    return (
-      <div className="sidepanel-container">
-        <div className="sidepanel-header">
-          <h1>Hình Ảnh Bưu Gửi</h1>
-        </div>
-        <div className="loading-container">
-          <Spin size="large" />
-          <div className="loading-text">Đang tải hình ảnh...</div>
-          {syncProgress.total > 0 && (
-            <div className="loading-progress">
-              {syncProgress.downloaded} / {syncProgress.total} hình ảnh
-              {syncProgress.failed > 0 && ` (${syncProgress.failed} lỗi)`}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // =================================================================
+  // RENDER
+  // =================================================================
 
-  // Render error state
-  if (error && images.length === 0) {
-    return (
-      <div className="sidepanel-container">
-        <div className="sidepanel-header">
-          <h1>Hình Ảnh Bưu Gửi</h1>
-        </div>
-        <div className="error-container">
-          <div className="error-icon">⚠️</div>
-          <Alert
-            message="Không thể tải hình ảnh"
-            description={error}
-            type="error"
-            showIcon
-          />
-          <Button
-            type="primary"
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            style={{ marginTop: 16 }}
-          >
-            Thử lại
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  // Render empty state
-  if (images.length === 0) {
-    return (
-      <div className="sidepanel-container">
-        <div className="sidepanel-header">
-          <h1>Hình Ảnh Bưu Gửi</h1>
-        </div>
-        <div className="empty-state">
-          <div className="empty-state-icon">📦</div>
-          <div className="empty-state-text">Chưa có hình ảnh nào</div>
-          <Button
-            type="link"
-            icon={<ReloadOutlined />}
-            onClick={handleRefresh}
-            style={{ marginTop: 16 }}
-          >
-            Làm mới
-          </Button>
-        </div>
-      </div>
-    );
-  }
+  if (loading && images.length === 0) return <div style={{padding:20, textAlign:'center'}}><Spin size="large"/><div>Đang tải...</div></div>;
+  if (images.length === 0) return (
+    <div style={{padding:20, textAlign:'center'}}>
+        <h3>Chưa có hình ảnh</h3>
+        <Button icon={<ReloadOutlined/>} onClick={handleRefresh}>Làm mới</Button>
+    </div>
+  );
 
   const selectedImage = images[selectedIndex];
 
   return (
-    <div className="sidepanel-container">
-      <div className="sidepanel-header">
+    <div className="sidepanel-container" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* Header */}
+      <div className="sidepanel-header" style={{ padding: '12px', borderBottom: '1px solid #ddd', background: '#fff' }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h1>Hình Ảnh Bưu Gửi ({images.length})</h1>
-          <Space size="small">
-            <Tooltip title="Xóa toàn bộ hình ảnh">
-              <Button
-                type="text"
-                danger
-                icon={<ClearOutlined />}
-                onClick={handleClearAllImages}
-                disabled={images.length === 0 || syncProgress.status === "syncing"}
-                size="small"
-              >
-                Xóa tất cả
-              </Button>
-            </Tooltip>
-            <Button
-              type="text"
-              icon={<ReloadOutlined />}
-              onClick={handleRefresh}
-              loading={syncProgress.status === "syncing"}
-              size="small"
-            >
-              Làm mới
-            </Button>
+          <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
+          <Space>
+             <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined/>} onClick={handleClearAllImages}/></Tooltip>
+             <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
           </Space>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px", padding: "8px", background: "#f5f5f5", borderRadius: "6px" }}>
-          <Space size="small">
-            <Button
-              type="default"
-              icon={<LeftOutlined />}
-              onClick={handlePreviousImage}
-              disabled={selectedIndex === 0}
-              size="small"
-            >
-              Trước
-            </Button>
-            <span style={{ fontSize: "14px", color: "#666" }}>
-              {selectedIndex + 1} / {images.length}
-            </span>
-            <Button
-              type="default"
-              icon={<RightOutlined />}
-              onClick={handleNextImage}
-              disabled={selectedIndex === images.length - 1}
-              size="small"
-            >
-              Sau
-            </Button>
-          </Space>
-          <Space size="small">
-            <span style={{ fontSize: "13px", color: "#595959" }}>Tự động zoom:</span>
-            <Switch 
-              checked={autoZoomEnabled} 
-              onChange={handleToggleAutoZoom}
-              size="small"
-            />
-            <Tooltip title="Đặt lại vị trí zoom mặc định">
-              <Button
-                type="default"
-                icon={<UndoOutlined />}
-                onClick={handleResetPresets}
-                size="small"
-              >
-                Đặt lại
-              </Button>
-            </Tooltip>
-          </Space>
+        
+        {/* Navigation & Tools */}
+        <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+           <Space>
+              <Button size="small" icon={<LeftOutlined/>} onClick={handlePreviousImage} disabled={selectedIndex === 0}/>
+              <span style={{ fontSize: 12 }}>{selectedIndex + 1}/{images.length}</span>
+              <Button size="small" icon={<RightOutlined/>} onClick={handleNextImage} disabled={selectedIndex === images.length - 1}/>
+           </Space>
+           <Space>
+              <span style={{ fontSize: 12 }}>Auto Zoom:</span>
+              <Switch size="small" checked={autoZoomEnabled} onChange={handleToggleAutoZoom} />
+              <Tooltip title="Reset Zoom"><Button size="small" icon={<UndoOutlined/>} onClick={handleResetPresets}/></Tooltip>
+           </Space>
         </div>
       </div>
-      <div className="sidepanel-content">
-        <div className="image-viewer-section">
-          <ImageViewer ref={imageViewerRef} image={selectedImage} />
+
+      {/* Main Content */}
+      <div className="sidepanel-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* Image Viewer (Upper part) */}
+        <div className="image-viewer-section" style={{ flex: '1 1 60%', position: 'relative', borderBottom: '1px solid #ddd' }}>
+          <ImageViewer 
+             ref={imageViewerRef} 
+             image={selectedImage}
+             onTransformChange={handleTransformChange}
+          />
         </div>
-        <div className="thumbnail-gallery-section">
+
+        {/* Thumbnails (Lower part) */}
+        <div className="thumbnail-gallery-section" style={{ flex: '0 0 160px', overflowY: 'auto', background: '#fafafa' }}>
           <ThumbnailGallery
             images={images}
             selectedIndex={selectedIndex}

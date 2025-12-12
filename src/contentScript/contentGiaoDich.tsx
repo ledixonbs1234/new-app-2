@@ -20,7 +20,6 @@ let Address = "";
 let isProcessingPortalItem = false; // Cờ để kiểm tra processSinglePortalItem đang chạy
 let isScriptActive = false; // Trạng thái script có đang hoạt động không
 let domObserver: MutationObserver | null = null; // Observer cho DOM changes
-let isSidePanelOpen = false; // Trạng thái side panel có đang mở không
 let lastParcelIndexValue = -1; // Theo dõi giá trị parcelIndex để phát hiện khi tăng
 
 // ID của các element thường dùng
@@ -72,7 +71,7 @@ const KEY_CODES = {
   F2: 113,
   F4: 115,
 };
-
+const STORAGE_KEY_PANEL_WIDTH = 'vnpost_sidepanel_saved_width'; // Key để lưu độ rộng
 let isTabed = false;
 let currentSuggestion: string | null = null;
 
@@ -83,6 +82,326 @@ let currentSuggestion: string | null = null;
 function isEmpty(str: any): boolean {
   return !str || str.length === 0;
 }
+
+// //loadSidePanelStyleAndIframe();
+// function loadSidePanelStyleAndIframe() {
+//   if (document.getElementById('inpage-sidepanel-container')) return;
+//   const SIDE_PANEL_WIDTH = 360; // Độ rộng mặc định
+//   const EXTENSION_URL = chrome.runtime.getURL('sidepanel.html');
+
+//   // =================================================================
+//   // PHẦN 1: CSS CHIA MÀN HÌNH (Fix lỗi giao diện React)
+//   // =================================================================
+//   const styleId = 'split-screen-style-fix';
+//   let style = document.getElementById(styleId);
+
+//   if (!style) {
+//     style = document.createElement('style');
+//     style.id = styleId;
+//     style.innerHTML = `
+//             /* Body thành Flex container */
+//             body {
+//                 display: flex !important;
+//                 flex-direction: row !important;
+//                 width: 100vw !important;
+//                 height: 100vh !important;
+//                 overflow: hidden !important;
+//             }
+
+//             /* Web cũ (#root) chiếm phần còn lại (flex: 1) */
+//             #root {
+//                 flex: 1 1 auto !important; /* Tự động co giãn */
+//                 height: 100% !important;
+//                 overflow-y: auto !important;
+//                 overflow-x: hidden !important;
+//                 position: relative !important;
+//                 z-index: 1 !important;
+//                 min-width: 0 !important; /* Fix flexbox overflow */
+//             }
+
+//             /* SỬA LỖI MENU REACT (Grid layout) */
+//             .layout {
+//                 grid-template-columns: var(--menu-width, 360px) 1fr !important;
+//                 width: 100% !important;
+//                 min-height: 100vh !important;
+//             }
+
+//             /* Fix Modal popup hiển thị đúng vị trí */
+//             .modal-upd, .swal-overlay {
+//                 width: 100% !important; 
+//                 position: fixed !important;
+//             }
+//         `;
+//     document.head.appendChild(style);
+//   }
+
+//   // =================================================================
+//   // PHẦN 2: TẠO GIAO DIỆN SIDE PANEL (Container + Iframe + Resizer)
+//   // =================================================================
+
+//   // Container chính
+//   const container = document.createElement('div');
+//   container.id = 'inpage-sidepanel-container';
+
+//   // Style cho container (Thay thế position:fixed bằng Flex item)
+//   Object.assign(container.style, {
+//     width: `${SIDE_PANEL_WIDTH}px`,
+//     height: '100vh',
+//     display: 'flex',
+//     flexDirection: 'column',
+//     backgroundColor: '#ffffff',
+//     borderLeft: '1px solid rgba(0,0,0,0.1)',
+//     zIndex: '2147483647',
+//     flex: '0 0 auto', // Không co giãn tự động, phụ thuộc width set tay
+//     position: 'relative',
+//     boxShadow: '-2px 0 5px rgba(0,0,0,0.05)'
+//   });
+
+//   // --- Header (Chứa nút đóng) ---
+//   const header = document.createElement('div');
+//   Object.assign(header.style, {
+//     display: 'flex',
+//     justifyContent: 'flex-end',
+//     alignItems: 'center',
+//     height: '36px',
+//     background: '#f5f5f5',
+//     borderBottom: '1px solid #e0e0e0',
+//     flexShrink: '0'
+//   });
+
+//   const closeBtn = document.createElement('button');
+//   closeBtn.textContent = '✕';
+//   Object.assign(closeBtn.style, {
+//     border: 'none',
+//     background: 'transparent',
+//     cursor: 'pointer',
+//     fontSize: '16px',
+//     padding: '0 12px',
+//     height: '100%',
+//     color: '#555'
+//   });
+
+//   // Sự kiện đóng panel: Xóa container và xóa cả CSS fix để trả lại web gốc
+//   closeBtn.addEventListener('click', () => {
+//     container.remove();
+//     if (style) style.remove(); // Trả lại style gốc cho web
+//   });
+
+//   header.appendChild(closeBtn);
+//   container.appendChild(header);
+
+//   // --- Iframe (Nội dung Extension) ---
+//   const iframe = document.createElement('iframe');
+//   iframe.src = EXTENSION_URL;
+//   iframe.setAttribute('title', 'Side Panel');
+//   Object.assign(iframe.style, {
+//     border: 'none',
+//     width: '100%',
+//     flex: '1', // Chiếm hết chiều cao còn lại
+//     height: '100%'
+//   });
+//   container.appendChild(iframe);
+
+//   // --- Resizer (Thanh kéo) ---
+//   const resizer = document.createElement('div');
+//   Object.assign(resizer.style, {
+//     position: 'absolute',
+//     left: '-5px', // Nhô ra ngoài bên trái để dễ bấm
+//     top: '0',
+//     bottom: '0',
+//     width: '10px',
+//     cursor: 'ew-resize',
+//     zIndex: '2147483648',
+//     backgroundColor: 'transparent' // Trong suốt nhưng vẫn bắt được sự kiện
+//   });
+//   container.appendChild(resizer);
+
+//   // Thêm vào Body
+//   document.body.appendChild(container);
+
+
+//   // =================================================================
+//   // PHẦN 3: LOGIC KÉO THẢ (RESIZE)
+//   // =================================================================
+//   let isResizing = false;
+
+//   const onMove = (ev: PointerEvent) => {
+//     if (!isResizing) return;
+
+//     // Tính toán độ rộng mới: Tổng chiều rộng window - vị trí chuột hiện tại
+//     const newWidth = window.innerWidth - ev.clientX;
+
+//     // Giới hạn độ rộng (Min: 300px, Max: 70% màn hình)
+//     const maxWidth = window.innerWidth * 0.7;
+//     if (newWidth > 300 && newWidth < maxWidth) {
+//       container.style.width = `${newWidth}px`;
+//     }
+//   };
+
+//   const stopResize = () => {
+//     isResizing = false;
+//     document.body.style.cursor = '';
+//     document.removeEventListener('pointermove', onMove);
+//     document.removeEventListener('pointerup', stopResize);
+
+//     // Bật lại pointer events cho iframe để thao tác được bên trong
+//     iframe.style.pointerEvents = 'auto';
+//   };
+
+//   const startResize = (ev: PointerEvent) => {
+//     isResizing = true;
+//     document.body.style.cursor = 'ew-resize';
+
+//     // Tắt pointer events của iframe để chuột không bị kẹt khi kéo qua iframe
+//     iframe.style.pointerEvents = 'none';
+
+//     ev.preventDefault();
+//     document.addEventListener('pointermove', onMove);
+//     document.addEventListener('pointerup', stopResize);
+//   };
+
+//   resizer.addEventListener('pointerdown', startResize);
+
+
+//   // =================================================================
+//   // PHẦN 4: LOGIC ĐỒNG BỘ MENU WEB GỐC (MutationObserver)
+//   // =================================================================
+//   // Phần này giữ nguyên để đảm bảo menu web gốc co giãn đúng
+//   function syncMenuWidth(layoutElement: any) {
+//     const currentStyle = layoutElement.getAttribute('style');
+//     if (currentStyle) {
+//       const match = currentStyle.match(/grid-template-columns:\s*([^ ]+)/);
+//       if (match && match[1]) {
+//         layoutElement.style.setProperty('--menu-width', match[1]);
+//       }
+//     }
+//   }
+
+//   const checkLayoutExist = setInterval(() => {
+//     const layoutNode = document.querySelector('.layout');
+//     if (layoutNode) {
+//       clearInterval(checkLayoutExist);
+//       syncMenuWidth(layoutNode);
+//       const observer = new MutationObserver((mutations) => {
+//         mutations.forEach((mutation) => {
+//           if (mutation.type === "attributes" && mutation.attributeName === "style") {
+//             syncMenuWidth(layoutNode);
+//           }
+//         });
+//       });
+//       observer.observe(layoutNode, { attributes: true });
+//     }
+//   }, 500);
+
+// }
+// // =================================================================
+// // PHẦN 1: CSS (Layout & Sửa lỗi Grid)
+// // =================================================================
+// const style = document.createElement('style');
+// style.innerHTML = `
+//         /* Layout Flexbox cho Body */
+//         body {
+//             display: flex !important;
+//             flex-direction: row !important;
+//             width: 100vw !important;
+//             height: 100vh !important;
+//             overflow: hidden !important;
+//         }
+
+//         /* Web cũ (#root) chiếm 2/3 */
+//         #root {
+//             flex: 0 0 66.66% !important;
+//             width: 66.66% !important;
+//             height: 100% !important;
+//             overflow-y: auto !important;
+//             overflow-x: hidden !important;
+//             position: relative !important;
+//             z-index: 1 !important;
+//         }
+
+//         /* 
+//            SỬA LỖI MENU:
+//            - Dùng var(--menu-width) để độ rộng có thể thay đổi động.
+//            - Giá trị mặc định là 360px.
+//            - Cột thứ 2 luôn là 1fr để lấp đầy khoảng trống còn lại.
+//         */
+//         .layout {
+//             grid-template-columns: var(--menu-width, 360px) 1fr !important;
+//             width: 100% !important;
+//             min-height: 100vh !important;
+//         }
+
+//         /* Iframe Sidepanel */
+//         #simulated-sidepanel-iframe {
+//             flex: 1; /* Chiếm 1/3 còn lại */
+//             height: 100%;
+//             border: none;
+//             border-left: 4px solid #fab71e;
+//             background: #fff;
+//             z-index: 99999;
+//         }
+
+//         /* Sửa lỗi Modal */
+//         .modal-upd, .swal-overlay {
+//             width: 66.66% !important;
+//             left: 0 !important;
+//         }
+//     `;
+// document.head.appendChild(style);
+
+// // =================================================================
+// // PHẦN 2: TẠO IFRAME
+// // =================================================================
+// const iframe = document.createElement('iframe');
+// iframe.id = 'simulated-sidepanel-iframe';
+// iframe.src = "https://www.google.com/search?igu=1"; // Link sidepanel của bạn
+// document.body.appendChild(iframe);
+
+// // =================================================================
+// // PHẦN 3: SCRIPT XỬ LÝ MENU (MutationObserver)
+// // =================================================================
+// // Hàm này sẽ đọc style gốc của React và cập nhật biến CSS của chúng ta
+// function syncMenuWidth(layoutElement:any) {
+//   // Lấy toàn bộ style trong thẻ (do React set)
+//   // Ví dụ: "grid-template-columns: 64px calc(-64px + 100vw);"
+//   const currentStyle = layoutElement.getAttribute('style');
+
+//   if (currentStyle) {
+//     // Dùng Regex lấy con số đầu tiên (độ rộng menu)
+//     // Tìm chuỗi đứng sau "grid-template-columns:" và trước khoảng trắng
+//     const match = currentStyle.match(/grid-template-columns:\s*([^ ]+)/);
+//     if (match && match[1]) {
+//       // Cập nhật biến --menu-width cho CSS sử dụng
+//       layoutElement.style.setProperty('--menu-width', match[1]);
+//     }
+//   }
+// }
+
+// // Tìm phần tử .layout
+// const checkLayoutExist = setInterval(() => {
+//   const layoutNode = document.querySelector('.layout');
+//   if (layoutNode) {
+//     clearInterval(checkLayoutExist);
+
+//     // 1. Đồng bộ lần đầu tiên ngay khi tìm thấy
+//     syncMenuWidth(layoutNode);
+
+//     // 2. Tạo Observer để theo dõi thay đổi
+//     // Khi bạn bấm nút thu nhỏ, React sẽ đổi attribute 'style' của .layout
+//     // Observer này sẽ bắt được sự kiện đó
+//     const observer = new MutationObserver((mutations) => {
+//       mutations.forEach((mutation) => {
+//         if (mutation.type === "attributes" && mutation.attributeName === "style") {
+//           syncMenuWidth(layoutNode);
+//         }
+//       });
+//     });
+
+//     // Bắt đầu theo dõi thuộc tính style
+//     observer.observe(layoutNode, { attributes: true });
+//   }
+// }, 500); // Kiểm tra mỗi 0.5s cho đến khi web load xong layout
+
 
 function removeAccents(str: string): string {
   if (!str) return "";
@@ -148,42 +467,47 @@ function checkIfProcessingActive(): boolean {
   // Kiểm tra từ chrome storage hoặc biến global
   return isProcessingPortalItem;
 }
-
 /**
- * Gửi thông báo đến side panel để zoom vào field group tương ứng
+ * Kiểm tra xem Side Panel có đang mở không bằng cách check DOM trực tiếp
+ * Thay vì đợi message sync state
  */
+function isSidePanelOpen(): boolean {
+  return !!document.getElementById(SIDE_PANEL_ID);
+}
+
 function notifySidePanelZoom(fieldGroup: FieldGroup): void {
+  const isOpen = isSidePanelOpen();
+
   console.log("[GiaoTich] 📤 notifySidePanelZoom called:", {
     fieldGroup,
-    isSidePanelOpen
+    isSidePanelOpen: isOpen
   });
 
-  if (fieldGroup === "NONE" || !isSidePanelOpen) {
+  if (fieldGroup === "NONE" || !isOpen) {
     console.log("[GiaoTich] ❌ Not sending - fieldGroup is NONE or panel closed");
     return;
   }
 
   const message = {
-    type: "SIDEPANEL_SMART_ZOOM",
+    type: "APPLY_SMART_ZOOM", // Đổi type cho khớp với SidePanel mới
     payload: { fieldGroup }
   };
 
-  console.log("[GiaoTich] 📨 Sending message to background:", message);
-
+  // Gửi tin nhắn đến Runtime (Extension context), iframe sẽ bắt được
   chrome.runtime.sendMessage(message, (response) => {
     if (chrome.runtime.lastError) {
-      console.log("[GiaoTich] ❌ Error sending smart zoom:", chrome.runtime.lastError.message);
+      // Lỗi này thường xảy ra nếu Iframe chưa load xong script, có thể bỏ qua
+      console.log("[GiaoTich] Zoom message sent (error ignored):", chrome.runtime.lastError.message);
     } else {
-      console.log("[GiaoTich] ✅ Smart zoom message sent successfully. Response:", response);
+      console.log("[GiaoTich] ✅ Smart zoom sent");
     }
   });
 }
-
 /**
  * Gửi message đến side panel để chuyển sang ảnh tiếp theo
  */
 function requestNextImage(): void {
-  if (!isSidePanelOpen) {
+  if (!isSidePanelOpen()) {
     console.log("[GiaoTich] Side panel not open, skip next image request");
     return;
   }
@@ -315,10 +639,9 @@ function monitorProcessingStatus(): void {
       console.log("[GiaoTich] Processing status updated:", isProcessingPortalItem);
     }
 
-    // Lắng nghe trạng thái side panel
-    if (msg.type === "SIDEPANEL_STATUS") {
-      isSidePanelOpen = msg.isOpen;
-      console.log("[GiaoTich] Side panel status updated:", isSidePanelOpen);
+
+    if (msg.action === "TOGGLE_SIDE_PANEL") {
+      toggleSidePanel();
     }
 
     // Lắng nghe yêu cầu điền ttNumber từ side panel
@@ -352,41 +675,268 @@ function monitorProcessingStatus(): void {
     }
   });
 }
+// Biến global để lưu trạng thái style (tránh tạo lại nhiều lần)
+const SIDE_PANEL_ID = 'inpage-sidepanel-container';
+const STYLE_FIX_ID = 'split-screen-style-fix';
+const SIDE_PANEL_WIDTH = 360;
+// Định nghĩa interface mở rộng cho Window để lưu trạng thái Observer (nếu cần dùng Global)
+declare global {
+  interface Window {
+    _layoutObserver?: MutationObserver;
+  }
+}
+/**
+ * Hàm chính để Bật/Tắt Sidepanel
+ */
+function toggleSidePanel(): void {
+  // 1. Kiểm tra xem Panel đã tồn tại chưa
+  const existingContainer = document.getElementById(SIDE_PANEL_ID) as HTMLDivElement | null;
+  const existingStyle = document.getElementById(STYLE_FIX_ID) as HTMLStyleElement | null;
+
+  // 2. NẾU ĐÃ CÓ -> TẮT (Xóa DOM, xóa Style, ngắt Observer)
+  if (existingContainer) {
+    existingContainer.remove();
+    if (existingStyle) existingStyle.remove();
+
+    // Ngắt theo dõi layout khi đóng panel để tiết kiệm tài nguyên
+    if (window._layoutObserver) {
+      window._layoutObserver.disconnect();
+      delete window._layoutObserver;
+    }
+    return;
+  }
+
+  // 3. NẾU CHƯA CÓ -> BẬT
+  injectCssFix();
+  const container = createSidePanelContainer();
+  document.body.appendChild(container);
+
+  // Khởi động Observer để đồng bộ menu React
+  initMenuObserver();
+}
 
 /**
- * Query trạng thái side panel khi content script init (xử lý trường hợp refresh trang)
+ * Inject CSS để sửa lỗi layout React (calc 100vw) và chia cột Flexbox
  */
-function querySidePanelStatus(): void {
-  let retryCount = 0;
-  const maxRetries = 5;
-  const retryDelay = 500; // 500ms
-
-  const attemptQuery = () => {
-    console.log(`[GiaoTich] Querying side panel status (attempt ${retryCount + 1}/${maxRetries})...`);
-
-    chrome.runtime.sendMessage({ type: "QUERY_SIDEPANEL_STATUS" }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.log("[GiaoTich] Query failed:", chrome.runtime.lastError.message);
-
-        // Retry if not exceeded max attempts
-        if (retryCount < maxRetries - 1) {
-          retryCount++;
-          setTimeout(attemptQuery, retryDelay);
-        } else {
-          console.log("[GiaoTich] ⚠️ Max retries reached. Side panel might not be open. Will listen for SIDEPANEL_STATUS broadcast.");
-        }
-        return;
+function injectCssFix(): void {
+  const style = document.createElement('style');
+  style.id = STYLE_FIX_ID;
+  style.innerHTML = `
+      body {
+          display: flex !important;
+          flex-direction: row !important;
+          width: 100vw !important;
+          height: 100vh !important;
+          overflow: hidden !important;
       }
-
-      if (response?.isOpen !== undefined) {
-        isSidePanelOpen = response.isOpen;
-        console.log(`[GiaoTich] ✅ Side panel status confirmed: ${isSidePanelOpen}`);
+      #root {
+          flex: 1 1 auto !important;
+          height: 100% !important;
+          overflow-y: auto !important;
+          overflow-x: hidden !important;
+          position: relative !important;
+          z-index: 1 !important;
+          min-width: 0 !important;
       }
-    });
+      /* Grid layout fix: Cột 1 theo biến, Cột 2 tự giãn (1fr) */
+      .layout {
+          grid-template-columns: var(--menu-width, 360px) 1fr !important;
+          width: 100% !important;
+          min-height: 100vh !important;
+      }
+      /* Fix Modal hiển thị đè lên toàn bộ vùng nhìn thấy */
+      .modal-upd, .swal-overlay {
+          width: 100% !important; 
+          position: fixed !important;
+      }
+  `;
+  document.head.appendChild(style);
+}
+
+/**
+ * Tạo cấu trúc DOM cho Sidepanel
+ */
+function createSidePanelContainer(): HTMLDivElement {
+  const extensionUrl = chrome.runtime.getURL('sidepanel.html');
+  // Lấy độ rộng đã lưu, nếu không có thì dùng mặc định 360
+  const savedWidth = localStorage.getItem(STORAGE_KEY_PANEL_WIDTH);
+  const initialWidth = savedWidth ? parseInt(savedWidth, 10) : SIDE_PANEL_WIDTH;
+  // --- Container ---
+  const container = document.createElement('div');
+  container.id = SIDE_PANEL_ID;
+  Object.assign(container.style, {
+    width: `${initialWidth}px`,
+    height: '100vh',
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: '#ffffff',
+    borderLeft: '1px solid rgba(0,0,0,0.1)',
+    zIndex: '2147483647',
+    flex: '0 0 auto',
+    position: 'relative',
+    boxShadow: '-2px 0 5px rgba(0,0,0,0.05)',
+  } as CSSStyleDeclaration);
+
+  // --- Header ---
+  const header = document.createElement('div');
+  Object.assign(header.style, {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    height: '36px',
+    background: '#f5f5f5',
+    borderBottom: '1px solid #e0e0e0',
+    flexShrink: '0',
+  } as CSSStyleDeclaration);
+
+  // --- Close Button ---
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '✕';
+  Object.assign(closeBtn.style, {
+    border: 'none',
+    background: 'transparent',
+    cursor: 'pointer',
+    fontSize: '16px',
+    padding: '0 12px',
+    height: '100%',
+    color: '#555',
+  } as CSSStyleDeclaration);
+
+  // Sự kiện đóng: Gọi lại toggleSidePanel để hủy
+  closeBtn.addEventListener('click', () => toggleSidePanel());
+
+  header.appendChild(closeBtn);
+  container.appendChild(header);
+
+  // --- Iframe ---
+  const iframe = document.createElement('iframe');
+  iframe.src = extensionUrl;
+  Object.assign(iframe.style, {
+    border: 'none',
+    width: '100%',
+    flex: '1',
+    height: '100%',
+  } as CSSStyleDeclaration);
+  container.appendChild(iframe);
+
+  // --- Resizer (Thanh kéo) ---
+  const resizer = document.createElement('div');
+  Object.assign(resizer.style, {
+    position: 'absolute',
+    left: '-5px',
+    top: '0',
+    bottom: '0',
+    width: '10px',
+    cursor: 'ew-resize',
+    zIndex: '2147483648',
+    backgroundColor: 'transparent',
+  } as CSSStyleDeclaration);
+
+  // Gán sự kiện resize
+  setupResizer(resizer, container, iframe);
+
+  container.appendChild(resizer);
+
+  return container;
+}
+
+/**
+ * Xử lý logic kéo thả (Resize)
+ */
+function setupResizer(
+  resizer: HTMLDivElement,
+  container: HTMLDivElement,
+  iframe: HTMLIFrameElement
+): void {
+  let isResizing = false;
+
+  const onMove = (ev: PointerEvent) => {
+    if (!isResizing) return;
+    const newWidth = window.innerWidth - ev.clientX;
+    const maxWidth = window.innerWidth * 0.7;
+
+    // Giới hạn min 300px, max 70% màn hình
+    if (newWidth > 300 && newWidth < maxWidth) {
+      container.style.width = `${newWidth}px`;
+    }
   };
 
-  attemptQuery();
+  const stopResize = () => {
+    isResizing = false;
+    document.body.style.cursor = '';
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', stopResize);
+
+    // Bật lại tương tác chuột cho iframe
+    iframe.style.pointerEvents = 'auto';
+
+    const currentWidth = parseInt(container.style.width, 10);
+    if (!isNaN(currentWidth)) {
+      localStorage.setItem(STORAGE_KEY_PANEL_WIDTH, currentWidth.toString());
+      console.log(`[GiaoTich] Saved sidepanel width: ${currentWidth}px`);
+    }
+  };
+
+  const startResize = (ev: PointerEvent) => {
+    isResizing = true;
+    document.body.style.cursor = 'ew-resize';
+
+    // Tắt tương tác chuột iframe để kéo mượt hơn
+    iframe.style.pointerEvents = 'none';
+
+    ev.preventDefault();
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', stopResize);
+  };
+
+  resizer.addEventListener('pointerdown', startResize);
 }
+
+/**
+ * Theo dõi thay đổi của class .layout để cập nhật biến CSS --menu-width
+ */
+function initMenuObserver(): void {
+  // Nếu đã có observer đang chạy thì thôi
+  if (window._layoutObserver) return;
+
+  const checkLayoutExist = setInterval(() => {
+    const layoutNode = document.querySelector('.layout') as HTMLElement | null;
+
+    if (layoutNode) {
+      clearInterval(checkLayoutExist);
+
+      // Hàm helper để đọc style từ DOM và set biến CSS
+      const syncMenuWidth = () => {
+        const currentStyle = layoutNode.getAttribute('style');
+        // Regex tìm: grid-template-columns: [GIÁ TRỊ] ...
+        const match = currentStyle && currentStyle.match(/grid-template-columns:\s*([^ ]+)/);
+
+        if (match && match[1]) {
+          layoutNode.style.setProperty('--menu-width', match[1]);
+        }
+      };
+
+      // Chạy ngay lần đầu
+      syncMenuWidth();
+
+      // Khởi tạo Observer
+      const observer = new MutationObserver((mutations: MutationRecord[]) => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === "attributes" && mutation.attributeName === "style") {
+            syncMenuWidth();
+          }
+        });
+      });
+
+      observer.observe(layoutNode, { attributes: true });
+
+      // Lưu reference vào global để sau này đóng lại được
+      window._layoutObserver = observer;
+    }
+  }, 500);
+}
+
+
 
 // ==========================================================================
 // Xử lý Sự kiện và Logic Chính
@@ -1133,9 +1683,6 @@ async function initialize(): Promise<void> {
 
   // Luôn monitor processing status (không phụ thuộc URL)
   monitorProcessingStatus();
-
-  // Query side panel status khi init
-  querySidePanelStatus();
 
   // Theo dõi URL changes và bật/tắt script
   monitorURLChanges();
