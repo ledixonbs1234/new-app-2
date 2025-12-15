@@ -52,7 +52,7 @@ const Options: React.FC = () => {
     }>>([]);
     const [isBulkCreating, setIsBulkCreating] = useState(false);
     const bulkCreationAbortRef = useRef<boolean>(false);
-  
+
 
     useEffect(() => {
         // First try to get from chrome storage
@@ -199,7 +199,7 @@ const Options: React.FC = () => {
         // Long delivery duration filter
         if (filterLongDelivery) {
             const history = order.history?.orderStatusHistoryDtoList || [];
-            const firstDelivery = history.slice().reverse().find(h => 
+            const firstDelivery = history.slice().reverse().find(h =>
                 h.statusText === "Đang phát hàng" || h.statusText === "Đã xác nhận đến phát"
             );
             if (firstDelivery) {
@@ -422,8 +422,8 @@ const Options: React.FC = () => {
 
     const saveSettings = () => {
         // Save to chrome.storage
-        chrome.storage.local.set({ 
-            accessToken: token, 
+        chrome.storage.local.set({
+            accessToken: token,
             orgCode: orgCode,
             supportedOrgCodes: supportedOrgCodes
         }, () => {
@@ -548,7 +548,7 @@ const Options: React.FC = () => {
             const timeout = setTimeout(() => {
                 updateOrderState(order.orderHdrId, { cmsData: null });
             }, 5000);
-            
+
             chrome.runtime.sendMessage({
                 event: "CONTENTMY",
                 type: "FETCH_CMS_DATA",
@@ -565,7 +565,7 @@ const Options: React.FC = () => {
         // Fetch detail tuần tự với delay để tránh spam
         // for (let i = 0; i < currentOrders.length; i++) {
         //     const order = currentOrders[i];
-            
+
         //     try {
         //         const response = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${order.orderHdrId}`, {
         //             headers: { 'Authorization': token, 'Capikey': '19001111' }
@@ -575,7 +575,7 @@ const Options: React.FC = () => {
         //         // Chỉ cập nhật receiverAddress nếu không chứa "+++"
         //         const hasError = detailData?.receiverPhone?.includes('+++') || detailData?.receiverAddress?.includes('+++');
         //         const receiverAddress = hasError ? order.receiverAddress : (detailData?.receiverAddress || order.receiverAddress);
-                
+
         //         updateOrderState(order.orderHdrId, {
         //             detail: detailData,
         //             receiverAddress: receiverAddress,
@@ -603,7 +603,7 @@ const Options: React.FC = () => {
         // Lưu tất cả cache một lần duy nhất
         chrome.storage.local.get('ordersCache', (result) => {
             const existingCache = result.ordersCache || {};
-            
+
             Object.keys(cacheUpdates).forEach(orderHdrId => {
                 const currentCache = existingCache[orderHdrId] || {};
                 existingCache[orderHdrId] = {
@@ -853,7 +853,7 @@ const Options: React.FC = () => {
                             </Tooltip>
                         </div>
                         <div className="text-xs text-gray-600 bg-slate-50 p-2 rounded">📍 {record.receiverAddress}</div>
-                        
+
                         {/* Thông tin đơn - Horizontal Layout */}
                         <div className="flex gap-2 text-xs">
                             <div className="flex items-center gap-1 bg-white px-2 py-1 rounded shadow-sm flex-1">
@@ -910,10 +910,10 @@ const Options: React.FC = () => {
 
                 // 2. First Delivery ("Đang phát hàng") -> Today (How many days in delivery)
                 const firstDelivery = history.slice().reverse().find(h => h.statusText === "Đang phát hàng" || h.statusText === "Đã xác nhận đến phát");
-            if(record.itemCode.toUpperCase() == "CX988708873VN"){
-                console.log('firstDelivery', firstDelivery);
+                if (record.itemCode.toUpperCase() == "CX988708873VN") {
+                    console.log('firstDelivery', firstDelivery);
 
-            }
+                }
                 const deliveryDuration = firstDelivery
                     ? (() => {
                         const startDate = parseDate(firstDelivery.traceDate);
@@ -935,7 +935,7 @@ const Options: React.FC = () => {
                 }
 
                 return (
-                    <div 
+                    <div
                         className="flex flex-col gap-3 p-2 cursor-pointer hover:bg-blue-50 rounded-lg transition-colors"
                         onClick={() => {
                             setCurrentDetailOrder(record);
@@ -982,7 +982,7 @@ const Options: React.FC = () => {
                         const lastTickets = record.cmsData.tickets.slice(-2);
 
                         return (
-                            <div 
+                            <div
                                 className="mt-2 cursor-pointer hover:bg-orange-50 rounded-lg transition-colors p-1"
                                 onClick={() => {
                                     setCurrentDetailOrder(record);
@@ -1025,7 +1025,7 @@ const Options: React.FC = () => {
                 <Space direction="vertical" className="w-full" size="small">
                     {/* Copy Button */}
                     <Button
-                        block 
+                        block
                         size="small"
                         icon={<CopyOutlined />}
                         className="rounded-lg shadow-sm hover:shadow-md transition-all hover:border-blue-400"
@@ -1099,8 +1099,8 @@ const Options: React.FC = () => {
                     </Space.Compact>
 
                     {/* CMS Create Button */}
-                    <CreateCMSTicketButton 
-                        record={record} 
+                    <CreateCMSTicketButton
+                        record={record}
                         orgCode={orgCode}
                         supportedOrgCodes={supportedOrgCodes}
                         updateOrderState={updateOrderState}
@@ -1191,7 +1191,7 @@ const Options: React.FC = () => {
             // Extract orgCode from history
             const historyList = order.history?.orderStatusHistoryDtoList || [];
             let destOrgCode = '';
-            
+
             for (const historyItem of historyList) {
                 const addressMatch = historyItem.address?.match(/(\d{6})/);
                 if (addressMatch) {
@@ -1406,9 +1406,9 @@ const Options: React.FC = () => {
                         columns={columns}
                         rowKey="orderHdrId"
                         loading={loading || singleSearchLoading}
-                        pagination={{ 
+                        pagination={{
                             current: currentPage,
-                            pageSize: pageSize, 
+                            pageSize: pageSize,
                             showSizeChanger: false,
                             onChange: (page) => {
                                 setCurrentPage(page);
@@ -1465,9 +1465,9 @@ const Options: React.FC = () => {
                             <div className="max-h-96 overflow-y-auto">
                                 {currentDetailOrder.cmsData?.tickets?.length ? (
                                     currentDetailOrder.cmsData.tickets.map((t: any, idx: number) => (
-                                        <CMSTicketItem 
-                                            key={idx} 
-                                            ticket={t} 
+                                        <CMSTicketItem
+                                            key={idx}
+                                            ticket={t}
                                             itemCode={currentDetailOrder.itemCode}
                                         />
                                     ))
@@ -1503,14 +1503,14 @@ const Options: React.FC = () => {
                     </div>
                     <div>
                         <label className="font-bold">Danh sách OrgCode được hỗ trợ tạo CMS</label>
-                        <TextArea 
-                            rows={3} 
-                            value={supportedOrgCodes.join(', ')} 
+                        <TextArea
+                            rows={3}
+                            value={supportedOrgCodes.join(', ')}
                             onChange={e => {
                                 const codes = e.target.value.split(',').map(c => c.trim()).filter(c => c);
                                 setSupportedOrgCodes(codes);
-                            }} 
-                            placeholder="C002707689, C002707690, ..." 
+                            }}
+                            placeholder="C002707689, C002707690, ..."
                         />
                         <div className="text-xs text-gray-500 mt-1">Ngăn cách bởi dấu phẩy</div>
                     </div>
@@ -1519,7 +1519,7 @@ const Options: React.FC = () => {
                         <div className="flex flex-col gap-2 mt-2">
                             {cmsTemplates.map((template, idx) => (
                                 <div key={idx} className="flex gap-2">
-                                    <Input 
+                                    <Input
                                         value={template}
                                         onChange={e => {
                                             const newTemplates = [...cmsTemplates];
@@ -1528,8 +1528,8 @@ const Options: React.FC = () => {
                                         }}
                                         placeholder="Nhập mẫu nội dung..."
                                     />
-                                    <Button 
-                                        danger 
+                                    <Button
+                                        danger
                                         icon={<DeleteOutlined />}
                                         onClick={() => {
                                             const newTemplates = cmsTemplates.filter((_, i) => i !== idx);
@@ -1538,8 +1538,8 @@ const Options: React.FC = () => {
                                     />
                                 </div>
                             ))}
-                            <Button 
-                                type="dashed" 
+                            <Button
+                                type="dashed"
                                 icon={<PlusOutlined />}
                                 onClick={() => setCmsTemplates([...cmsTemplates, ''])}
                                 block
@@ -1589,7 +1589,7 @@ const Options: React.FC = () => {
                                 const item = bulkCMSItems[i];
 
                                 // Update status to processing
-                                setBulkCMSItems(prev => prev.map((it, idx) => 
+                                setBulkCMSItems(prev => prev.map((it, idx) =>
                                     idx === i ? { ...it, status: 'processing' } : it
                                 ));
 
@@ -1714,7 +1714,7 @@ const Options: React.FC = () => {
                                             }
                                         }
 
-                                        setBulkCMSItems(prev => prev.map((it, idx) => 
+                                        setBulkCMSItems(prev => prev.map((it, idx) =>
                                             idx === i ? { ...it, status: 'success' } : it
                                         ));
                                     } else {
@@ -1722,7 +1722,7 @@ const Options: React.FC = () => {
                                     }
                                 } catch (error) {
                                     console.error('Error creating ticket:', error);
-                                    setBulkCMSItems(prev => prev.map((it, idx) => 
+                                    setBulkCMSItems(prev => prev.map((it, idx) =>
                                         idx === i ? { ...it, status: 'error', error: 'Không thể tạo CMS' } : it
                                     ));
                                 }
@@ -2011,8 +2011,8 @@ const BulkCMSModal: React.FC<{
     );
 };
 
-const CreateCMSTicketButton: React.FC<{ 
-    record: ExtendedOrder; 
+const CreateCMSTicketButton: React.FC<{
+    record: ExtendedOrder;
     orgCode: string;
     supportedOrgCodes: string[];
     updateOrderState: (orderHdrId: string, updates: Partial<ExtendedOrder>) => void;
@@ -2059,8 +2059,8 @@ const CreateCMSTicketButton: React.FC<{
     };
 
     // Check if should show button
-    const shouldShow = supportedOrgCodes.includes(orgCode) && 
-                       (record.cmsData === undefined || record.cmsData?.tickets?.length === 0);
+    const shouldShow = supportedOrgCodes.includes(orgCode) &&
+        (record.cmsData === undefined || record.cmsData?.tickets?.length === 0);
 
     if (!shouldShow) return null;
 
@@ -2069,7 +2069,7 @@ const CreateCMSTicketButton: React.FC<{
             setOrgInfo(null);
             return;
         }
-        
+
         try {
             const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
                 headers: {
@@ -2108,7 +2108,7 @@ const CreateCMSTicketButton: React.FC<{
         // Auto-fetch CMS if not fetched yet
         if (record.cmsData === undefined) {
             message.loading({ content: 'Đang kiểm tra CMS...', key: 'fetch_cms', duration: 0 });
-            
+
             const cmsData = await new Promise<any>((resolve) => {
                 const timeout = setTimeout(() => resolve(null), 5000);
                 chrome.runtime.sendMessage({
@@ -2134,7 +2134,7 @@ const CreateCMSTicketButton: React.FC<{
         // Lấy address mới nhất có chứa 6 số, bỏ qua các log cuộc gọi
         const historyList = record.history?.orderStatusHistoryDtoList || [];
         let extracted = '';
-        
+
         for (const historyItem of historyList) {
             const addressMatch = historyItem.address?.match(/(\d{6})/);
             if (addressMatch) {
@@ -2142,7 +2142,7 @@ const CreateCMSTicketButton: React.FC<{
                 break; // Lấy cái đầu tiên tìm được (mới nhất)
             }
         }
-        
+
         setDestOrgCode(extracted);
         if (extracted.length === 6) {
             fetchOrgInfo(extracted);
@@ -2382,7 +2382,7 @@ const CreateCMSTicketButton: React.FC<{
                     <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
                         <div className="text-xs text-gray-600 mb-1">Service Code</div>
                         <div className="font-bold text-blue-700">
-                            {record.serviceCode || 'Không xác định'} 
+                            {record.serviceCode || 'Không xác định'}
                             <span className="text-sm text-gray-500 ml-2">
                                 (ttkSrvIdL3: {SERVICE_CODE_MAPPING[record.serviceCode || ''] || '1206'})
                             </span>
@@ -2391,8 +2391,8 @@ const CreateCMSTicketButton: React.FC<{
 
                     <div>
                         <label className="font-bold text-sm">Mã đơn vị (từ lịch sử)</label>
-                        <Input 
-                            value={destOrgCode} 
+                        <Input
+                            value={destOrgCode}
                             onChange={e => {
                                 const val = e.target.value.replace(/\D/g, '').slice(0, 6);
                                 setDestOrgCode(val);
@@ -2476,7 +2476,8 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
     const [orgCode, setOrgCode] = useState('');
     const [orgInfo, setOrgInfo] = useState<{ orgCode: string; name: string } | null>(null);
     const [comment, setComment] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(false)
+    const [templates, setTemplates] = useState<string[]>([]);
 
     // Extract unit from last action
     const lastAction = ticket.actions?.[ticket.actions.length - 1];
@@ -2492,10 +2493,23 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
             fetchOrgInfo(defaultOrgCode);
         }
     }, [defaultOrgCode]);
-
+    // --- THÊM USEEFFECT MỚI ĐỂ LẤY TEMPLATES ---
+    useEffect(() => {
+        if (!isTicketClosed) {
+            chrome.runtime.sendMessage({
+                event: 'CONTENTMY',
+                type: 'GET_CMS_TEMPLATES',
+                payload: {}
+            }, (response) => {
+                if (response?.status === 'success' && response.templates) {
+                    setTemplates(response.templates);
+                }
+            });
+        }
+    }, [isTicketClosed]);
     const fetchOrgInfo = async (code: string) => {
         if (code.length !== 6) return;
-        
+
         try {
             const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
                 headers: {
@@ -2616,7 +2630,7 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
                     className={`p-3 mt-2 rounded-lg ${ai === ticket.actions.length - 1
                         ? 'bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-400'
                         : 'bg-white border border-slate-200'
-                    }`}
+                        }`}
                 >
                     <div className="font-semibold text-sm text-slate-700 mb-2">
                         🕐 {a.date} • {a.unit}
@@ -2645,6 +2659,22 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
                                 </div>
                             )}
                         </div>
+                        {templates.length > 0 && (
+                            <Select
+                                placeholder="📋 Chọn mẫu nội dung..."
+                                size="small"
+                                onChange={(val) => setComment(val)}
+                                allowClear
+                                className="w-full"
+                                dropdownMatchSelectWidth={false}
+                            >
+                                {templates.map((t, idx) => (
+                                    <Select.Option key={idx} value={t}>
+                                        {t.length > 50 ? t.substring(0, 50) + '...' : t}
+                                    </Select.Option>
+                                ))}
+                            </Select>
+                        )}
                         <TextArea
                             size="small"
                             placeholder="Nhập nội dung..."

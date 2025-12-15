@@ -5009,6 +5009,69 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       handleOpenCMSSearch(msg.payload, sendResponse);
       return true; // Xử lý bất đồng bộ
     }
+
+    if (msg.type === "SEARCH_ORG_INFO") {
+        (async () => {
+            try {
+                const { code } = msg.payload;
+                const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
+                    method: "GET",
+                    headers: {
+                        "accept": "*/*",
+                        "x-requested-with": "XMLHttpRequest"
+                    },
+                    credentials: "include" // QUAN TRỌNG: Để gửi kèm cookie đăng nhập của CMS
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    sendResponse({ status: 'success', data: data });
+                } else {
+                    sendResponse({ status: 'error', error: response.statusText });
+                }
+            } catch (error) {
+                console.error("Error fetching org info:", error);
+                sendResponse({ status: 'error', error: msg.message });
+            }
+        })();
+        return true; // Giữ kết nối để trả lời async
+    }
+
+    if (msg.type === "FORWARD_CMS_TICKET") {
+        (async () => {
+            try {
+                const { ticketId, dataOrgObj } = msg.payload;
+
+                // 1. Tạo FormData ngay tại Background
+                const form = new FormData();
+                
+                // API CMS yêu cầu 'dataOrg' là một Blob chứa JSON
+                form.append("dataOrg", new Blob([JSON.stringify(dataOrgObj)], { type: "application/json" }));
+                form.append("ids", ticketId);
+
+                console.log(`[BG] Forwarding ticket ${ticketId} to ${dataOrgObj[0].orgCode}`);
+
+                // 2. Gọi Fetch (Bypass CORS nhờ Background context)
+                const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
+                    method: "PUT",
+                    body: form,
+                    credentials: "include" // Quan trọng: Gửi kèm Cookie đăng nhập
+                });
+
+                if (response.ok) {
+                    // API này thường trả về JSON dù thành công hay thất bại logic
+                    const result = await response.json();
+                    sendResponse({ status: 'success', data: result });
+                } else {
+                    sendResponse({ status: 'error', error: `HTTP Error: ${response.status}` });
+                }
+            } catch (error) {
+                console.error("[BG] Error forwarding ticket:", error);
+                sendResponse({ status: 'error', error: msg.message });
+            }
+        })();
+        return true; // Giữ kết nối async
+    }
   }
 });
 //END Ho Duy--------------------------------

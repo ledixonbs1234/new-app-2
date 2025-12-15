@@ -295,8 +295,10 @@ const SidePanel: React.FC = () => {
   // LISTEN MESSAGES (APPLY ZOOM)
   // =================================================================
 
+  // useEffect để lắng nghe message
   useEffect(() => {
-    const handleMessage = (msg: any, _sender: any, sendResponse: any) => {
+    // 1. Handler cho Chrome Runtime Message (Giữ nguyên logic cũ cho các tính năng khác)
+    const handleRuntimeMessage = (msg: any, _sender: any, sendResponse: any) => {
       if (msg.type === "SIDEPANEL_PING") { sendResponse({ status: "alive" }); return false; }
       
       if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
@@ -308,22 +310,38 @@ const SidePanel: React.FC = () => {
         }
         return false;
       }
+      return false;
+    };
 
-      // XỬ LÝ ZOOM THÔNG MINH
+    // 2. Handler mới cho Window Message (Nhận từ Content Script qua postMessage)
+    const handleWindowMessage = (event: MessageEvent) => {
+      // Kiểm tra nguồn gốc tin nhắn để bảo mật (chỉ nhận từ chính extension hoặc trang web chứa nó)
+      // Trong trường hợp này, trang web gửi vào iframe extension, nên origin là domain trang web
+      // Tuy nhiên để đơn giản ta check cấu trúc data
+      
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+
+      // XỬ LÝ ZOOM THÔNG MINH (Trigger từ focus input bên ngoài)
       if (msg.type === "APPLY_SMART_ZOOM") {
         if (msg.payload?.fieldGroup && autoZoomEnabled) {
           const fieldGroup: FieldGroup = msg.payload.fieldGroup;
-          console.log(`[SidePanel] Received focus signal: ${fieldGroup}`);
+          console.log(`[SidePanel] 📩 Received postMessage signal: ${fieldGroup}`);
           applySmartZoom(fieldGroup);
         }
-        return false;
       }
-      return false;
     };
-    chrome.runtime.onMessage.addListener(handleMessage);
-    return () => chrome.runtime.onMessage.removeListener(handleMessage);
-  }, [savedPresets, autoZoomEnabled, selectedIndex, images.length]); // Bỏ handleSelectImage khỏi deps
 
+    // Đăng ký listeners
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    window.addEventListener("message", handleWindowMessage);
+
+    // Cleanup
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+      window.removeEventListener("message", handleWindowMessage);
+    };
+  }, [savedPresets, autoZoomEnabled, selectedIndex, images.length]); // Dependencies
   const applySmartZoom = (fieldGroup: FieldGroup) => {
     // 1. Cập nhật field hiện tại
     currentFocusedFieldRef.current = fieldGroup;

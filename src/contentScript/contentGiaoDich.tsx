@@ -83,325 +83,6 @@ function isEmpty(str: any): boolean {
   return !str || str.length === 0;
 }
 
-// //loadSidePanelStyleAndIframe();
-// function loadSidePanelStyleAndIframe() {
-//   if (document.getElementById('inpage-sidepanel-container')) return;
-//   const SIDE_PANEL_WIDTH = 360; // Độ rộng mặc định
-//   const EXTENSION_URL = chrome.runtime.getURL('sidepanel.html');
-
-//   // =================================================================
-//   // PHẦN 1: CSS CHIA MÀN HÌNH (Fix lỗi giao diện React)
-//   // =================================================================
-//   const styleId = 'split-screen-style-fix';
-//   let style = document.getElementById(styleId);
-
-//   if (!style) {
-//     style = document.createElement('style');
-//     style.id = styleId;
-//     style.innerHTML = `
-//             /* Body thành Flex container */
-//             body {
-//                 display: flex !important;
-//                 flex-direction: row !important;
-//                 width: 100vw !important;
-//                 height: 100vh !important;
-//                 overflow: hidden !important;
-//             }
-
-//             /* Web cũ (#root) chiếm phần còn lại (flex: 1) */
-//             #root {
-//                 flex: 1 1 auto !important; /* Tự động co giãn */
-//                 height: 100% !important;
-//                 overflow-y: auto !important;
-//                 overflow-x: hidden !important;
-//                 position: relative !important;
-//                 z-index: 1 !important;
-//                 min-width: 0 !important; /* Fix flexbox overflow */
-//             }
-
-//             /* SỬA LỖI MENU REACT (Grid layout) */
-//             .layout {
-//                 grid-template-columns: var(--menu-width, 360px) 1fr !important;
-//                 width: 100% !important;
-//                 min-height: 100vh !important;
-//             }
-
-//             /* Fix Modal popup hiển thị đúng vị trí */
-//             .modal-upd, .swal-overlay {
-//                 width: 100% !important; 
-//                 position: fixed !important;
-//             }
-//         `;
-//     document.head.appendChild(style);
-//   }
-
-//   // =================================================================
-//   // PHẦN 2: TẠO GIAO DIỆN SIDE PANEL (Container + Iframe + Resizer)
-//   // =================================================================
-
-//   // Container chính
-//   const container = document.createElement('div');
-//   container.id = 'inpage-sidepanel-container';
-
-//   // Style cho container (Thay thế position:fixed bằng Flex item)
-//   Object.assign(container.style, {
-//     width: `${SIDE_PANEL_WIDTH}px`,
-//     height: '100vh',
-//     display: 'flex',
-//     flexDirection: 'column',
-//     backgroundColor: '#ffffff',
-//     borderLeft: '1px solid rgba(0,0,0,0.1)',
-//     zIndex: '2147483647',
-//     flex: '0 0 auto', // Không co giãn tự động, phụ thuộc width set tay
-//     position: 'relative',
-//     boxShadow: '-2px 0 5px rgba(0,0,0,0.05)'
-//   });
-
-//   // --- Header (Chứa nút đóng) ---
-//   const header = document.createElement('div');
-//   Object.assign(header.style, {
-//     display: 'flex',
-//     justifyContent: 'flex-end',
-//     alignItems: 'center',
-//     height: '36px',
-//     background: '#f5f5f5',
-//     borderBottom: '1px solid #e0e0e0',
-//     flexShrink: '0'
-//   });
-
-//   const closeBtn = document.createElement('button');
-//   closeBtn.textContent = '✕';
-//   Object.assign(closeBtn.style, {
-//     border: 'none',
-//     background: 'transparent',
-//     cursor: 'pointer',
-//     fontSize: '16px',
-//     padding: '0 12px',
-//     height: '100%',
-//     color: '#555'
-//   });
-
-//   // Sự kiện đóng panel: Xóa container và xóa cả CSS fix để trả lại web gốc
-//   closeBtn.addEventListener('click', () => {
-//     container.remove();
-//     if (style) style.remove(); // Trả lại style gốc cho web
-//   });
-
-//   header.appendChild(closeBtn);
-//   container.appendChild(header);
-
-//   // --- Iframe (Nội dung Extension) ---
-//   const iframe = document.createElement('iframe');
-//   iframe.src = EXTENSION_URL;
-//   iframe.setAttribute('title', 'Side Panel');
-//   Object.assign(iframe.style, {
-//     border: 'none',
-//     width: '100%',
-//     flex: '1', // Chiếm hết chiều cao còn lại
-//     height: '100%'
-//   });
-//   container.appendChild(iframe);
-
-//   // --- Resizer (Thanh kéo) ---
-//   const resizer = document.createElement('div');
-//   Object.assign(resizer.style, {
-//     position: 'absolute',
-//     left: '-5px', // Nhô ra ngoài bên trái để dễ bấm
-//     top: '0',
-//     bottom: '0',
-//     width: '10px',
-//     cursor: 'ew-resize',
-//     zIndex: '2147483648',
-//     backgroundColor: 'transparent' // Trong suốt nhưng vẫn bắt được sự kiện
-//   });
-//   container.appendChild(resizer);
-
-//   // Thêm vào Body
-//   document.body.appendChild(container);
-
-
-//   // =================================================================
-//   // PHẦN 3: LOGIC KÉO THẢ (RESIZE)
-//   // =================================================================
-//   let isResizing = false;
-
-//   const onMove = (ev: PointerEvent) => {
-//     if (!isResizing) return;
-
-//     // Tính toán độ rộng mới: Tổng chiều rộng window - vị trí chuột hiện tại
-//     const newWidth = window.innerWidth - ev.clientX;
-
-//     // Giới hạn độ rộng (Min: 300px, Max: 70% màn hình)
-//     const maxWidth = window.innerWidth * 0.7;
-//     if (newWidth > 300 && newWidth < maxWidth) {
-//       container.style.width = `${newWidth}px`;
-//     }
-//   };
-
-//   const stopResize = () => {
-//     isResizing = false;
-//     document.body.style.cursor = '';
-//     document.removeEventListener('pointermove', onMove);
-//     document.removeEventListener('pointerup', stopResize);
-
-//     // Bật lại pointer events cho iframe để thao tác được bên trong
-//     iframe.style.pointerEvents = 'auto';
-//   };
-
-//   const startResize = (ev: PointerEvent) => {
-//     isResizing = true;
-//     document.body.style.cursor = 'ew-resize';
-
-//     // Tắt pointer events của iframe để chuột không bị kẹt khi kéo qua iframe
-//     iframe.style.pointerEvents = 'none';
-
-//     ev.preventDefault();
-//     document.addEventListener('pointermove', onMove);
-//     document.addEventListener('pointerup', stopResize);
-//   };
-
-//   resizer.addEventListener('pointerdown', startResize);
-
-
-//   // =================================================================
-//   // PHẦN 4: LOGIC ĐỒNG BỘ MENU WEB GỐC (MutationObserver)
-//   // =================================================================
-//   // Phần này giữ nguyên để đảm bảo menu web gốc co giãn đúng
-//   function syncMenuWidth(layoutElement: any) {
-//     const currentStyle = layoutElement.getAttribute('style');
-//     if (currentStyle) {
-//       const match = currentStyle.match(/grid-template-columns:\s*([^ ]+)/);
-//       if (match && match[1]) {
-//         layoutElement.style.setProperty('--menu-width', match[1]);
-//       }
-//     }
-//   }
-
-//   const checkLayoutExist = setInterval(() => {
-//     const layoutNode = document.querySelector('.layout');
-//     if (layoutNode) {
-//       clearInterval(checkLayoutExist);
-//       syncMenuWidth(layoutNode);
-//       const observer = new MutationObserver((mutations) => {
-//         mutations.forEach((mutation) => {
-//           if (mutation.type === "attributes" && mutation.attributeName === "style") {
-//             syncMenuWidth(layoutNode);
-//           }
-//         });
-//       });
-//       observer.observe(layoutNode, { attributes: true });
-//     }
-//   }, 500);
-
-// }
-// // =================================================================
-// // PHẦN 1: CSS (Layout & Sửa lỗi Grid)
-// // =================================================================
-// const style = document.createElement('style');
-// style.innerHTML = `
-//         /* Layout Flexbox cho Body */
-//         body {
-//             display: flex !important;
-//             flex-direction: row !important;
-//             width: 100vw !important;
-//             height: 100vh !important;
-//             overflow: hidden !important;
-//         }
-
-//         /* Web cũ (#root) chiếm 2/3 */
-//         #root {
-//             flex: 0 0 66.66% !important;
-//             width: 66.66% !important;
-//             height: 100% !important;
-//             overflow-y: auto !important;
-//             overflow-x: hidden !important;
-//             position: relative !important;
-//             z-index: 1 !important;
-//         }
-
-//         /* 
-//            SỬA LỖI MENU:
-//            - Dùng var(--menu-width) để độ rộng có thể thay đổi động.
-//            - Giá trị mặc định là 360px.
-//            - Cột thứ 2 luôn là 1fr để lấp đầy khoảng trống còn lại.
-//         */
-//         .layout {
-//             grid-template-columns: var(--menu-width, 360px) 1fr !important;
-//             width: 100% !important;
-//             min-height: 100vh !important;
-//         }
-
-//         /* Iframe Sidepanel */
-//         #simulated-sidepanel-iframe {
-//             flex: 1; /* Chiếm 1/3 còn lại */
-//             height: 100%;
-//             border: none;
-//             border-left: 4px solid #fab71e;
-//             background: #fff;
-//             z-index: 99999;
-//         }
-
-//         /* Sửa lỗi Modal */
-//         .modal-upd, .swal-overlay {
-//             width: 66.66% !important;
-//             left: 0 !important;
-//         }
-//     `;
-// document.head.appendChild(style);
-
-// // =================================================================
-// // PHẦN 2: TẠO IFRAME
-// // =================================================================
-// const iframe = document.createElement('iframe');
-// iframe.id = 'simulated-sidepanel-iframe';
-// iframe.src = "https://www.google.com/search?igu=1"; // Link sidepanel của bạn
-// document.body.appendChild(iframe);
-
-// // =================================================================
-// // PHẦN 3: SCRIPT XỬ LÝ MENU (MutationObserver)
-// // =================================================================
-// // Hàm này sẽ đọc style gốc của React và cập nhật biến CSS của chúng ta
-// function syncMenuWidth(layoutElement:any) {
-//   // Lấy toàn bộ style trong thẻ (do React set)
-//   // Ví dụ: "grid-template-columns: 64px calc(-64px + 100vw);"
-//   const currentStyle = layoutElement.getAttribute('style');
-
-//   if (currentStyle) {
-//     // Dùng Regex lấy con số đầu tiên (độ rộng menu)
-//     // Tìm chuỗi đứng sau "grid-template-columns:" và trước khoảng trắng
-//     const match = currentStyle.match(/grid-template-columns:\s*([^ ]+)/);
-//     if (match && match[1]) {
-//       // Cập nhật biến --menu-width cho CSS sử dụng
-//       layoutElement.style.setProperty('--menu-width', match[1]);
-//     }
-//   }
-// }
-
-// // Tìm phần tử .layout
-// const checkLayoutExist = setInterval(() => {
-//   const layoutNode = document.querySelector('.layout');
-//   if (layoutNode) {
-//     clearInterval(checkLayoutExist);
-
-//     // 1. Đồng bộ lần đầu tiên ngay khi tìm thấy
-//     syncMenuWidth(layoutNode);
-
-//     // 2. Tạo Observer để theo dõi thay đổi
-//     // Khi bạn bấm nút thu nhỏ, React sẽ đổi attribute 'style' của .layout
-//     // Observer này sẽ bắt được sự kiện đó
-//     const observer = new MutationObserver((mutations) => {
-//       mutations.forEach((mutation) => {
-//         if (mutation.type === "attributes" && mutation.attributeName === "style") {
-//           syncMenuWidth(layoutNode);
-//         }
-//       });
-//     });
-
-//     // Bắt đầu theo dõi thuộc tính style
-//     observer.observe(layoutNode, { attributes: true });
-//   }
-// }, 500); // Kiểm tra mỗi 0.5s cho đến khi web load xong layout
-
 
 function removeAccents(str: string): string {
   if (!str) return "";
@@ -487,21 +168,29 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
     console.log("[GiaoTich] ❌ Not sending - fieldGroup is NONE or panel closed");
     return;
   }
+// 1. Kiểm tra DOM xem panel có mở không
+  const container = document.getElementById(SIDE_PANEL_ID);
+  const iframe = container?.querySelector('iframe') as HTMLIFrameElement;
+
+  if (!container || !iframe) {
+    console.log("[GiaoTich] ❌ Not sending - panel closed");
+    return;
+  }
+  
+
+  console.log("[GiaoTich] 📤 notifySidePanelZoom via postMessage:", fieldGroup);
 
   const message = {
-    type: "APPLY_SMART_ZOOM", // Đổi type cho khớp với SidePanel mới
+    type: "APPLY_SMART_ZOOM",
     payload: { fieldGroup }
   };
 
-  // Gửi tin nhắn đến Runtime (Extension context), iframe sẽ bắt được
-  chrome.runtime.sendMessage(message, (response) => {
-    if (chrome.runtime.lastError) {
-      // Lỗi này thường xảy ra nếu Iframe chưa load xong script, có thể bỏ qua
-      console.log("[GiaoTich] Zoom message sent (error ignored):", chrome.runtime.lastError.message);
-    } else {
-      console.log("[GiaoTich] ✅ Smart zoom sent");
-    }
-  });
+  // 2. Gửi bằng postMessage trực tiếp vào Iframe
+  // targetOrigin là URL của extension để bảo mật
+  const extensionOrigin = chrome.runtime.getURL(""); // vd: chrome-extension://abcdef.../
+  
+  // Gửi tin nhắn
+  iframe.contentWindow?.postMessage(message,extensionOrigin);
 }
 /**
  * Gửi message đến side panel để chuyển sang ảnh tiếp theo

@@ -103,7 +103,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
+    // e.preventDefault();
     const delta = e.deltaY > 0 ? -0.2 : 0.2;
     setZoom((prev) => Math.max(1, Math.min(5, prev + delta)));
   };
