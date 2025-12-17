@@ -3,7 +3,8 @@ import { Button, Input, Table, Card, Tag, Space, message, Modal, Typography, Too
 import dayjs from 'dayjs';
 import { CopyOutlined, SettingOutlined, SyncOutlined, FileTextOutlined, HistoryOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
 import { OrderHdr, OrderDetail, OrderHistoryResponse } from '../types/vnpost';
-
+import { Timeline } from 'antd';
+import { UndoOutlined, CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, CarOutlined, HomeOutlined } from '@ant-design/icons';
 const { Title } = Typography;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -52,7 +53,9 @@ const Options: React.FC = () => {
     }>>([]);
     const [isBulkCreating, setIsBulkCreating] = useState(false);
     const bulkCreationAbortRef = useRef<boolean>(false);
-
+    const [filterPendingCMSDelivered, setFilterPendingCMSDelivered] = useState<boolean>(false);
+    // Thêm state để quản lý trạng thái đang đóng
+    const [isBulkClosing, setIsBulkClosing] = useState(false);
 
     useEffect(() => {
         // First try to get from chrome storage
@@ -215,9 +218,149 @@ const Options: React.FC = () => {
                 return false;
             }
         }
+        if (filterPendingCMSDelivered) {
+            // 1. Phải có CMS Data
+            if (!order.cmsData || !order.cmsData.tickets || order.cmsData.tickets.length === 0) {
+                return false;
+            }
+
+            // 2. Lấy ticket mới nhất và action cuối cùng
+            const latestTicket = order.cmsData.tickets[0]; // Giả định ticket đầu tiên là mới nhất
+            const actions = latestTicket.actions || [];
+
+            // Nếu không có action nào, coi như chưa đóng -> Giữ lại (return true)
+            // Nếu có action, kiểm tra nội dung cuối cùng
+            if (actions.length > 0) {
+                const lastAction = actions[actions.length - 1]; // Action cuối cùng (mới nhất theo mảng đã sort)
+                // Nội dung bắt đầu bằng "Đóng yêu cầu" -> Loại bỏ (vì đã đóng rồi)
+                if (lastAction.content && lastAction.content.trim().startsWith("Đóng yêu cầu")) {
+                    return false;
+                }
+            }
+
+            // 3. Kiểm tra lịch sử hành trình: Phải Phát TC và Không Hủy Phát TC
+            const history = order.history?.orderStatusHistoryDtoList || [];
+            const hasSuccess = history.some(h => h.statusText.toLowerCase().includes("phát hàng thành công"));
+            const hasCancel = history.some(h => h.statusText.toLowerCase().includes("hủy phát hàng thành công"));
+
+            // Điều kiện: Có phát thành công VÀ Không bị hủy
+            if (!hasSuccess || hasCancel) {
+                return false;
+            }
+        }
 
         return true;
     });
+    // Hàm xử lý Đóng hàng loạt
+    const handleBulkCloseCMS = async () => {
+        if (selectedRowKeys.length === 0) {
+            message.warning('Vui lòng chọn ít nhất một đơn hàng');
+            return;
+        }
+
+        // Lọc ra các đơn hàng có CMS Ticket chưa đóng
+        // Logic: Có cmsData, có tickets, và ticket mới nhất chưa có nội dung "Đóng yêu cầu"
+        const ordersToClose = orders.filter(o => {
+            if (!selectedRowKeys.includes(o.orderHdrId)) return false;
+
+            if (!o.cmsData || !o.cmsData.tickets || o.cmsData.tickets.length === 0) return false;
+
+            const latestTicket = o.cmsData.tickets[0];
+            const lastAction = latestTicket.actions?.[latestTicket.actions.length - 1];
+
+            // Nếu action cuối cùng đã là Đóng thì bỏ qua
+            if (lastAction?.content?.includes("Đóng yêu cầu")) {
+                return false;
+            }
+            return true;
+        });
+
+        if (ordersToClose.length === 0) {
+            message.info("Các đơn hàng đã chọn đều chưa có CMS hoặc đã được đóng.");
+            return;
+        }
+
+        Modal.confirm({
+            title: `Xác nhận đóng ${ordersToClose.length} ticket CMS`,
+            content: (
+                <div>
+                    <p>Hệ thống sẽ thực hiện:</p>
+                    <ul className="list-disc pl-5">
+                        <li>Lưu kết quả: <b>PTC (Phát thành công)</b></li>
+                        <li>Trạng thái: <b>Đóng hồ sơ</b></li>
+                    </ul>
+                    <p className="text-red-500 mt-2">Lưu ý: Chỉ thực hiện với các đơn đã thực sự phát xong!</p>
+                </div>
+            ),
+            okText: "Thực hiện Đóng",
+            cancelText: "Hủy",
+            onOk: async () => {
+                setIsBulkClosing(true);
+                const hide = message.loading(`Đang đóng 0/${ordersToClose.length} ticket...`, 0);
+
+                let successCount = 0;
+                let failCount = 0;
+
+                for (let i = 0; i < ordersToClose.length; i++) {
+                    const order = ordersToClose[i];
+                    const ticketId = order.cmsData.tickets[0].ticketId; // Lấy ticket mới nhất
+
+                    hide(); // update loading message
+                    message.loading(`Đang đóng ${i + 1}/${ordersToClose.length}: ${order.itemCode}...`, 0);
+
+                    try {
+                        // Gửi message xuống content script
+                        const response = await new Promise<any>((resolve) => {
+                            chrome.runtime.sendMessage({
+                                event: 'CONTENTMY',
+                                type: 'CLOSE_CMS_TICKET',
+                                payload: { ticketId: ticketId }
+                            }, resolve);
+                        });
+
+                        if (response && response.status === 'success') {
+                            successCount++;
+                            // Cập nhật lại UI CMS local (giả lập đã đóng) để không phải fetch lại ngay
+                            // Hoặc gọi fetch CMS lại:
+                            const updatedCmsData = await new Promise<any>((resolve) => {
+                                const timeout = setTimeout(() => resolve(null), 3000);
+                                chrome.runtime.sendMessage({
+                                    event: "CONTENTMY",
+                                    type: "FETCH_CMS_DATA",
+                                    payload: { maVanDon: order.itemCode }
+                                }, (res) => {
+                                    clearTimeout(timeout);
+                                    resolve(res?.status === 'success' ? res.data : null);
+                                });
+                            });
+                            updateOrderState(order.orderHdrId, { cmsData: updatedCmsData });
+
+                        } else {
+                            console.error(`Failed to close ${order.itemCode}:`, response?.error);
+                            failCount++;
+                        }
+                    } catch (error) {
+                        console.error(`Error closing ${order.itemCode}:`, error);
+                        failCount++;
+                    }
+
+                    // Delay nhẹ để tránh spam server quá gắt
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
+
+                hide();
+                setIsBulkClosing(false);
+                if (failCount === 0) {
+                    message.success(`✅ Đã đóng thành công toàn bộ ${successCount} ticket!`);
+                } else {
+                    message.warning(`⚠️ Đã đóng ${successCount}, lỗi ${failCount} ticket.`);
+                }
+
+                // Clear selection sau khi làm xong
+                setSelectedRowKeys([]);
+            }
+        });
+    };
 
     const handleFetchAllDetails = async () => {
         const targetOrders = filteredOrders.length > 0 ? filteredOrders : orders;
@@ -882,87 +1025,172 @@ const Options: React.FC = () => {
             }
         },
         {
-            title: 'Trạng thái & Metrics',
+            title: 'Hành trình chi tiết',
             key: 'status',
+            width: 320,
             render: (_: any, record: ExtendedOrder) => {
                 const history = record.history?.orderStatusHistoryDtoList || [];
-                const lastStatus = history[0];
-                const daysSinceUpdate = lastStatus ? getDaysDiff(lastStatus.traceDate) : 0;
 
-                // Metrics Calculation
-                // 1. Received (593200 + "Đang vận chuyển") -> Confirmed Delivery ("Đã xác nhận đến phát")
-                const receivedEvent = history.slice().reverse().find(h => h.orgCode === "593200" && h.statusText === "Đang vận chuyển");
-                const confirmedEvent = history.find(h => h.statusText === "Đã xác nhận đến phát" || h.statusText === "Đang phát hàng");
-                const transportDuration = receivedEvent
-                    ? (confirmedEvent
-                        ? calculateDuration(receivedEvent.traceDate, confirmedEvent.traceDate)
-                        : (() => {
-                            const startDate = parseDate(receivedEvent.traceDate);
-                            if (!startDate) return null;
-                            const now = new Date();
-                            const diff = now.getTime() - startDate.getTime();
-                            const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                            const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                            return `${days} ngày ${hours} giờ`;
-                        })()
-                    )
-                    : null;
+                // 1. Logic lọc thông minh hơn: Giữ lại Chuyển hoàn và các ghi chú quan trọng
+                const timelineEvents = history.slice().reverse().reduce((acc: any[], curr, index, arr) => {
+                    const status = curr.statusText || "";
+                    const detail = curr.statusDetail || "";
 
-                // 2. First Delivery ("Đang phát hàng") -> Today (How many days in delivery)
-                const firstDelivery = history.slice().reverse().find(h => h.statusText === "Đang phát hàng" || h.statusText === "Đã xác nhận đến phát");
-                if (record.itemCode.toUpperCase() == "CX988708873VN") {
-                    console.log('firstDelivery', firstDelivery);
+                    const isStart = status.includes("đã nhận hàng");
+                    const isDeliveryStart = status.includes("Đã xác nhận đến phát");
+                    const isDeliveryAttempt = status.includes("Đang phát hàng");
+                    // Bổ sung bắt buộc lấy trạng thái Chuyển hoàn
+                    const isReturn = status.includes("chuyển hoàn") || status.includes("Chuyển hoàn");
+                    const isFail = status.includes("không thành công");
+                    const isSuccess = status.includes("thành công") && !status.includes("không");
+                    const isLatest = index === arr.length - 1;
 
-                }
-                const deliveryDuration = firstDelivery
-                    ? (() => {
-                        const startDate = parseDate(firstDelivery.traceDate);
-                        if (!startDate) return null;
-                        const now = new Date();
-                        const diff = now.getTime() - startDate.getTime();
-                        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-                        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                        return `${days} ngày ${hours} giờ`;
-                    })()
-                    : null;
+                    // Nếu có ghi chú (DingDong) thì ưu tiên hiển thị bất kể trạng thái gì
+                    const hasNote = detail.toLowerCase().includes("ghi chú") || detail.toLowerCase().includes("dingdong");
 
-                // Warnings
-                let warning = null;
-                if (lastStatus?.statusText === "Vận chuyển đến bưu cục" && daysSinceUpdate > 4) {
-                    warning = <Tag color="red" className="whitespace-normal w-full mt-1">Hỗ trợ lưu thoát gấp. TKS</Tag>;
-                } else if (["Đã xác nhận đến phát", "Đang phát hàng"].includes(lastStatus?.statusText || "")) {
-                    warning = <Tag color="orange" className="whitespace-normal w-full mt-1">BG có cam kết thời gian phát, Bưu tá liên hệ KH từ Dingdong.</Tag>;
+                    if (isStart || isDeliveryStart || isDeliveryAttempt || isFail || isReturn || isSuccess || isLatest || hasNote) {
+                        // Tránh duplicate nếu trạng thái liền kề giống hệt nhau (trừ khi là đang phát hàng vì có thể phát nhiều lần)
+                        const last = acc.length > 0 ? acc[acc.length - 1] : null;
+                        if (!last || last.statusText !== status || isDeliveryAttempt || isFail) {
+                            acc.push(curr);
+                        }
+                    }
+                    return acc;
+                }, []);
+
+                // Lấy tối đa 5 sự kiện quan trọng nhất (ưu tiên lỗi và chuyển hoàn)
+                // Nếu danh sách dài, ta ưu tiên giữ: Sự kiện mới nhất + Các sự kiện lỗi/chuyển hoàn + Sự kiện đầu
+                let displayEvents = timelineEvents;
+                if (timelineEvents.length > 10) {
+                    const importantEvents = timelineEvents.filter((h: any) =>
+                        h.statusText.includes("không thành công") ||
+                        h.statusText.includes("chuyển hoàn") ||
+                        h.statusText.includes("Đang phát") || // <--- THÊM DÒNG NÀY
+                        (h.statusDetail && h.statusDetail.includes("Ghi chú"))
+                    );
+                    const latest = timelineEvents[timelineEvents.length - 1];
+                    const first = timelineEvents[0];
+
+                    // Merge lại để đảm bảo không quá dài nhưng đủ ý
+                    displayEvents = [...new Set([first, ...importantEvents.slice(-4), latest])].sort((a: any, b: any) => {
+                        return history.indexOf(a) - history.indexOf(b);
+                    }).reverse();
+                    // Ở đây Antd Timeline mặc định trên xuống, nên ta để Mới nhất (index cuối của mảng gốc) nằm cuối list display? 
+                    // KHÔNG, slice().reverse() ở đầu tức là timelineEvents[0] là CŨ NHẤT.
+                    // Antd Timeline hiển thị: Item 1 (Top) -> Item N (Bottom).
+                    // Thường log hiển thị Mới nhất ở trên cùng. 
+                    // => Reverse lại displayEvents để Mới nhất lên đầu.
+                    displayEvents = displayEvents.reverse();
+                } else {
+                    // Nếu ít thì đảo ngược để Mới nhất lên đầu
+                    displayEvents = [...timelineEvents].reverse();
                 }
 
                 return (
                     <div
-                        className="flex flex-col gap-3 p-2 cursor-pointer hover:bg-blue-50 rounded-lg transition-colors"
+                        className="flex flex-col gap-2 p-2 cursor-pointer hover:bg-blue-50 rounded-lg transition-colors group"
                         onClick={() => {
                             setCurrentDetailOrder(record);
                             setDetailModalActiveTab('2');
                             setDetailModalOpen(true);
                         }}
                     >
-                        {/* <Tag color={record.status === '15' ? 'red' : 'blue'} className="text-sm py-2 px-3 rounded-lg shadow-md">{record.statusName}</Tag> */}
+                        {/* Header trạng thái hiện tại */}
+                        <div className="font-bold text-sm text-blue-700 mb-1 flex justify-between items-center">
+                            <span className="truncate max-w-[200px]" title={history[0]?.statusText}>{history[0]?.statusText || record.statusName}</span>
+                            <span className="text-xs text-gray-500 font-normal whitespace-nowrap">
+                                {history[0] ? getDaysDiff(history[0].traceDate) + ' ngày' : ''}
+                            </span>
+                        </div>
 
-                        {lastStatus && (
-                            <div className="text-xs bg-gradient-to-br from-blue-50 to-indigo-50 p-3 rounded-xl border border-blue-200 shadow-sm">
-                                <div className="font-bold text-blue-700 mb-2">{lastStatus.statusText}</div>
-                                <div className="text-gray-600 bg-white px-2 py-1 rounded mb-2">🕐 {lastStatus.traceDate} <span className="text-orange-500">({daysSinceUpdate} ngày trước)</span></div>
-                                {lastStatus.statusDetail && <div className="text-gray-700 italic mt-2 border-t border-blue-200 pt-2 bg-white p-2 rounded" dangerouslySetInnerHTML={{ __html: lastStatus.statusDetail }}></div>}
-                                {lastStatus.postmanName && <div className="mt-2 bg-white p-2 rounded">👮 {lastStatus.postmanName}</div>}
-                                {lastStatus.posTel && <div className="bg-white p-2 rounded mt-1">📞 {lastStatus.posTel}</div>}
-                            </div>
-                        )}
+                        {/* Timeline */}
+                        <div className="pl-1">
+                            <Timeline
+                                mode="left"
+                                className="custom-compact-timeline"
+                                style={{ marginTop: '5px' }}
+                                items={displayEvents.map((h: any, idx: number) => {
+                                    const statusLower = h.statusText.toLowerCase();
+                                    const isFail = statusLower.includes("không thành công");
+                                    const isReturn = statusLower.includes("chuyển hoàn") || statusLower.includes("trả lại");
+                                    const isDelivery = statusLower.includes("đang phát");
+                                    const isLatest = idx === 0;
 
-                        {(transportDuration || deliveryDuration) && (
-                            <div className="text-xs bg-gradient-to-r from-green-50 to-emerald-50 p-3 rounded-xl border border-green-200 shadow-sm">
-                                {transportDuration && <div className="mb-1">🚛 VC: <span className="font-bold text-green-700">{transportDuration}</span></div>}
-                                {deliveryDuration && <div>📦 Phát: <span className="font-bold text-green-700">{deliveryDuration}</span></div>}
-                            </div>
-                        )}
+                                    const dateShort = h.traceDate ? (h.traceDate.split(' ')[0].substring(0, 5) + ' ' + h.traceDate.split(' ')[1].substring(0, 5)) : '';
 
-                        {warning}
+                                    let color = "gray";
+                                    let dot = <ClockCircleOutlined style={{ fontSize: '10px' }} />;
+
+                                    if (isReturn) {
+                                        color = "orange";
+                                        dot = <UndoOutlined style={{ fontSize: '14px', color: '#fa8c16', fontWeight: 'bold' }} />;
+                                    } else if (isFail) {
+                                        color = "red";
+                                        dot = <ExclamationCircleOutlined style={{ fontSize: '12px', color: '#ff4d4f' }} />;
+                                    } else if (isDelivery) {
+                                        color = "blue";
+                                        dot = <CarOutlined style={{ fontSize: '12px', color: '#1890ff' }} />;
+                                    } else if (statusLower.includes("nhận hàng")) {
+                                        color = "green";
+                                        dot = <HomeOutlined style={{ fontSize: '12px', color: '#52c41a' }} />;
+                                    }
+
+                                    let rawDetail = h.statusDetail || "";
+                                    rawDetail = rawDetail.replace(/<[^>]*>?/gm, '');
+
+                                    let reason = "";
+                                    let note = "";
+
+                                    if (rawDetail.includes("Lý do:")) {
+                                        const reasonPart = rawDetail.split("Ghi chú:")[0];
+                                        const arrowParts = reasonPart.split("->");
+                                        reason = arrowParts.length > 1 ? arrowParts[arrowParts.length - 1].trim() : reasonPart.replace("Lý do:", "").trim();
+                                        reason = reason.replace(/\.$/, "");
+                                    }
+
+                                    const noteIndex = rawDetail.toLowerCase().indexOf("ghi chú:");
+                                    const dingDongIndex = rawDetail.indexOf("(DingDong)");
+
+                                    if (dingDongIndex !== -1) {
+                                        note = rawDetail.substring(dingDongIndex + 10).trim();
+                                    } else if (noteIndex !== -1) {
+                                        note = rawDetail.substring(noteIndex + 8).trim();
+                                    }
+
+                                    note = note.replace(/^\)+/, '').trim();
+
+                                    return {
+                                        key: idx,
+                                        color: color,
+                                        dot: dot,
+                                        className: isLatest ? "font-semibold pb-2" : "opacity-80 pb-2",
+                                        children: (
+                                            <div className="flex flex-col text-xs leading-tight">
+                                                <div className="flex justify-between gap-2">
+                                                    <span className={`${isFail || isReturn ? 'text-red-700 font-bold' : 'text-gray-700'}`}>
+                                                        {h.statusText.replace("Vận chuyển", "VC").replace("Bưu cục", "BC")}
+                                                    </span>
+                                                    <span className="text-gray-400 text-[10px] whitespace-nowrap ml-1">{dateShort}</span>
+                                                </div>
+                                                {reason && (
+                                                    <div className="text-red-600 mt-0.5 text-[11px] bg-red-50 px-1 rounded inline-block">
+                                                        {reason}
+                                                    </div>
+                                                )}
+                                                {note && (
+                                                    <div className="text-blue-800 italic mt-0.5 text-[11px] border-l-2 border-blue-300 pl-1">
+                                                        "{note}"
+                                                    </div>
+                                                )}
+                                                {isDelivery && h.postmanName && (
+                                                    <div className="text-blue-500 text-[10px] mt-0.5">👮 {h.postmanName} - {h.postmanTel || h.posTel}</div>
+                                                )}
+                                            </div>
+                                        )
+                                    };
+                                })}
+                            />
+                        </div>
                     </div>
                 );
             }
@@ -1335,6 +1563,24 @@ const Options: React.FC = () => {
                                     </span>
                                 )}
                             </Button>
+                            <Button
+                                size="small"
+                                type={filterStatus.includes('14') ? 'primary' : 'default'}
+                                onClick={() => {
+                                    const status = ['14', '23', '25', '26'];
+                                    setFilterStatus(status);
+                                    fetchOrders(status);
+                                }}
+                                className="rounded-r-lg shadow-sm"
+                                danger
+                            >
+                                ⚠️ Thành Công
+                                {orders.length > 0 && filterStatus.includes('14') && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 bg-red-500 text-white text-xs rounded-full font-bold">
+                                        {orders.length}
+                                    </span>
+                                )}
+                            </Button>
                         </Space.Compact>
 
                         {/* Additional Filters */}
@@ -1367,7 +1613,22 @@ const Options: React.FC = () => {
                                     </span>
                                 )}
                             </Button>
+                            <Button
+                                size="small"
+                                type={filterPendingCMSDelivered ? 'primary' : 'default'}
+                                onClick={() => setFilterPendingCMSDelivered(!filterPendingCMSDelivered)}
+                                className="shadow-sm"
+                                style={filterPendingCMSDelivered ? { background: '#08979c', borderColor: '#08979c' } : {}}
+                            >
+                                ✅ Phát xong chưa đóng CMS
+                                {filterPendingCMSDelivered && filteredOrders.length > 0 && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 bg-teal-800 text-white text-xs rounded-full font-bold">
+                                        {filteredOrders.length}
+                                    </span>
+                                )}
+                            </Button>
                         </Space.Compact>
+
 
                         {/* Active Filters Indicator */}
                         {(filterNoCMS || filterLongDelivery) && (
@@ -1390,6 +1651,18 @@ const Options: React.FC = () => {
                         {selectedRowKeys.length > 0 && (
                             <Button size="small" type="primary" danger onClick={handleBulkCheckCMS} className="rounded-lg shadow-md animate-pulse">
                                 🔍 Tạo nhiều CMS ({selectedRowKeys.length})
+                            </Button>
+                        )}
+                        {selectedRowKeys.length > 0 && (
+                            <Button
+                                size="small"
+                                type="primary"
+                                icon={<CheckCircleOutlined />}
+                                onClick={handleBulkCloseCMS}
+                                loading={isBulkClosing}
+                                className="rounded-lg shadow-md bg-emerald-600 border-emerald-600 hover:bg-emerald-500"
+                            >
+                                ✅ Đóng CMS ({selectedRowKeys.length})
                             </Button>
                         )}
                         <Button size="small" onClick={handleFetchAllDetails} className="rounded-lg shadow-sm">📄 Chi Tiết</Button>
@@ -1892,6 +2165,45 @@ const BulkCMSModal: React.FC<{
         }
     };
 
+    const handleDeleteItem = (index: number) => {
+        setItems(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const handleOrgCodeChange = (index: number, newCode: string) => {
+        setItems(prev => prev.map((item, i) =>
+            i === index ? { ...item, destOrgCode: newCode, orgInfo: null } : item
+        ));
+    };
+
+    const handleCheckOrgCode = async (index: number, code: string) => {
+        if (!code || code.length !== 6) {
+            message.error('Mã bưu cục phải có 6 số');
+            return;
+        }
+
+        try {
+            const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
+                headers: { "accept": "*/*", "x-requested-with": "XMLHttpRequest" },
+                method: "GET",
+                mode: "cors",
+                credentials: "include"
+            });
+            const data = await response.json();
+            if (data && data.length > 0) {
+                const newOrgInfo = { orgCode: data[0].orgCode, name: data[0].name };
+                setItems(prev => prev.map((item, i) =>
+                    i === index ? { ...item, orgInfo: newOrgInfo } : item
+                ));
+                message.success('Đã tìm thấy bưu cục: ' + data[0].name);
+            } else {
+                message.warning('Không tìm thấy bưu cục nào với mã này');
+            }
+        } catch (error) {
+            console.error('Error checking org:', error);
+            message.error('Lỗi khi tra cứu bưu cục');
+        }
+    };
+
     return (
         <Modal
             title={<span className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600">🎫 Tạo nhiều CMS ({items.length} đơn hàng)</span>}
@@ -1950,7 +2262,7 @@ const BulkCMSModal: React.FC<{
                 <div className="max-h-[50vh] overflow-y-auto space-y-2">
                     {items.map((item, idx) => (
                         <div key={idx} className={`border-2 rounded-lg p-3 transition-all ${getStatusColor(item.status)}`}>
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3 flex-1">
                                     <span className="text-2xl">{getStatusIcon(item.status)}</span>
                                     <div className="flex-1">
@@ -1958,23 +2270,57 @@ const BulkCMSModal: React.FC<{
                                             <span className="font-bold text-blue-700">{item.order.itemCode}</span>
                                             <span className="text-sm text-gray-600">- {item.order.receiverName}</span>
                                         </div>
-                                        <div className="flex gap-4 text-xs text-gray-600">
+                                        <div className="flex gap-4 text-xs text-gray-600 items-center">
                                             <span>Service: <span className="font-semibold text-blue-600">{item.order.serviceCode || 'N/A'}</span></span>
-                                            {item.destOrgCode && (
-                                                <span>
-                                                    OrgCode: <span className="font-semibold text-green-600">{item.destOrgCode}</span>
-                                                    {item.orgInfo && <span className="text-gray-500 ml-1">({item.orgInfo.name})</span>}
-                                                </span>
-                                            )}
+                                            <div className="flex items-center gap-1">
+                                                <span>OrgCode:</span>
+                                                <Input
+                                                    size="small"
+                                                    value={item.destOrgCode}
+                                                    onChange={(e) => handleOrgCodeChange(idx, e.target.value)}
+                                                    style={{ width: 80 }}
+                                                    disabled={isCreating}
+                                                    maxLength={6}
+                                                />
+                                                <Button
+                                                    size="small"
+                                                    type="text"
+                                                    icon={<SyncOutlined />}
+                                                    disabled={isCreating || !item.destOrgCode}
+                                                    onClick={() => handleCheckOrgCode(idx, item.destOrgCode)}
+                                                    title="Kiểm tra tên bưu cục"
+                                                />
+                                                {item.orgInfo ? (
+                                                    <span className="font-semibold text-green-600">({item.orgInfo.name})</span>
+                                                ) : (
+                                                    item.destOrgCode && <span className="text-orange-500 italic">(Chưa kiểm tra)</span>
+                                                )}
+                                            </div>
                                         </div>
                                         {item.error && <div className="text-red-600 font-semibold text-sm mt-1">❌ {item.error}</div>}
                                     </div>
                                 </div>
-                                {item.status === 'processing' && (
-                                    <div className="text-blue-600 font-semibold animate-pulse">Đang tạo...</div>
-                                )}
-                                {item.status === 'success' && (
-                                    <div className="text-green-600 font-semibold">Thành công ✓</div>
+
+                                {/* Status or Actions */}
+                                {item.status === 'pending' && !isCreating ? (
+                                    <div className="flex items-center">
+                                        <Button
+                                            danger
+                                            type="text"
+                                            icon={<DeleteOutlined />}
+                                            onClick={() => handleDeleteItem(idx)}
+                                            title="Xóa khỏi danh sách"
+                                        />
+                                    </div>
+                                ) : (
+                                    <>
+                                        {item.status === 'processing' && (
+                                            <div className="text-blue-600 font-semibold animate-pulse">Đang tạo...</div>
+                                        )}
+                                        {item.status === 'success' && (
+                                            <div className="text-green-600 font-semibold">Thành công ✓</div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -1988,7 +2334,7 @@ const BulkCMSModal: React.FC<{
                         size="large"
                         block
                         onClick={onStartCreation}
-                        disabled={isCreating || items.every(it => it.status !== 'pending') || !globalContent.trim()}
+                        disabled={isCreating || items.length === 0 || items.every(it => it.status !== 'pending') || !globalContent.trim()}
                         loading={isCreating}
                         className="rounded-lg"
                         icon={isCreating ? null : <PlusOutlined />}

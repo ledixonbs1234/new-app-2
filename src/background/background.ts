@@ -5072,6 +5072,60 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         })();
         return true; // Giữ kết nối async
     }
+    if (msg.type === "CLOSE_CMS_TICKET") {
+        (async () => {
+            try {
+                const { ticketId } = msg.payload;
+                console.log(`[BG] Closing ticket ${ticketId}...`);
+
+                // BƯỚC 1: Lưu kết quả xử lý (Save Result)
+                const formData = new FormData();
+                formData.append("actType", "4");
+                formData.append("actResult", "490"); // 490 = Phát thành công/Giải quyết xong
+                formData.append("ttkId", ticketId);
+                formData.append("actContent", "PTC");
+                formData.append("file", "undefined");
+                formData.append("isProcess", "true");
+                formData.append("isCompensated", "false");
+
+                const saveRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save-result", {
+                    method: "POST",
+                    body: formData,
+                    credentials: "include"
+                });
+
+                const saveData = await saveRes.json();
+
+                // Kiểm tra kết quả bước 1
+                if (!saveData.result) {
+                    throw new Error(`Lỗi lưu kết quả: ${saveData.message || 'Unknown error'}`);
+                }
+
+                // BƯỚC 2: Đóng hồ sơ (Change Status)
+                // API này dùng x-www-form-urlencoded
+                const closeRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/changestatus", {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    },
+                    body: `ids=${ticketId}`,
+                    credentials: "include"
+                });
+
+                // API changestatus thường trả về text hoặc json, kiểm tra ok là được
+                if (closeRes.ok) {
+                    sendResponse({ status: 'success' });
+                } else {
+                    throw new Error(`Lỗi đóng hồ sơ: ${closeRes.statusText}`);
+                }
+
+            } catch (error: any) {
+                console.error("[BG] Error closing ticket:", error);
+                sendResponse({ status: 'error', error: error.message });
+            }
+        })();
+        return true; // Giữ kết nối async
+    }
   }
 });
 //END Ho Duy--------------------------------

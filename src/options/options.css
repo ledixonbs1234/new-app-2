@@ -70,3 +70,32 @@ body {
     border-radius: 16px;
     overflow: hidden;
 }
+/* Custom Compact Timeline cho Table */
+.custom-compact-timeline .ant-timeline-item {
+    padding-bottom: 8px !important;
+}
+
+.custom-compact-timeline .ant-timeline-item-tail {
+    border-left: 1px solid #d9d9d9 !important;
+    left: 4px !important;
+}
+
+.custom-compact-timeline .ant-timeline-item-head {
+    width: 10px !important;
+    height: 10px !important;
+    left: 0 !important;
+    padding: 0 !important;
+    background-color: white !important;
+}
+
+.custom-compact-timeline .ant-timeline-item-head-custom {
+    left: 0 !important;
+    margin-left: 0 !important;
+    padding: 0 !important;
+}
+
+.custom-compact-timeline .ant-timeline-item-content {
+    margin-left: 18px !important;
+    min-height: auto !important;
+    top: -2px !important;
+}
