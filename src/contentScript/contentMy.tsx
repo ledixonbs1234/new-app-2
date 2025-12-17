@@ -1742,6 +1742,41 @@ function runOrderLogic() {
     // ===== PHẦN MỚI: CMS INTEGRATION =====
 
     /**
+     * Service Code Mapping - Map từ service code sang ttkSrvIdL3
+     */
+    const SERVICE_CODE_MAPPING: { [key: string]: string } = {
+        "CTN004": "363", "CTN005": "566", "CTN002": "335", "CTN003": "336",
+        "TTN006": "311", "RTN001": "307", "RTN002": "706", "RTN004": "1147",
+        "RTN003": "726", "TTN002": "346", "TTN005": "310", "TTN001": "315",
+        "TTN004": "309", "TTN003": "367", "TTN007": "707", "CTN012": "1266",
+        "CTN001": "334", "CTN019": "1187", "CTN028": "1646", "CTN022": "1306",
+        "CTN020": "1206", "CTN018": "1186", "CTN007": "668", "CTN016": "1146",
+        "PTN010": "1506", "CTN021": "1226", "CTN025": "1606", "ETN054": "1547",
+        "ETN053": "1546", "ETN031": "646", "ETN032": "647", "ETN033": "766",
+        "ETN037": "786", "ETN052": "1486", "CTN010": "926", "CTN024": "1526",
+        "CTN023": "1527", "CTN009": "846", "ETN017": "329", "ETN007": "318",
+        "ETN039": "1026", "ETN019": "332", "ETN009": "320", "ETN030": "468",
+        "ETN050": "1366", "ETN040": "989", "ETN044": "1107", "ETN045": "1106",
+        "ETN001": "312", "ETN011": "324", "ETN055": "1626", "ETN022": "526",
+        "ETN020": "333", "ETN010": "321", "ETN029": "347", "ETN048": "1326",
+        "ETN051": "1426", "ETN047": "1246", "ETN046": "1166", "ETN049": "1346",
+        "ETN016": "328", "ETN006": "317", "ETN041": "966", "ETN013": "326",
+        "ETN003": "314", "ETN024": "342", "ETN028": "345", "ETN027": "344",
+        "ETN015": "327", "ETN005": "316", "ETN012": "325", "ETN002": "313",
+        "ETN035": "807", "ETN034": "806", "ETN036": "808", "ETN018": "330",
+        "ETN008": "319", "HCC003": "688", "HCC004": "689", "HCC001": "686",
+        "HCC002": "687", "KT1001": "348", "KT1005": "352", "KT1006": "353",
+        "KT1007": "354", "KT1003": "350", "KT1014": "360", "KT1015": "361",
+        "KT1016": "362", "KT1002": "349", "KT1008": "322", "KT1009": "355",
+        "KT1010": "356", "KT1004": "351", "KT1011": "357", "KT1012": "358",
+        "KT1013": "359", "PTN012": "1267", "PTN003": "746", "PTN001": "337",
+        "PTN005": "906", "PTN006": "907", "PTN009": "986", "PTN008": "946",
+        "PTN004": "747", "PHBC02": "1006", "CTN006": "586", "TDT001": "364",
+        "ETN021": "341", "TDT002": "338", "TDT004": "340", "TDT003": "339",
+        "CTN008": "826", "PTN002": "546"
+    };
+
+    /**
      * Fetch thông tin CMS từ API qua background script (bypass CORS)
      */
     async function fetchCMSData(maVanDon: string): Promise<{ hasData: boolean; tickets?: any[] }> {
@@ -1848,6 +1883,9 @@ function runOrderLogic() {
                     <button id="custom-cms-detail-btn" class="ant-btn ant-btn-primary ant-btn-sm" style="display: none;">
                         <span>Chi tiết CMS</span>
                     </button>
+                    <button id="custom-cms-create-btn" class="ant-btn ant-btn-primary ant-btn-sm" style="display: none;">
+                        <span>Tạo CMS</span>
+                    </button>
                 </div>
             </div>
         `;
@@ -1875,6 +1913,16 @@ function runOrderLogic() {
                     </span>
                 </div>
             `;
+
+            // Hiện nút "Tạo CMS" khi chưa có CMS
+            const createButton = cmsCard.querySelector('#custom-cms-create-btn') as HTMLButtonElement;
+            if (createButton) {
+                createButton.style.display = 'block';
+                createButton.addEventListener('click', () => {
+                    openCreateCMSModal(maVanDon);
+                });
+            }
+
             return;
         }
 
@@ -1886,6 +1934,16 @@ function runOrderLogic() {
                     </span>
                 </div>
             `;
+
+            // Hiện nút "Tạo CMS" khi không có ticket
+            const createButton = cmsCard.querySelector('#custom-cms-create-btn') as HTMLButtonElement;
+            if (createButton) {
+                createButton.style.display = 'block';
+                createButton.addEventListener('click', () => {
+                    openCreateCMSModal(maVanDon);
+                });
+            }
+
             return;
         }
 
@@ -2002,6 +2060,447 @@ function runOrderLogic() {
                 console.log('[CMS] Tab opened successfully');
             } else {
                 console.error('[CMS] Failed to open tab:', response?.error);
+            }
+        });
+    }
+
+    // Trong contentMy.tsx
+
+    async function checkOrgCode(orgCode: string): Promise<{ orgCode: string; name: string } | null> {
+        if (!orgCode || orgCode.length !== 6) {
+            return null;
+        }
+
+        return new Promise((resolve) => {
+            chrome.runtime.sendMessage({
+                event: "CONTENTMY",
+                type: "SEARCH_ORG_INFO",
+                payload: { code: orgCode }
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("Lỗi kết nối background:", chrome.runtime.lastError);
+                    resolve(null);
+                    return;
+                }
+
+                if (response && response.status === 'success' && response.data && response.data.length > 0) {
+                    resolve({ orgCode: response.data[0].orgCode, name: response.data[0].name });
+                } else {
+                    resolve(null);
+                }
+            });
+        });
+    }
+
+    async function createCMSTicket(params: {
+        maVanDon: string;
+        serviceCode: string;
+        ticketType: 'support' | 'complaint';
+        content: string;
+        destOrgCode?: string;
+        orgInfo?: { orgCode: string; name: string } | null;
+    }): Promise<{ success: boolean; ticketCode?: string; error?: string }> {
+        try {
+            // Calculate expiration date
+            const now = new Date();
+            const expirationDate = new Date(now);
+            expirationDate.setDate(expirationDate.getDate() + (params.ticketType === 'support' ? 1 : 7));
+            const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
+
+            // Get ttkSrvIdL3 from serviceCode mapping
+            const ttkSrvIdL3 = SERVICE_CODE_MAPPING[params.serviceCode] || "1206";
+
+            const form = new FormData();
+            form.append("file", "");
+            form.append("type", "DVBC");
+
+            const troubleticketData = {
+                ttkType: "2",
+                ttkContactName: "Bưu cục Bồng Sơn 1",
+                ttkSource: "1",
+                ttkSeverity: "1",
+                ttkReason: params.ticketType === 'support' ? "134" : "534",
+                ttkContactNumber: "02563861718",
+                ttkContactEmail: "",
+                ttkContent: params.content,
+                accntCodeRef: "",
+                accntName: "",
+                accntMobile: "",
+                ttkSrvIdL2: "62",
+                ttkSrvIdL3: ttkSrvIdL3,
+                ttkExpiration: expiration,
+                ttkContactAddr: "",
+                accntAddr: "",
+                accntCode: "",
+                accntPostcode: "",
+                accntProvince: "",
+                accntDistrict: "",
+                accntWards: "",
+                accntEmail: "",
+                contactPostcode: "",
+                contactProvince: "",
+                contactDistrict: "",
+                contactWards: "",
+                accntAddrDetail: "",
+                ttkContactAddrDetail: "",
+                ttkSrvId: 1,
+                parcelId: params.maVanDon,
+                postageData: {
+                    parcelId: params.maVanDon,
+                    poAcc: "", poName: "", managerOrg: "", poWeigh: "", poRate: "",
+                    poClassify: "", poSenderName: "", poSenderPhone: "", poSenderAddress: "",
+                    poSenderAddressDetail: "", poReceiverName: "", poReceiverPhone: "",
+                    poReceiverAddress: "", poReceiverAddressDetail: "", poParcelDirection: "",
+                    poSend: "", poSendName: "", poSenderEmail: "", poStatus: "", poMethod: ""
+                }
+            };
+
+            // Gửi Message thay vì Fetch
+            return new Promise((resolve) => {
+                chrome.runtime.sendMessage({
+                    event: "CONTENTMY",
+                    type: "CREATE_CMS_TICKET_V2", // Gọi handler mới ở background
+                    payload: { troubleticketData: troubleticketData }
+                }, async (response) => {
+                    if (chrome.runtime.lastError) {
+                        resolve({ success: false, error: chrome.runtime.lastError.message });
+                        return;
+                    }
+
+                    if (response && response.status === 'success') {
+                        const ticketCode = response.ticketCode;
+
+                        // Logic Forward (Chuyển tiếp) giữ nguyên hoặc cũng cần chuyển lên Background
+                        // Nếu bạn muốn chuyển tiếp luôn, hãy dùng lại logic FORWARD_CMS_TICKET đã có trong background
+                        if (params.destOrgCode && params.orgInfo) {
+                            await delay(3000); // Đợi CMS xử lý tạo xong
+
+                            // Gọi lại FORWARD_CMS_TICKET đã có ở background (Line 1500 background.ts)
+                            const dataOrgObj = [{
+                                tempId: 72,
+                                orgCode: params.orgInfo.orgCode,
+                                orgName: `${params.orgInfo.orgCode} - ${params.orgInfo.name}`,
+                                filename: "", comment: params.content, file: "", type: 2, number: 1
+                            }];
+
+                            chrome.runtime.sendMessage({
+                                event: 'CONTENTMY',
+                                type: 'FORWARD_CMS_TICKET',
+                                payload: {
+                                    ticketId: ticketCode,
+                                    dataOrgObj: dataOrgObj
+                                }
+                            });
+                        }
+
+                        resolve({ success: true, ticketCode: ticketCode });
+                    } else {
+                        resolve({ success: false, error: response?.error || 'Unknown error' });
+                    }
+                });
+            });
+        } catch (error) {
+            console.error('[CMS] Error creating ticket:', error);
+            return { success: false, error: String(error) };
+        }
+    }
+
+    /**
+     * Mở modal tạo CMS mới
+     */
+    function openCreateCMSModal(maVanDon: string) {
+        console.log(`[CMS] Opening create CMS modal for ${maVanDon}`);
+
+        // Load templates from Firebase
+        chrome.runtime.sendMessage({
+            event: 'CONTENTMY',
+            type: 'GET_CMS_TEMPLATES',
+            payload: {}
+        }, (response) => {
+            const templates = response?.status === 'success' && response.templates ? response.templates : [];
+            showCMSModal(maVanDon, templates);
+        });
+    }
+
+    /**
+     * Hiển thị CMS modal
+     */
+    async function showCMSModal(maVanDon: string, templates: string[]) {
+        // Get order data from modal
+        const modalElement = document.querySelector('div[role="dialog"]');
+        if (!modalElement) {
+            alert('Không tìm thấy thông tin đơn hàng');
+            return;
+        }
+
+        const modalBody = modalElement.querySelector('.ant-modal-body');
+        if (!modalBody) return;
+
+        const getTextFromLabel = (container: Element, labelText: string): string => {
+            const allThs = container.querySelectorAll('th');
+            for (const th of allThs) {
+                if (th.textContent?.trim().includes(labelText)) {
+                    return th.nextElementSibling?.textContent?.trim() ?? '';
+                }
+            }
+            return '';
+        };
+
+        const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
+            .find(el => el.textContent?.includes('Đơn hàng'))
+            ?.closest('.ant-card');
+
+        if (!orderCard) {
+            alert('Không tìm thấy thông tin đơn hàng');
+            return;
+        }
+
+        const serviceCode = getTextFromLabel(orderCard, 'Dịch vụ');
+
+        // Fetch order history to extract org code
+        let defaultOrgCode = '';
+        let defaultOrgInfo: { orgCode: string; name: string } | null = null;
+
+        try {
+            const token = localStorage.getItem('accessToken');
+            if (token) {
+                const historyResponse = await fetch(
+                    `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${maVanDon}`,
+                    {
+                        headers: {
+                            'Authorization': token,
+                            'Capikey': '19001111'
+                        }
+                    }
+                );
+
+                if (historyResponse.ok) {
+                    const historyData = await historyResponse.json();
+                    const historyList = historyData?.orderStatusHistoryDtoList || [];
+
+                    // Extract orgCode from history (same logic as Options.tsx)
+                    for (const historyItem of historyList) {
+                        const addressMatch = historyItem.address?.match(/(\d{6})/);
+                        if (addressMatch) {
+                            defaultOrgCode = addressMatch[1];
+                            break;
+                        }
+                    }
+
+                    // Fetch org info if we have defaultOrgCode
+                    if (defaultOrgCode && defaultOrgCode.length === 6) {
+                        const orgResult = await checkOrgCode(defaultOrgCode);
+                        if (orgResult) {
+                            defaultOrgInfo = orgResult;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[CMS] Error fetching history:', error);
+        }
+
+        // Create modal overlay
+        const overlay = document.createElement('div');
+        overlay.id = 'custom-cms-modal-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+
+        // Create modal container
+        const modal = document.createElement('div');
+        modal.style.cssText = `
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 24px;
+        `;
+
+        // Modal content
+        modal.innerHTML = `
+            <div style="margin-bottom: 20px;">
+                <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #1890ff;">
+                    🎫 Tạo CMS cho ${maVanDon}
+                </h3>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500;">Loại ticket:</label>
+                <select id="cms-ticket-type" class="ant-select" style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px;">
+                    <option value="support">🆘 Hỗ trợ (134, +1 ngày)</option>
+                    <option value="complaint">⚠️ Khiếu nại (534, +7 ngày)</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500;">Nội dung:</label>
+                ${templates.length > 0 ? `
+                    <select id="cms-template-select" style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; margin-bottom: 8px;">
+                        <option value="">-- Chọn mẫu --</option>
+                        ${templates.map((t, i) => `<option value="${i}">${t.substring(0, 50)}...</option>`).join('')}
+                    </select>
+                ` : ''}
+                <textarea id="cms-content" rows="5" style="width: 100%; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px; resize: vertical;" placeholder="Nhập nội dung CMS..."></textarea>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 500;">Mã bưu cục chuyển tiếp (6 số, không bắt buộc):</label>
+                <div style="display: flex; gap: 8px;">
+                    <input id="cms-org-code" type="text" maxlength="6" style="flex: 1; padding: 8px; border: 1px solid #d9d9d9; border-radius: 4px;" placeholder="Ví dụ: 560100">
+                    <button id="cms-check-org-btn" class="ant-btn ant-btn-default" style="padding: 8px 16px; border: 1px solid #d9d9d9; border-radius: 4px; background: white; cursor: pointer;">
+                        Kiểm tra
+                    </button>
+                </div>
+                <div id="cms-org-name" style="margin-top: 8px; color: #52c41a; font-size: 13px;"></div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 24px;">
+                <button id="cms-cancel-btn" class="ant-btn ant-btn-default" style="padding: 8px 16px; border: 1px solid #d9d9d9; border-radius: 4px; background: white; cursor: pointer;">
+                    Hủy
+                </button>
+                <button id="cms-create-btn" class="ant-btn ant-btn-primary" style="padding: 8px 16px; border: none; border-radius: 4px; background: #1890ff; color: white; cursor: pointer;">
+                    Tạo CMS
+                </button>
+            </div>
+
+            <div id="cms-loading" style="display: none; text-align: center; margin-top: 16px; color: #1890ff;">
+                <div style="font-size: 14px;">⏳ Đang tạo CMS...</div>
+            </div>
+        `;
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+
+        // State - initialize with defaultOrgInfo from history
+        let orgInfo: { orgCode: string; name: string } | null = defaultOrgInfo;
+
+        // Event handlers
+        const templateSelect = modal.querySelector('#cms-template-select') as HTMLSelectElement;
+        const contentTextarea = modal.querySelector('#cms-content') as HTMLTextAreaElement;
+        const orgCodeInput = modal.querySelector('#cms-org-code') as HTMLInputElement;
+        const checkOrgBtn = modal.querySelector('#cms-check-org-btn') as HTMLButtonElement;
+        const orgNameDiv = modal.querySelector('#cms-org-name') as HTMLDivElement;
+        const cancelBtn = modal.querySelector('#cms-cancel-btn') as HTMLButtonElement;
+        const createBtn = modal.querySelector('#cms-create-btn') as HTMLButtonElement;
+        const loadingDiv = modal.querySelector('#cms-loading') as HTMLDivElement;
+        const ticketTypeSelect = modal.querySelector('#cms-ticket-type') as HTMLSelectElement;
+
+        // Auto-fill org code from history
+        if (defaultOrgCode) {
+            orgCodeInput.value = defaultOrgCode;
+            if (defaultOrgInfo) {
+                orgNameDiv.textContent = `✅ ${defaultOrgInfo.orgCode} - ${defaultOrgInfo.name}`;
+                orgNameDiv.style.color = '#52c41a';
+            }
+        }
+
+        // Template selection
+        if (templateSelect) {
+            templateSelect.addEventListener('change', () => {
+                const index = parseInt(templateSelect.value);
+                if (!isNaN(index) && templates[index]) {
+                    contentTextarea.value = templates[index];
+                }
+            });
+        }
+
+        // Check org code
+        checkOrgBtn.addEventListener('click', async () => {
+            const code = orgCodeInput.value.trim();
+            if (!code || code.length !== 6) {
+                orgNameDiv.textContent = '❌ Mã bưu cục phải có 6 số';
+                orgNameDiv.style.color = '#ff4d4f';
+                orgInfo = null;
+                return;
+            }
+
+            checkOrgBtn.textContent = 'Đang kiểm tra...';
+            checkOrgBtn.disabled = true;
+
+            const result = await checkOrgCode(code);
+            if (result) {
+                orgInfo = result;
+                orgNameDiv.textContent = `✅ ${result.orgCode} - ${result.name}`;
+                orgNameDiv.style.color = '#52c41a';
+            } else {
+                orgInfo = null;
+                orgNameDiv.textContent = '❌ Không tìm thấy bưu cục';
+                orgNameDiv.style.color = '#ff4d4f';
+            }
+
+            checkOrgBtn.textContent = 'Kiểm tra';
+            checkOrgBtn.disabled = false;
+        });
+
+        // Cancel
+        cancelBtn.addEventListener('click', () => {
+            document.body.removeChild(overlay);
+        });
+
+        // Create CMS
+        createBtn.addEventListener('click', async () => {
+            const content = contentTextarea.value.trim();
+            if (!content) {
+                alert('Vui lòng nhập nội dung CMS');
+                return;
+            }
+
+            const ticketType = ticketTypeSelect.value as 'support' | 'complaint';
+            const destOrgCode = orgCodeInput.value.trim();
+
+            // Show loading
+            loadingDiv.style.display = 'block';
+            createBtn.disabled = true;
+            cancelBtn.disabled = true;
+
+            const result = await createCMSTicket({
+                maVanDon,
+                serviceCode,
+                ticketType,
+                content,
+                destOrgCode: destOrgCode || undefined,
+                orgInfo: orgInfo
+            });
+
+            if (result.success) {
+                alert(`✅ Đã tạo CMS thành công! Mã ticket: ${result.ticketCode}`);
+                document.body.removeChild(overlay);
+
+                // Refresh CMS data
+                setTimeout(() => {
+                    const cmsCol = document.querySelector('#custom-cms-col');
+                    if (cmsCol) {
+                        const modal = document.querySelector('div[role="dialog"]');
+                        if (modal) {
+                            // Trigger refresh by calling addCMSInfoToModal again
+                            addCMSInfoToModal(modal, maVanDon);
+                        }
+                    }
+                }, 2000);
+            } else {
+                alert(`❌ Lỗi khi tạo CMS: ${result.error}`);
+                loadingDiv.style.display = 'none';
+                createBtn.disabled = false;
+                cancelBtn.disabled = false;
+            }
+        });
+
+        // Close on overlay click
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) {
+                document.body.removeChild(overlay);
             }
         });
     }

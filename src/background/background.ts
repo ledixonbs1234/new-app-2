@@ -1523,6 +1523,15 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         });
         // Không sendResponse, không return true
       }
+      if (request.type === "SEARCH_ORG_INFO") {
+        handleSearchOrgInfo(request.payload, sendResponse);
+        return true; // Async response
+    }
+
+    if (request.type === "CREATE_CMS_TICKET_V2") {
+        handleCreateCMSTicketV2(request.payload, sendResponse);
+        return true; // Async response
+    }
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
@@ -5883,5 +5892,80 @@ async function handleSendSubmit(): Promise<void | PromiseLike<void>> {
       }
     },
   );
+}
+
+/**
+ * Handler: Tìm kiếm thông tin đơn vị (Org) trên CMS
+ */
+async function handleSearchOrgInfo(
+  payload: { code: string },
+  sendResponse: (response: any) => void
+) {
+  try {
+    const { code } = payload;
+    // Bypass CORS bằng cách gọi từ Background
+    const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
+      method: "GET",
+      headers: {
+        "accept": "*/*",
+        "x-requested-with": "XMLHttpRequest"
+      },
+      credentials: "include" // Quan trọng: Gửi kèm Cookie đăng nhập CMS
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      sendResponse({ status: 'success', data: data });
+    } else {
+      sendResponse({ status: 'error', error: `HTTP ${response.status}: ${response.statusText}` });
+    }
+  } catch (error: any) {
+    console.error("[BG] Error searching org:", error);
+    sendResponse({ status: 'error', error: error.message });
+  }
+}
+
+/**
+ * Handler: Tạo CMS Ticket (Thay thế cho createCMSTicket ở Content Script)
+ * Nhận dữ liệu thô, tự tạo FormData để gửi.
+ */
+async function handleCreateCMSTicketV2(
+  payload: { troubleticketData: any }, // Nhận object JSON thô, không phải FormData
+  sendResponse: (response: any) => void
+) {
+  try {
+    const { troubleticketData } = payload;
+    console.log("[BG] Creating CMS Ticket...", troubleticketData);
+
+    // 1. Tái tạo FormData tại Background
+    const form = new FormData();
+    form.append("file", "");
+    form.append("type", "DVBC");
+    
+    // Chuyển object thành Blob như yêu cầu của API CMS
+    form.append(
+      "troubleticketData", 
+      new Blob([JSON.stringify(troubleticketData)], { type: "application/json" })
+    );
+
+    // 2. Gọi Fetch
+    const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
+      method: "POST",
+      body: form,
+      credentials: "include" // Quan trọng
+    });
+
+    const result = await response.json();
+
+    if (result.result === true && result.code) {
+      sendResponse({ status: 'success', ticketCode: result.code });
+    } else {
+      sendResponse({ status: 'error', error: result.message || 'CMS trả về lỗi không xác định' });
+    }
+
+  } catch (error: any) {
+    console.error("[BG] Error creating ticket:", error);
+    sendResponse({ status: 'error', error: error.message });
+  }
 }
 // END: ================== MY VNPOST ==================

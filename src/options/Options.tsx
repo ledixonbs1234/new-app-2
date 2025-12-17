@@ -5,6 +5,7 @@ import { CopyOutlined, SettingOutlined, SyncOutlined, FileTextOutlined, HistoryO
 import { OrderHdr, OrderDetail, OrderHistoryResponse } from '../types/vnpost';
 import { Timeline } from 'antd';
 import { UndoOutlined, CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, CarOutlined, HomeOutlined } from '@ant-design/icons';
+import { delay } from '../contentScript/utils';
 const { Title } = Typography;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
@@ -32,7 +33,7 @@ const Options: React.FC = () => {
     const [currentDetailOrder, setCurrentDetailOrder] = useState<ExtendedOrder | null>(null);
     const [detailModalActiveTab, setDetailModalActiveTab] = useState<string>('1');
     const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().subtract(1, 'month'), dayjs()]);
-    const [supportedOrgCodes, setSupportedOrgCodes] = useState<string[]>([]);
+
     const [singleSearchLoading, setSingleSearchLoading] = useState<boolean>(false);
     const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const [currentPage, setCurrentPage] = useState<number>(1);
@@ -59,10 +60,9 @@ const Options: React.FC = () => {
 
     useEffect(() => {
         // First try to get from chrome storage
-        chrome.storage.local.get(['accessToken', 'orgCode', 'supportedOrgCodes'], (result) => {
+        chrome.storage.local.get(['accessToken', 'orgCode'], (result) => {
             if (result.accessToken) setToken(result.accessToken);
             if (result.orgCode) setOrgCode(result.orgCode);
-            if (result.supportedOrgCodes) setSupportedOrgCodes(result.supportedOrgCodes);
         });
 
         // Load CMS templates from Firebase
@@ -197,6 +197,14 @@ const Options: React.FC = () => {
             if (order.cmsData === undefined) return false; // Chưa fetch CMS, bỏ qua
             const hasCMS = order.cmsData?.tickets && order.cmsData.tickets.length > 0;
             if (hasCMS) return false; // Có CMS, bỏ qua
+
+            // 3. Loại bỏ đơn hàng đã Chuyển hoàn (không cần lập CMS)
+            const history = order.history?.orderStatusHistoryDtoList || [];
+            const isReturn = history.some(h => {
+                const statusLower = (h.statusText || "").toLowerCase();
+                return statusLower.includes("chuyển hoàn");
+            });
+            if (isReturn) return false;
         }
 
         // Long delivery duration filter
@@ -567,8 +575,7 @@ const Options: React.FC = () => {
         // Save to chrome.storage
         chrome.storage.local.set({
             accessToken: token,
-            orgCode: orgCode,
-            supportedOrgCodes: supportedOrgCodes
+            orgCode: orgCode
         }, () => {
             // Save CMS templates to Firebase
             chrome.runtime.sendMessage({
@@ -647,24 +654,20 @@ const Options: React.FC = () => {
     };
 
     const processOrdersQueue = async (currentOrders: ExtendedOrder[]) => {
-        // To tránh server phát hiện spam và trả về SDT/địa chỉ kèm "Lỗi truy vấn thông tin",
-        // ta fetch detail tuần tự với delay giữa mỗi request.
-        // Các fetch khác (history, extraInfo, cmsData) chạy song song và update ngay khi có kết quả.
-
-        const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
         // Cache tập trung để tránh race condition
         const cacheUpdates: { [orderHdrId: string]: Partial<ExtendedOrder> } = {};
+        const promises: Promise<any>[] = [];
 
-        // Fetch history, extraInfo, cmsData song song và update ngay
+        const initCache = (id: string) => {
+            if (!cacheUpdates[id]) cacheUpdates[id] = {};
+        };
+
+        // 1. History & Extra Info
         currentOrders.forEach((order) => {
-            // Khởi tạo cache entry
-            if (!cacheUpdates[order.orderHdrId]) {
-                cacheUpdates[order.orderHdrId] = {};
-            }
+            initCache(order.orderHdrId);
 
-            // History
-            fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${order.itemCode}`, {
+            // History Promise
+            const historyPromise = fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${order.itemCode}`, {
                 headers: { 'Authorization': token, 'Capikey': '19001111' }
             })
                 .then(res => res.json())
@@ -674,79 +677,87 @@ const Options: React.FC = () => {
                     cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
                 })
                 .catch(() => null);
+            promises.push(historyPromise);
 
-            // Extra Info
-            chrome.runtime.sendMessage({
-                event: "CONTENTMY",
-                type: "GET_EXTRA_INFO",
-                payload: { maVanDon: order.itemCode }
-            }, (response) => {
-                const extraInfo = response?.status === 'success' ? response.data : '';
-                updateOrderState(order.orderHdrId, { extraInfo });
-                cacheUpdates[order.orderHdrId].extraInfo = extraInfo;
-                cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
+            // Extra Info Promise
+            const extraPromise = new Promise(resolve => {
+                chrome.runtime.sendMessage({
+                    event: "CONTENTMY",
+                    type: "GET_EXTRA_INFO",
+                    payload: { maVanDon: order.itemCode }
+                }, (response) => {
+                    const extraInfo = response?.status === 'success' ? response.data : '';
+                    updateOrderState(order.orderHdrId, { extraInfo });
+                    cacheUpdates[order.orderHdrId].extraInfo = extraInfo;
+                    cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
+                    resolve(null);
+                });
             });
-
-            // CMS Data
-            const timeout = setTimeout(() => {
-                updateOrderState(order.orderHdrId, { cmsData: null });
-            }, 5000);
-
-            chrome.runtime.sendMessage({
-                event: "CONTENTMY",
-                type: "FETCH_CMS_DATA",
-                payload: { maVanDon: order.itemCode }
-            }, (response) => {
-                clearTimeout(timeout);
-                const cmsData = response?.status === 'success' ? response.data : null;
-                updateOrderState(order.orderHdrId, { cmsData });
-                cacheUpdates[order.orderHdrId].cmsData = cmsData;
-                cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
-            });
+            promises.push(extraPromise);
         });
 
-        // Fetch detail tuần tự với delay để tránh spam
-        // for (let i = 0; i < currentOrders.length; i++) {
-        //     const order = currentOrders[i];
+        // 2. CMS Data - Probe Logic Wrapped
+        if (currentOrders.length > 0) {
+            const cmsPromise = new Promise(async (resolve) => {
+                const probeOrder = currentOrders[0];
+                const others = currentOrders.slice(1);
+                initCache(probeOrder.orderHdrId);
 
-        //     try {
-        //         const response = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${order.orderHdrId}`, {
-        //             headers: { 'Authorization': token, 'Capikey': '19001111' }
-        //         });
-        //         const detailData: OrderDetail = await response.json();
+                // Fetch Probe (Timeout 10s)
+                const probeResult: any = await new Promise(r => {
+                    const t = setTimeout(() => r(null), 10000);
+                    chrome.runtime.sendMessage({
+                        event: "CONTENTMY", type: "FETCH_CMS_DATA", payload: { maVanDon: probeOrder.itemCode }
+                    }, (res) => { clearTimeout(t); r(res); });
+                });
 
-        //         // Chỉ cập nhật receiverAddress nếu không chứa "+++"
-        //         const hasError = detailData?.receiverPhone?.includes('+++') || detailData?.receiverAddress?.includes('+++');
-        //         const receiverAddress = hasError ? order.receiverAddress : (detailData?.receiverAddress || order.receiverAddress);
+                if (probeResult?.status === 'success') {
+                    // Probe Success
+                    const cmsData = probeResult.data;
+                    updateOrderState(probeOrder.orderHdrId, { cmsData });
+                    cacheUpdates[probeOrder.orderHdrId].cmsData = cmsData;
+                    cacheUpdates[probeOrder.orderHdrId].lastUpdated = Date.now();
 
-        //         updateOrderState(order.orderHdrId, {
-        //             detail: detailData,
-        //             receiverAddress: receiverAddress,
-        //             loading: false
-        //         });
+                    // Parallel fetch for others - NO aggressive timeout (allow queueing)
+                    const otherPromises = others.map(order => new Promise(rInner => {
+                        initCache(order.orderHdrId);
+                        // Safety timeout 60s
+                        const t = setTimeout(() => rInner(null), 60000);
+                        chrome.runtime.sendMessage({
+                            event: "CONTENTMY", type: "FETCH_CMS_DATA", payload: { maVanDon: order.itemCode }
+                        }, (res) => {
+                            clearTimeout(t);
+                            if (res?.status === 'success') {
+                                const data = res.data;
+                                updateOrderState(order.orderHdrId, { cmsData: data });
+                                cacheUpdates[order.orderHdrId].cmsData = data;
+                                cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
+                            }
+                            rInner(null);
+                        });
+                    }));
 
-        //         cacheUpdates[order.orderHdrId].detail = detailData;
-        //         cacheUpdates[order.orderHdrId].receiverAddress = receiverAddress;
-        //         cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
+                    await Promise.all(otherPromises);
+                    resolve(null);
+                } else {
+                    // Probe Failed
+                    console.warn("CMS Probe failed.");
+                    message.warning("Không thể kết nối CMS. Dừng tải dữ liệu CMS.");
+                    currentOrders.forEach(order => {
+                        updateOrderState(order.orderHdrId, { cmsData: { error: true } });
+                    });
+                    resolve(null);
+                }
+            });
+            promises.push(cmsPromise);
+        }
 
-        //     } catch (error) {
-        //         console.error(`Error fetching detail for ${order.itemCode}`, error);
-        //         updateOrderState(order.orderHdrId, { loading: false });
-        //     }
+        // Wait for ALL fetches to complete
+        await Promise.allSettled(promises);
 
-        //     // Delay trước khi fetch order tiếp theo
-        //     if (i < currentOrders.length - 1) {
-        //         await sleep(DETAIL_DELAY);
-        //     }
-        // }
-
-        // Đợi thêm 2s cho các async fetch (history, extra, cms) hoàn thành
-        await sleep(2000);
-
-        // Lưu tất cả cache một lần duy nhất
+        // Save entire cache once
         chrome.storage.local.get('ordersCache', (result) => {
             const existingCache = result.ordersCache || {};
-
             Object.keys(cacheUpdates).forEach(orderHdrId => {
                 const currentCache = existingCache[orderHdrId] || {};
                 existingCache[orderHdrId] = {
@@ -1206,6 +1217,11 @@ const Options: React.FC = () => {
                         initialValue={record.extraInfo}
                         onUpdate={(newVal) => updateOrderState(record.orderHdrId, { extraInfo: newVal })}
                     />
+                    {record.cmsData?.error && (
+                        <div className="mt-2 text-xs text-red-500 font-semibold bg-red-50 p-2 rounded border border-red-200 flex items-center gap-2">
+                            <ExclamationCircleOutlined /> Lỗi kết nối CMS
+                        </div>
+                    )}
                     {record.cmsData?.tickets && record.cmsData.tickets.length > 0 && (() => {
                         const lastTickets = record.cmsData.tickets.slice(-2);
 
@@ -1329,8 +1345,6 @@ const Options: React.FC = () => {
                     {/* CMS Create Button */}
                     <CreateCMSTicketButton
                         record={record}
-                        orgCode={orgCode}
-                        supportedOrgCodes={supportedOrgCodes}
                         updateOrderState={updateOrderState}
                     />
 
@@ -1412,7 +1426,18 @@ const Options: React.FC = () => {
         }
 
         // Get selected orders
-        const selectedOrders = orders.filter(o => selectedRowKeys.includes(o.orderHdrId));
+        const selectedOrders = orders.filter(o => {
+            if (!selectedRowKeys.includes(o.orderHdrId)) return false;
+
+            // Filter out 'chuyển hoàn' or 'trả lại'
+            const history = o.history?.orderStatusHistoryDtoList || [];
+            const isReturn = history.some(h => {
+                const statusLower = (h.statusText || "").toLowerCase();
+                return statusLower.includes("chuyển hoàn") || statusLower.includes("trả lại");
+            });
+
+            return !isReturn;
+        });
 
         // Initialize bulk CMS items
         const items = await Promise.all(selectedOrders.map(async (order) => {
@@ -1774,25 +1799,13 @@ const Options: React.FC = () => {
                         <label className="font-bold">Org Code</label>
                         <Input value={orgCode} onChange={e => setOrgCode(e.target.value)} placeholder="C00..." />
                     </div>
-                    <div>
-                        <label className="font-bold">Danh sách OrgCode được hỗ trợ tạo CMS</label>
-                        <TextArea
-                            rows={3}
-                            value={supportedOrgCodes.join(', ')}
-                            onChange={e => {
-                                const codes = e.target.value.split(',').map(c => c.trim()).filter(c => c);
-                                setSupportedOrgCodes(codes);
-                            }}
-                            placeholder="C002707689, C002707690, ..."
-                        />
-                        <div className="text-xs text-gray-500 mt-1">Ngăn cách bởi dấu phẩy</div>
-                    </div>
+
                     <div>
                         <label className="font-bold">Mẫu nội dung CMS</label>
                         <div className="flex flex-col gap-2 mt-2">
                             {cmsTemplates.map((template, idx) => (
                                 <div key={idx} className="flex gap-2">
-                                    <Input
+                                    <TextArea
                                         value={template}
                                         onChange={e => {
                                             const newTemplates = [...cmsTemplates];
@@ -1915,42 +1928,57 @@ const Options: React.FC = () => {
 
                                     const troubleticketData = {
                                         ttkType: "2",
-                                        ttkContactName: "Nước Mắm Bếp Xưa",
+                                        ttkContactName: "Bưu cục Bồng Sơn 1",
                                         ttkSource: "1",
                                         ttkSeverity: "1",
                                         ttkReason: item.ticketType === 'support' ? "134" : "534",
-                                        ttkContactNumber: "0971555066",
+                                        ttkContactNumber: "02563861718",
                                         ttkContactEmail: "",
                                         ttkContent: item.content,
-                                        accntCodeRef: "59320A04000588000",
-                                        accntName: "Nước Mắm Bếp Xưa",
-                                        accntMobile: "0971555066",
+                                        accntCodeRef: "",
+                                        accntName: "",
+                                        accntMobile: "",
                                         ttkSrvIdL2: "62",
                                         ttkSrvIdL3: ttkSrvIdL3,
                                         ttkExpiration: expiration,
-                                        ttkContactAddr: "55415 - X. Hoài Hảo H. Hoài Nhơn Tỉnh Bình Định",
-                                        accntAddr: "55415 - X. Hoài Hảo H. Hoài Nhơn Tỉnh Bình Định",
-                                        accntCode: "C002707689",
-                                        accntPostcode: "55415",
-                                        accntProvince: "55",
-                                        accntDistrict: "5540",
-                                        accntWards: "55415",
+                                        ttkContactAddr: "",
+                                        accntAddr: "",
+                                        accntCode: "",
+                                        accntPostcode: "",
+                                        accntProvince: "",
+                                        accntDistrict: "",
+                                        accntWards: "",
                                         accntEmail: "",
-                                        contactPostcode: "55415",
-                                        contactProvince: "55",
-                                        contactDistrict: "5540",
-                                        contactWards: "55415",
-                                        accntAddrDetail: "phụng du 2, hoài hảo",
-                                        ttkContactAddrDetail: "phụng du 2, hoài hảo",
+                                        contactPostcode: "",
+                                        contactProvince: "",
+                                        contactDistrict: "",
+                                        contactWards: "",
+                                        accntAddrDetail: "",
+                                        ttkContactAddrDetail: "",
                                         ttkSrvId: 1,
                                         parcelId: item.order.itemCode,
                                         postageData: {
                                             parcelId: item.order.itemCode,
-                                            poAcc: "", poName: "", managerOrg: "", poWeigh: "", poRate: "",
-                                            poClassify: "", poSenderName: "", poSenderPhone: "", poSenderAddress: "",
-                                            poSenderAddressDetail: "", poReceiverName: "", poReceiverPhone: "",
-                                            poReceiverAddress: "", poReceiverAddressDetail: "", poParcelDirection: "",
-                                            poSend: "", poSendName: "", poSenderEmail: "", poStatus: "", poMethod: ""
+                                            poAcc: "",
+                                            poName: "",
+                                            managerOrg: "",
+                                            poWeigh: "",
+                                            poRate: "",
+                                            poClassify: "",
+                                            poSenderName: "",
+                                            poSenderPhone: "",
+                                            poSenderAddress: "",
+                                            poSenderAddressDetail: "",
+                                            poReceiverName: "",
+                                            poReceiverPhone: "",
+                                            poReceiverAddress: "",
+                                            poReceiverAddressDetail: "",
+                                            poParcelDirection: "",
+                                            poSend: "",
+                                            poSendName: "",
+                                            poSenderEmail: "",
+                                            poStatus: "",
+                                            poMethod: ""
                                         }
                                     };
 
@@ -1965,6 +1993,7 @@ const Options: React.FC = () => {
                                     const result = await response.json();
 
                                     if (result.result === true && result.code) {
+                                        await delay(3000);
                                         // Success - forward if destOrgCode exists
                                         if (item.destOrgCode && item.orgInfo) {
                                             try {
@@ -2235,7 +2264,7 @@ const BulkCMSModal: React.FC<{
                                         placeholder="📋 Chọn mẫu nội dung..."
                                         style={{ flex: 1 }}
                                         size="large"
-                                        onChange={(value) => setGlobalContent(value)}
+                                        onChange={(value) => setGlobalContent(value.replace(/\\n/g, '\n'))}
                                         allowClear
                                     >
                                         {templates.map((template, tIdx) => (
@@ -2359,10 +2388,8 @@ const BulkCMSModal: React.FC<{
 
 const CreateCMSTicketButton: React.FC<{
     record: ExtendedOrder;
-    orgCode: string;
-    supportedOrgCodes: string[];
     updateOrderState: (orderHdrId: string, updates: Partial<ExtendedOrder>) => void;
-}> = ({ record, orgCode, supportedOrgCodes, updateOrderState }) => {
+}> = ({ record, updateOrderState }) => {
     const [modalOpen, setModalOpen] = useState(false);
     const [ticketType, setTicketType] = useState<'support' | 'complaint'>('support');
     const [content, setContent] = useState('');
@@ -2405,7 +2432,7 @@ const CreateCMSTicketButton: React.FC<{
     };
 
     // Check if should show button
-    const shouldShow = supportedOrgCodes.includes(orgCode) &&
+    const shouldShow =
         (record.cmsData === undefined || record.cmsData?.tickets?.length === 0);
 
     if (!shouldShow) return null;
@@ -2525,33 +2552,33 @@ const CreateCMSTicketButton: React.FC<{
 
                     const troubleticketData = {
                         ttkType: "2",
-                        ttkContactName: "Nước Mắm Bếp Xưa",
+                        ttkContactName: "Bưu cục Bồng Sơn 1",
                         ttkSource: "1",
                         ttkSeverity: "1",
                         ttkReason: ticketType === 'support' ? "134" : "534",
-                        ttkContactNumber: "0971555066",
+                        ttkContactNumber: "02563861718",
                         ttkContactEmail: "",
                         ttkContent: content,
-                        accntCodeRef: "59320A04000588000",
-                        accntName: "Nước Mắm Bếp Xưa",
-                        accntMobile: "0971555066",
+                        accntCodeRef: "",
+                        accntName: "",
+                        accntMobile: "",
                         ttkSrvIdL2: "62",
                         ttkSrvIdL3: ttkSrvIdL3,
                         ttkExpiration: expiration,
-                        ttkContactAddr: "55415 - X. Hoài Hảo H. Hoài Nhơn Tỉnh Bình Định",
-                        accntAddr: "55415 - X. Hoài Hảo H. Hoài Nhơn Tỉnh Bình Định",
-                        accntCode: "C002707689",
-                        accntPostcode: "55415",
-                        accntProvince: "55",
-                        accntDistrict: "5540",
-                        accntWards: "55415",
+                        ttkContactAddr: "",
+                        accntAddr: "",
+                        accntCode: "",
+                        accntPostcode: "",
+                        accntProvince: "",
+                        accntDistrict: "",
+                        accntWards: "",
                         accntEmail: "",
-                        contactPostcode: "55415",
-                        contactProvince: "55",
-                        contactDistrict: "5540",
-                        contactWards: "55415",
-                        accntAddrDetail: "phụng du 2, hoài hảo",
-                        ttkContactAddrDetail: "phụng du 2, hoài hảo",
+                        contactPostcode: "",
+                        contactProvince: "",
+                        contactDistrict: "",
+                        contactWards: "",
+                        accntAddrDetail: "",
+                        ttkContactAddrDetail: "",
                         ttkSrvId: 1,
                         parcelId: record.itemCode,
                         postageData: {
@@ -2778,7 +2805,7 @@ const CreateCMSTicketButton: React.FC<{
                             <Select
                                 placeholder="📋 Chọn mẫu có sẵn..."
                                 className="w-full"
-                                onChange={(value) => setContent(value)}
+                                onChange={(value) => setContent(value.replace(/\\n/g, '\n'))}
                                 allowClear
                             >
                                 {templates.map((template, idx) => (
