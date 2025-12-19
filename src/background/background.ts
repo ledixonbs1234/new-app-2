@@ -403,7 +403,7 @@ chrome.runtime.onInstalled.addListener(() => {
     title: "Gọi với App của tôi",
     contexts: ["selection"], // Chỉ hiện khi có bôi đen văn bản
   });
-  
+
   chrome.contextMenus.create({
     id: "openImagePanel",
     title: "📦 Mở Panel Hình Ảnh",
@@ -418,10 +418,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 
     await updateToPhone("phonecall", phoneNumber);
   }
-  
+
   if (info.menuItemId === "openImagePanel") {
     // Click context menu là user gesture hợp lệ
-   if (tab?.id) {
+    if (tab?.id) {
       // Gửi tín hiệu đến Content Script yêu cầu Bật/Tắt panel
       try {
         await chrome.tabs.sendMessage(tab.id, { action: "TOGGLE_SIDE_PANEL" });
@@ -1526,12 +1526,19 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       if (request.type === "SEARCH_ORG_INFO") {
         handleSearchOrgInfo(request.payload, sendResponse);
         return true; // Async response
-    }
+      }
+      if (request.type === "GET_CMS_AUTO_CONFIGS") {
+        handleGetCMSAutoConfigs(sendResponse);
+        return true; 
+      } else if (request.type === "SAVE_CMS_AUTO_CONFIGS") {
+        handleSaveCMSAutoConfigs(request.payload, sendResponse);
+        return true; 
+      }
 
-    if (request.type === "CREATE_CMS_TICKET_V2") {
+      if (request.type === "CREATE_CMS_TICKET_V2") {
         handleCreateCMSTicketV2(request.payload, sendResponse);
         return true; // Async response
-    }
+      }
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
@@ -1733,7 +1740,7 @@ async function handleClearAllImages(
     });
 
     const firebasePath = `PORTAL/CHILD/${keyMessage}/imported_images`;
-    
+
     console.log(`[BG] Clearing all images from Firebase path: ${firebasePath}`);
 
     // Get count before deletion (for response)
@@ -1744,15 +1751,15 @@ async function handleClearAllImages(
     await db.ref(firebasePath).remove();
 
     console.log(`[BG] Successfully deleted ${imageCount} images from Firebase`);
-    sendResponse({ 
-      status: "success", 
+    sendResponse({
+      status: "success",
       deletedCount: imageCount,
       message: `Đã xóa ${imageCount} hình ảnh thành công`
     });
   } catch (error: any) {
     console.error("[BG] Error clearing all images:", error);
-    sendResponse({ 
-      status: "error", 
+    sendResponse({
+      status: "error",
       error: error.message || "Không thể xóa hình ảnh"
     });
   }
@@ -2448,7 +2455,7 @@ const handleSendToPortal = async (
             return reject(
               new Error(
                 chrome.runtime.lastError.message ||
-                  "Lỗi không xác định khi gửi tin nhắn",
+                "Lỗi không xác định khi gửi tin nhắn",
               ),
             );
           }
@@ -4384,7 +4391,7 @@ function handleSaveKHOption(data: any): void | PromiseLike<void> {
   //save chrome local b
   chrome.storage.local.set(
     { currentMaKH: temp1.maKH, currentOptions: temp1.options },
-    function () {},
+    function () { },
   );
   if (temp1.account && temp1.password) {
     accountPortal = temp1.account;
@@ -4398,9 +4405,9 @@ const handleEditKL = async (data: any): Promise<void> => {
   let loadedTab: chrome.tabs.Tab | undefined = undefined;
   var initialTab = await createOrActiveTab(
     "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" +
-      temp1.ID +
-      "&id=" +
-      temp1.IDCODE,
+    temp1.ID +
+    "&id=" +
+    temp1.IDCODE,
     "portalkhl.vnpost.vn",
     true,
   );
@@ -4426,9 +4433,9 @@ const handleEditKL = async (data: any): Promise<void> => {
     );
     await createOrActiveTab(
       "https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=" +
-        temp1.ID +
-        "&id=" +
-        temp1.IDCODE,
+      temp1.ID +
+      "&id=" +
+      temp1.IDCODE,
       "portalkhl.vnpost.vn",
       true, // Kích hoạt tab này
     );
@@ -4757,7 +4764,7 @@ function broadcastUpdate(payload: SessionData) {
       if (tab.id) {
         chrome.tabs
           .sendMessage(tab.id, { type: "STORAGE_UPDATED", payload })
-          .catch(() => {});
+          .catch(() => { });
       }
     }
   });
@@ -4807,7 +4814,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         // 4. TRỰC TIẾP LƯU DỮ LIỆU
         // Gọi hàm save_order để lưu vào chrome.storage.session và phát đi thông báo cập nhật.
         // Đây là bước mấu chốt: đảm bảo dữ liệu được lưu ngay cả khi popup đã đóng.
-        save_order({ payload: { orders: orders } }, () => {}); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
+        save_order({ payload: { orders: orders } }, () => { }); // dùng hàm rỗng cho sendResponse vì ta không cần phản hồi từ hàm này
         // Cập nhật badge thành công (màu xanh lá)
         chrome.action.setBadgeText({ text: "OK" });
         chrome.action.setBadgeBackgroundColor({ color: "#28a745" });
@@ -4904,28 +4911,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
   if (msg.type === "QUERY_SIDEPANEL_STATUS") {
     console.log("[Background] 📨 Received QUERY_SIDEPANEL_STATUS from content script");
-    
+
     // Check if side panel is open by trying to send a message to it
     chrome.runtime.sendMessage({ type: "SIDEPANEL_PING" }, (response) => {
       const isOpen = !chrome.runtime.lastError;
       console.log("[Background] Side panel status:", isOpen ? "OPEN" : "CLOSED");
       sendResponse({ isOpen });
     });
-    
+
     return true; // Async response
   }
 
   if (msg.type === "SIDEPANEL_SMART_ZOOM") {
     console.log("[Background] 📨 Received SIDEPANEL_SMART_ZOOM from content script:", msg.payload);
-    
+
     // Forward message to all side panel contexts
     const forwardedMessage = {
       type: "APPLY_SMART_ZOOM",
       payload: msg.payload
     };
-    
+
     console.log("[Background] 📤 Forwarding as APPLY_SMART_ZOOM:", forwardedMessage);
-    
+
     chrome.runtime.sendMessage(forwardedMessage, (response) => {
       if (chrome.runtime.lastError) {
         console.log("[Background] ❌ Error forwarding to side panel:", chrome.runtime.lastError.message);
@@ -4933,14 +4940,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         console.log("[Background] ✅ Message forwarded successfully. Response:", response);
       }
     });
-    
+
     sendResponse({ status: "forwarded" });
     return true;
   }
 
   if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
     console.log("[Background] 📨 Received SIDEPANEL_NEXT_IMAGE from content script");
-    
+
     // Forward to side panel
     chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
       if (chrome.runtime.lastError) {
@@ -4951,7 +4958,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ status: "success" });
       }
     });
-    
+
     return true;
   }
 
@@ -5020,120 +5027,120 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     }
 
     if (msg.type === "SEARCH_ORG_INFO") {
-        (async () => {
-            try {
-                const { code } = msg.payload;
-                const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
-                    method: "GET",
-                    headers: {
-                        "accept": "*/*",
-                        "x-requested-with": "XMLHttpRequest"
-                    },
-                    credentials: "include" // QUAN TRỌNG: Để gửi kèm cookie đăng nhập của CMS
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    sendResponse({ status: 'success', data: data });
-                } else {
-                    sendResponse({ status: 'error', error: response.statusText });
-                }
-            } catch (error) {
-                console.error("Error fetching org info:", error);
-                sendResponse({ status: 'error', error: msg.message });
-            }
-        })();
-        return true; // Giữ kết nối để trả lời async
+      (async () => {
+        try {
+          const { code } = msg.payload;
+          const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
+            method: "GET",
+            headers: {
+              "accept": "*/*",
+              "x-requested-with": "XMLHttpRequest"
+            },
+            credentials: "include" // QUAN TRỌNG: Để gửi kèm cookie đăng nhập của CMS
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            sendResponse({ status: 'success', data: data });
+          } else {
+            sendResponse({ status: 'error', error: response.statusText });
+          }
+        } catch (error) {
+          console.error("Error fetching org info:", error);
+          sendResponse({ status: 'error', error: msg.message });
+        }
+      })();
+      return true; // Giữ kết nối để trả lời async
     }
 
     if (msg.type === "FORWARD_CMS_TICKET") {
-        (async () => {
-            try {
-                const { ticketId, dataOrgObj } = msg.payload;
+      (async () => {
+        try {
+          const { ticketId, dataOrgObj } = msg.payload;
 
-                // 1. Tạo FormData ngay tại Background
-                const form = new FormData();
-                
-                // API CMS yêu cầu 'dataOrg' là một Blob chứa JSON
-                form.append("dataOrg", new Blob([JSON.stringify(dataOrgObj)], { type: "application/json" }));
-                form.append("ids", ticketId);
+          // 1. Tạo FormData ngay tại Background
+          const form = new FormData();
 
-                console.log(`[BG] Forwarding ticket ${ticketId} to ${dataOrgObj[0].orgCode}`);
+          // API CMS yêu cầu 'dataOrg' là một Blob chứa JSON
+          form.append("dataOrg", new Blob([JSON.stringify(dataOrgObj)], { type: "application/json" }));
+          form.append("ids", ticketId);
 
-                // 2. Gọi Fetch (Bypass CORS nhờ Background context)
-                const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
-                    method: "PUT",
-                    body: form,
-                    credentials: "include" // Quan trọng: Gửi kèm Cookie đăng nhập
-                });
+          console.log(`[BG] Forwarding ticket ${ticketId} to ${dataOrgObj[0].orgCode}`);
 
-                if (response.ok) {
-                    // API này thường trả về JSON dù thành công hay thất bại logic
-                    const result = await response.json();
-                    sendResponse({ status: 'success', data: result });
-                } else {
-                    sendResponse({ status: 'error', error: `HTTP Error: ${response.status}` });
-                }
-            } catch (error) {
-                console.error("[BG] Error forwarding ticket:", error);
-                sendResponse({ status: 'error', error: msg.message });
-            }
-        })();
-        return true; // Giữ kết nối async
+          // 2. Gọi Fetch (Bypass CORS nhờ Background context)
+          const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
+            method: "PUT",
+            body: form,
+            credentials: "include" // Quan trọng: Gửi kèm Cookie đăng nhập
+          });
+
+          if (response.ok) {
+            // API này thường trả về JSON dù thành công hay thất bại logic
+            const result = await response.json();
+            sendResponse({ status: 'success', data: result });
+          } else {
+            sendResponse({ status: 'error', error: `HTTP Error: ${response.status}` });
+          }
+        } catch (error) {
+          console.error("[BG] Error forwarding ticket:", error);
+          sendResponse({ status: 'error', error: msg.message });
+        }
+      })();
+      return true; // Giữ kết nối async
     }
     if (msg.type === "CLOSE_CMS_TICKET") {
-        (async () => {
-            try {
-                const { ticketId } = msg.payload;
-                console.log(`[BG] Closing ticket ${ticketId}...`);
+      (async () => {
+        try {
+          const { ticketId } = msg.payload;
+          console.log(`[BG] Closing ticket ${ticketId}...`);
 
-                // BƯỚC 1: Lưu kết quả xử lý (Save Result)
-                const formData = new FormData();
-                formData.append("actType", "4");
-                formData.append("actResult", "490"); // 490 = Phát thành công/Giải quyết xong
-                formData.append("ttkId", ticketId);
-                formData.append("actContent", "PTC");
-                formData.append("file", "undefined");
-                formData.append("isProcess", "true");
-                formData.append("isCompensated", "false");
+          // BƯỚC 1: Lưu kết quả xử lý (Save Result)
+          const formData = new FormData();
+          formData.append("actType", "4");
+          formData.append("actResult", "490"); // 490 = Phát thành công/Giải quyết xong
+          formData.append("ttkId", ticketId);
+          formData.append("actContent", "PTC");
+          formData.append("file", "undefined");
+          formData.append("isProcess", "true");
+          formData.append("isCompensated", "false");
 
-                const saveRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save-result", {
-                    method: "POST",
-                    body: formData,
-                    credentials: "include"
-                });
+          const saveRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save-result", {
+            method: "POST",
+            body: formData,
+            credentials: "include"
+          });
 
-                const saveData = await saveRes.json();
+          const saveData = await saveRes.json();
 
-                // Kiểm tra kết quả bước 1
-                if (!saveData.result) {
-                    throw new Error(`Lỗi lưu kết quả: ${saveData.message || 'Unknown error'}`);
-                }
+          // Kiểm tra kết quả bước 1
+          if (!saveData.result) {
+            throw new Error(`Lỗi lưu kết quả: ${saveData.message || 'Unknown error'}`);
+          }
 
-                // BƯỚC 2: Đóng hồ sơ (Change Status)
-                // API này dùng x-www-form-urlencoded
-                const closeRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/changestatus", {
-                    method: "POST",
-                    headers: {
-                        "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
-                    },
-                    body: `ids=${ticketId}`,
-                    credentials: "include"
-                });
+          // BƯỚC 2: Đóng hồ sơ (Change Status)
+          // API này dùng x-www-form-urlencoded
+          const closeRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/changestatus", {
+            method: "POST",
+            headers: {
+              "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+            },
+            body: `ids=${ticketId}`,
+            credentials: "include"
+          });
 
-                // API changestatus thường trả về text hoặc json, kiểm tra ok là được
-                if (closeRes.ok) {
-                    sendResponse({ status: 'success' });
-                } else {
-                    throw new Error(`Lỗi đóng hồ sơ: ${closeRes.statusText}`);
-                }
+          // API changestatus thường trả về text hoặc json, kiểm tra ok là được
+          if (closeRes.ok) {
+            sendResponse({ status: 'success' });
+          } else {
+            throw new Error(`Lỗi đóng hồ sơ: ${closeRes.statusText}`);
+          }
 
-            } catch (error: any) {
-                console.error("[BG] Error closing ticket:", error);
-                sendResponse({ status: 'error', error: error.message });
-            }
-        })();
-        return true; // Giữ kết nối async
+        } catch (error: any) {
+          console.error("[BG] Error closing ticket:", error);
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true; // Giữ kết nối async
     }
   }
 });
@@ -5531,7 +5538,7 @@ async function handleCreateComplaint(
     if (cmsTabs.length > 0) {
       console.log("[BG] Tìm thấy tab CMS. Kiểm tra URL hiện tại...");
       const currentTab = cmsTabs[0];
-      
+
       // Chỉ update URL nếu khác với URL mong muốn (tránh refresh không cần thiết)
       if (currentTab.url !== cmsUrl) {
         console.log("[BG] URL khác nhau, đang chuyển hướng và đợi load...");
@@ -5569,7 +5576,7 @@ async function handleCreateComplaint(
         payload: complaintData,
       }
     );
-    
+
     console.log('[BG] Đã gửi message tới CMS, không chờ response');
   } catch (error: any) {
     console.error("[BG] Lỗi trong quá trình tạo khiếu nại:", error);
@@ -5924,35 +5931,77 @@ async function handleSearchOrgInfo(
     sendResponse({ status: 'error', error: error.message });
   }
 }
-
 /**
- * Handler: Tạo CMS Ticket (Thay thế cho createCMSTicket ở Content Script)
- * Nhận dữ liệu thô, tự tạo FormData để gửi.
+ * Handler: Tạo CMS Ticket V2 (Logic tập trung tại Background)
  */
 async function handleCreateCMSTicketV2(
-  payload: { troubleticketData: any }, // Nhận object JSON thô, không phải FormData
+  payload: {
+    maVanDon: string,
+    serviceCode: string,
+    ticketType: 'support' | 'complaint',
+    content: string
+  },
   sendResponse: (response: any) => void
 ) {
   try {
-    const { troubleticketData } = payload;
-    console.log("[BG] Creating CMS Ticket...", troubleticketData);
+    const { maVanDon, serviceCode, ticketType, content } = payload;
 
-    // 1. Tái tạo FormData tại Background
+    console.log(`[BG] Processing CMS Ticket creation for ${maVanDon}`);
+
+    // 1. Tính toán ngày hết hạn (Business Logic)
+    const now = new Date();
+    const expirationDate = new Date(now);
+    // Support +1 ngày, Complaint +7 ngày
+    expirationDate.setDate(expirationDate.getDate() + (ticketType === 'support' ? 1 : 7));
+    const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
+
+    // 2. Mapping Service Code
+    const ttkSrvIdL3 = SERVICE_CODE_MAPPING[serviceCode] || SERVICE_CODE_MAPPING["DEFAULT"] || "1206";
+
+    // 3. Cấu tạo Object troubleticketData
+    const troubleticketData = {
+      ttkType: "2",
+      ttkContactName: "Bưu cục Bồng Sơn 1",
+      ttkSource: "1",
+      ttkSeverity: "1",
+      ttkReason: ticketType === 'support' ? "134" : "534",
+      ttkContactNumber: "02563861718",
+      ttkContactEmail: "",
+      ttkContent: content,
+      accntCodeRef: "", accntName: "", accntMobile: "",
+      ttkSrvIdL2: "62",
+      ttkSrvIdL3: ttkSrvIdL3,
+      ttkExpiration: expiration,
+      ttkContactAddr: "", accntAddr: "", accntCode: "", accntPostcode: "",
+      accntProvince: "", accntDistrict: "", accntWards: "", accntEmail: "",
+      contactPostcode: "", contactProvince: "", contactDistrict: "", contactWards: "",
+      accntAddrDetail: "", ttkContactAddrDetail: "",
+      ttkSrvId: 1,
+      parcelId: maVanDon,
+      postageData: {
+        parcelId: maVanDon,
+        poAcc: "", poName: "", managerOrg: "", poWeigh: "", poRate: "",
+        poClassify: "", poSenderName: "", poSenderPhone: "", poSenderAddress: "",
+        poSenderAddressDetail: "", poReceiverName: "", poReceiverPhone: "",
+        poReceiverAddress: "", poReceiverAddressDetail: "", poParcelDirection: "",
+        poSend: "", poSendName: "", poSenderEmail: "", poStatus: "", poMethod: ""
+      }
+    };
+
+    // 4. Tạo FormData
     const form = new FormData();
     form.append("file", "");
     form.append("type", "DVBC");
-    
-    // Chuyển object thành Blob như yêu cầu của API CMS
     form.append(
-      "troubleticketData", 
+      "troubleticketData",
       new Blob([JSON.stringify(troubleticketData)], { type: "application/json" })
     );
 
-    // 2. Gọi Fetch
+    // 5. Gọi Fetch
     const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
       method: "POST",
       body: form,
-      credentials: "include" // Quan trọng
+      credentials: "include"
     });
 
     const result = await response.json();
@@ -5960,7 +6009,7 @@ async function handleCreateCMSTicketV2(
     if (result.result === true && result.code) {
       sendResponse({ status: 'success', ticketCode: result.code });
     } else {
-      sendResponse({ status: 'error', error: result.message || 'CMS trả về lỗi không xác định' });
+      sendResponse({ status: 'error', error: result.message || 'CMS trả về lỗi' });
     }
 
   } catch (error: any) {
@@ -5968,4 +6017,89 @@ async function handleCreateCMSTicketV2(
     sendResponse({ status: 'error', error: error.message });
   }
 }
+
+/**
+  * Service Code Mapping - Map từ service code sang ttkSrvIdL3
+  */
+const SERVICE_CODE_MAPPING: { [key: string]: string } = {
+  "CTN004": "363", "CTN005": "566", "CTN002": "335", "CTN003": "336",
+  "TTN006": "311", "RTN001": "307", "RTN002": "706", "RTN004": "1147",
+  "RTN003": "726", "TTN002": "346", "TTN005": "310", "TTN001": "315",
+  "TTN004": "309", "TTN003": "367", "TTN007": "707", "CTN012": "1266",
+  "CTN001": "334", "CTN019": "1187", "CTN028": "1646", "CTN022": "1306",
+  "CTN020": "1206", "CTN018": "1186", "CTN007": "668", "CTN016": "1146",
+  "PTN010": "1506", "CTN021": "1226", "CTN025": "1606", "ETN054": "1547",
+  "ETN053": "1546", "ETN031": "646", "ETN032": "647", "ETN033": "766",
+  "ETN037": "786", "ETN052": "1486", "CTN010": "926", "CTN024": "1526",
+  "CTN023": "1527", "CTN009": "846", "ETN017": "329", "ETN007": "318",
+  "ETN039": "1026", "ETN019": "332", "ETN009": "320", "ETN030": "468",
+  "ETN050": "1366", "ETN040": "989", "ETN044": "1107", "ETN045": "1106",
+  "ETN001": "312", "ETN011": "324", "ETN055": "1626", "ETN022": "526",
+  "ETN020": "333", "ETN010": "321", "ETN029": "347", "ETN048": "1326",
+  "ETN051": "1426", "ETN047": "1246", "ETN046": "1166", "ETN049": "1346",
+  "ETN016": "328", "ETN006": "317", "ETN041": "966", "ETN013": "326",
+  "ETN003": "314", "ETN024": "342", "ETN028": "345", "ETN027": "344",
+  "ETN015": "327", "ETN005": "316", "ETN012": "325", "ETN002": "313",
+  "ETN035": "807", "ETN034": "806", "ETN036": "808", "ETN018": "330",
+  "ETN008": "319", "HCC003": "688", "HCC004": "689", "HCC001": "686",
+  "HCC002": "687", "KT1001": "348", "KT1005": "352", "KT1006": "353",
+  "KT1007": "354", "KT1003": "350", "KT1014": "360", "KT1015": "361",
+  "KT1016": "362", "KT1002": "349", "KT1008": "322", "KT1009": "355",
+  "KT1010": "356", "KT1004": "351", "KT1011": "357", "KT1012": "358",
+  "KT1013": "359", "PTN012": "1267", "PTN003": "746", "PTN001": "337",
+  "PTN005": "906", "PTN006": "907", "PTN009": "986", "PTN008": "946",
+  "PTN004": "747", "PHBC02": "1006", "CTN006": "586", "TDT001": "364",
+  "ETN021": "341", "TDT002": "338", "TDT004": "340", "TDT003": "339",
+  "CTN008": "826", "PTN002": "546", "DEFAULT": "1206"
+
+};
 // END: ================== MY VNPOST ==================
+/**
+ * Lấy cấu hình tự động CMS từ Firebase (Global)
+ */
+async function handleGetCMSAutoConfigs(
+  sendResponse: (response: any) => void,
+) {
+  try {
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lấy từ path chung CMS_AUTO_CONFIGS
+    const snapshot = await db.ref('CMS_AUTO_CONFIGS').get();
+    const configs = snapshot.val() || [];
+
+    console.log(`[BG] Đã tải ${configs.length} cấu hình tự động từ Firebase`);
+    sendResponse({ status: "success", configs: configs });
+  } catch (error: any) {
+    console.error("[BG] Lỗi khi lấy cấu hình tự động:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}
+
+/**
+ * Lưu cấu hình tự động CMS lên Firebase (Global)
+ */
+async function handleSaveCMSAutoConfigs(
+  payload: { configs: any[] },
+  sendResponse: (response: any) => void,
+) {
+  try {
+    const { configs } = payload;
+
+    if (!db) {
+      sendResponse({ status: "error", error: "Firebase chưa được khởi tạo" });
+      return;
+    }
+
+    // Lưu vào path chung CMS_AUTO_CONFIGS
+    await db.ref('CMS_AUTO_CONFIGS').set(configs);
+
+    console.log(`[BG] Đã lưu ${configs.length} cấu hình tự động lên Firebase`);
+    sendResponse({ status: "success" });
+  } catch (error: any) {
+    console.error("[BG] Lỗi khi lưu cấu hình tự động:", error);
+    sendResponse({ status: "error", error: error.message });
+  }
+}

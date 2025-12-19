@@ -18,7 +18,25 @@ interface ExtendedOrder extends OrderHdr {
     lastUpdated?: number;
     loading?: boolean;
 }
-
+interface BulkCMSItem {
+    order: ExtendedOrder;
+    ticketType: 'support' | 'complaint';
+    content: string;
+    destOrgCode: string;
+    orgInfo: { orgCode: string; name: string } | null;
+    status: 'pending' | 'processing' | 'success' | 'error';
+    error?: string;
+    // Đây là 2 trường mới bạn cần thêm:
+    action?: 'create' | 'forward';
+    ticketId?: string;
+}
+// Interface cho cấu hình tự động
+interface CMSAutoConfig {
+    orgCode: string;       // Mã khách hàng (VD: C00...)
+    customerName?: string; // Tên gợi nhớ (optional)
+    ticketType: 'support' | 'complaint';
+    content: string;       // Nội dung CMS
+}
 const Options: React.FC = () => {
     const [token, setToken] = useState<string>('');
     const [orgCode, setOrgCode] = useState<string>('');
@@ -33,7 +51,8 @@ const Options: React.FC = () => {
     const [currentDetailOrder, setCurrentDetailOrder] = useState<ExtendedOrder | null>(null);
     const [detailModalActiveTab, setDetailModalActiveTab] = useState<string>('1');
     const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs]>([dayjs().subtract(1, 'month'), dayjs()]);
-
+    const [cmsAutoConfigs, setCmsAutoConfigs] = useState<CMSAutoConfig[]>([]);
+    const [isAutoProcessing, setIsAutoProcessing] = useState(false);
     const [singleSearchLoading, setSingleSearchLoading] = useState<boolean>(false);
     const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
     const [currentPage, setCurrentPage] = useState<number>(1);
@@ -43,15 +62,7 @@ const Options: React.FC = () => {
     const LONG_DELIVERY_THRESHOLD = 3; // days
     const [bulkCMSModalOpen, setBulkCMSModalOpen] = useState(false);
     const [cmsTemplates, setCmsTemplates] = useState<string[]>([]);
-    const [bulkCMSItems, setBulkCMSItems] = useState<Array<{
-        order: ExtendedOrder;
-        ticketType: 'support' | 'complaint';
-        content: string;
-        destOrgCode: string;
-        orgInfo: { orgCode: string; name: string } | null;
-        status: 'pending' | 'processing' | 'success' | 'error';
-        error?: string;
-    }>>([]);
+    const [bulkCMSItems, setBulkCMSItems] = useState<BulkCMSItem[]>([]);
     const [isBulkCreating, setIsBulkCreating] = useState(false);
     const bulkCreationAbortRef = useRef<boolean>(false);
     const [filterPendingCMSDelivered, setFilterPendingCMSDelivered] = useState<boolean>(false);
@@ -121,6 +132,15 @@ const Options: React.FC = () => {
                             });
                     }
                 });
+            }
+        });
+        chrome.runtime.sendMessage({
+            event: 'CONTENTMY',
+            type: 'GET_CMS_AUTO_CONFIGS',
+            payload: {}
+        }, (response) => {
+            if (response?.status === 'success' && Array.isArray(response.configs)) {
+                setCmsAutoConfigs(response.configs);
             }
         });
     }, []);
@@ -575,7 +595,8 @@ const Options: React.FC = () => {
         // Save to chrome.storage
         chrome.storage.local.set({
             accessToken: token,
-            orgCode: orgCode
+            orgCode: orgCode,
+            cmsAutoConfigs: cmsAutoConfigs
         }, () => {
             // Save CMS templates to Firebase
             chrome.runtime.sendMessage({
@@ -590,7 +611,180 @@ const Options: React.FC = () => {
                     message.error('Lỗi khi lưu mẫu CMS');
                 }
             });
+            // 2. --- THÊM MỚI: Save CMS Auto Configs to Firebase ---
+            chrome.runtime.sendMessage({
+                event: 'CONTENTMY',
+                type: 'SAVE_CMS_AUTO_CONFIGS',
+                payload: { configs: cmsAutoConfigs }
+            }, (response) => {
+                if (response?.status === 'success') {
+                    message.success('Đã đồng bộ cấu hình tự động lên hệ thống');
+                } else {
+                    message.error('Lỗi khi lưu cấu hình tự động');
+                }
+            });
+            message.success('Đã lưu cài đặt bao gồm cấu hình tự động CMS');
+            setShowSettings(false);
         });
+    };
+
+    const handleAutoGenerateCMS = async () => {
+        // 1. Xác định danh sách đơn hàng cần xử lý (Phát hàng + KTC)
+        const targetStatus = ['11', '12', '13', '15', '27'];
+
+        // 2. Lọc danh sách candidate
+        const candidateOrders = orders.filter(order => {
+            if (!targetStatus.includes(order.status)) return false;
+
+            // QUAN TRỌNG: Bỏ điều kiện check chưa có CMS.
+            // Chúng ta cần xử lý cả đơn đã có CMS nhưng cần nhắc lại.
+            // Tuy nhiên, vẫn cần check cmsData !== undefined để đảm bảo đã load dữ liệu
+            if (order.cmsData === undefined) return false;
+
+            // Check chuyển hoàn/trả lại (giữ nguyên logic loại bỏ)
+            const history = order.history?.orderStatusHistoryDtoList || [];
+            const isReturn = history.some(h => {
+                const statusLower = (h.statusText || "").toLowerCase();
+                return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công");
+            });
+            if (isReturn) return false;
+
+            return true;
+        });
+
+        if (candidateOrders.length === 0) {
+            message.warning("Không tìm thấy đơn hàng nào thỏa mãn (Phát hàng/KTC). Hãy tải dữ liệu chi tiết và CMS trước!");
+            return;
+        }
+
+        setIsAutoProcessing(true);
+        message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_map', duration: 0 });
+
+        const todayStr = dayjs().format("DD/MM/YYYY");
+
+        const items = await Promise.all(candidateOrders.map(async (order) => {
+            // Tìm cấu hình
+            const config = cmsAutoConfigs.find(cfg => cfg.orgCode === order.senderCode);
+
+            // Nội dung chuẩn từ cấu hình
+            const configContent = config ? config.content : `Hỗ trợ đơn hàng ${order.itemCode}`;
+            const ticketType = config ? config.ticketType : 'support';
+
+            // Logic lấy OrgCode đích (giữ nguyên)
+            const historyList = order.history?.orderStatusHistoryDtoList || [];
+            let destOrgCode = '';
+            for (const historyItem of historyList) {
+                const addressMatch = historyItem.address?.match(/(\d{6})/);
+                if (addressMatch) {
+                    destOrgCode = addressMatch[1];
+                    break;
+                }
+            }
+
+            // Fetch Org Info (giữ nguyên)
+            let orgInfo: { orgCode: string; name: string } | null = null;
+            if (destOrgCode && destOrgCode.length === 6) {
+                try {
+                    const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${destOrgCode}`, {
+                        headers: { "accept": "*/*", "x-requested-with": "XMLHttpRequest" },
+                        credentials: "include"
+                    });
+                    const data = await response.json();
+                    if (data && data.length > 0) {
+                        orgInfo = { orgCode: data[0].orgCode, name: data[0].name };
+                    }
+                } catch (e) { console.error(e); }
+            }
+
+            // --- LOGIC MỚI: QUYẾT ĐỊNH CREATE HAY FORWARD ---
+            let action: 'create' | 'forward' = 'create';
+            let finalContent = configContent;
+            let targetTicketId = '';
+            let shouldInclude = true;
+
+            const existingTickets = order.cmsData?.tickets || [];
+
+            if (existingTickets.length > 0) {
+                // Đã có ticket. Kiểm tra xem có ticket nào chứa nội dung mẫu chưa
+                // Tìm ticket mới nhất mà trong history của nó có chứa nội dung config
+                // Hoặc đơn giản: Check ticket mới nhất xem trạng thái thế nào
+
+                const latestTicket = existingTickets[0]; // Giả sử ticket đầu tiên là mới nhất
+                const actions = latestTicket.actions || [];
+
+                // Kiểm tra xem trong ticket này đã từng có nội dung giống config chưa
+                // So sánh tương đối (includes) và chuẩn hóa chữ thường
+                const normalizedConfigContent = configContent.toLowerCase().trim();
+
+                const matchingAction = actions.find((act: any) =>
+                    act.content && act.content.toLowerCase().includes(normalizedConfigContent)
+                );
+
+                if (matchingAction) {
+                    // Đã có nội dung này rồi. Kiểm tra ngày.
+                    // Action date format thường là "dd/mm/yyyy HH:mm"
+                    const actionDatePart = matchingAction.date.split(' ')[0]; // lấy dd/mm/yyyy
+
+                    if (actionDatePart === todayStr) {
+                        // Đã yêu cầu trong hôm nay -> Bỏ qua
+                        shouldInclude = false;
+                    } else {
+                        // Khác ngày hiện tại -> Chuyển tiếp nhắc nhở
+                        action = 'forward';
+                        targetTicketId = latestTicket.ticketId;
+                        finalContent = "Hỗ trợ phát gấp!!, Thank";
+                    }
+                } else {
+                    // Có ticket nhưng chưa có nội dung yêu cầu này -> Có thể tạo mới hoặc forward nội dung yêu cầu vào ticket cũ.
+                    // Theo yêu cầu: "tạo nếu chưa có".
+                    // Tuy nhiên, CMS thường không cho tạo nhiều ticket mở cùng lúc. 
+                    // Tốt nhất: Nếu ticket cũ chưa đóng -> Forward nội dung yêu cầu vào ticket đó.
+                    // Nếu ticket cũ đã đóng -> Tạo mới.
+
+                    const isClosed = actions.length > 0 && actions[actions.length - 1].content.includes("Đóng yêu cầu");
+
+                    if (isClosed) {
+                        action = 'create';
+                    } else {
+                        // Ticket đang mở nhưng chưa có nội dung này -> Forward nội dung cấu hình vào
+                        action = 'forward';
+                        targetTicketId = latestTicket.ticketId;
+                        // Giữ nguyên nội dung gốc (configContent) để gửi vào ticket đang mở
+                    }
+                }
+            } else {
+                // Chưa có ticket nào -> Tạo mới
+                action = 'create';
+            }
+
+            if (!shouldInclude) return null;
+
+            return {
+                order,
+                ticketType,
+                content: finalContent, // Nội dung cuối cùng (Gốc hoặc "Hỗ trợ gấp")
+                destOrgCode,
+                orgInfo,
+                status: 'pending' as const,
+                action,
+                ticketId: targetTicketId
+            };
+        }));
+
+        // Lọc bỏ các null items
+        const validItems = items.filter((item): item is NonNullable<typeof item> => item !== null);
+
+        setIsAutoProcessing(false);
+
+        if (validItems.length === 0) {
+            message.info("Tất cả các đơn hàng thỏa mãn đã được xử lý trong hôm nay.");
+            return;
+        }
+
+        message.success({ content: `Đã lập danh sách ${validItems.length} yêu cầu!`, key: 'auto_map' });
+
+        setBulkCMSItems(validItems);
+        setBulkCMSModalOpen(true);
     };
 
     const fetchOrders = async (customStatus?: string[]) => {
@@ -1606,6 +1800,25 @@ const Options: React.FC = () => {
                                     </span>
                                 )}
                             </Button>
+                            <Button
+                                size="small"
+                                // Highlight nếu đang chọn đúng tập hợp các mã này
+                                type={filterStatus.length === 5 && filterStatus.includes('15') && filterStatus.includes('11') ? 'primary' : 'dashed'}
+                                onClick={() => {
+                                    // Gộp mã của Phát hàng (11,12,13) và KTC (15,27)
+                                    const status = ['11', '12', '13', '15', '27'];
+                                    setFilterStatus(status);
+                                    fetchOrders(status);
+                                }}
+                                className="shadow-sm border-purple-400 text-purple-600"
+                            >
+                                🔄 Phát & KTC
+                                {orders.length > 0 && filterStatus.length === 5 && (
+                                    <span className="ml-1.5 px-1.5 py-0.5 bg-purple-600 text-white text-xs rounded-full font-bold">
+                                        {orders.length}
+                                    </span>
+                                )}
+                            </Button>
                         </Space.Compact>
 
                         {/* Additional Filters */}
@@ -1670,6 +1883,20 @@ const Options: React.FC = () => {
                             </Button>
                         )}
                     </div>
+                    <Space.Compact className="ml-2">
+                        <Tooltip title="Tự động quét đơn KTC/Phát hàng, map nội dung theo Mã KH và chuẩn bị tạo CMS">
+                            <Button
+                                type="primary"
+                                style={{ background: 'linear-gradient(45deg, #FF6B6B, #FF8E53)', border: 'none' }}
+                                icon={<span role="img" aria-label="robot">🤖</span>}
+                                onClick={handleAutoGenerateCMS}
+                                loading={isAutoProcessing}
+                                className="shadow-md hover:shadow-lg transition-all"
+                            >
+                                Tự động CMS
+                            </Button>
+                        </Tooltip>
+                    </Space.Compact>
 
                     {/* Action Buttons */}
                     <Space size="small">
@@ -1789,52 +2016,112 @@ const Options: React.FC = () => {
                 onOk={saveSettings}
                 onCancel={() => setShowSettings(false)}
                 className="modern-modal"
+                width={800}
             >
-                <div className="flex flex-col gap-4">
-                    <div>
-                        <label className="font-bold">Token (Authorization)</label>
-                        <TextArea rows={4} value={token} onChange={e => setToken(e.target.value)} placeholder="eyJhbGciOi..." />
-                    </div>
-                    <div>
-                        <label className="font-bold">Org Code</label>
-                        <Input value={orgCode} onChange={e => setOrgCode(e.target.value)} placeholder="C00..." />
-                    </div>
-
-                    <div>
-                        <label className="font-bold">Mẫu nội dung CMS</label>
-                        <div className="flex flex-col gap-2 mt-2">
-                            {cmsTemplates.map((template, idx) => (
-                                <div key={idx} className="flex gap-2">
-                                    <TextArea
-                                        value={template}
-                                        onChange={e => {
-                                            const newTemplates = [...cmsTemplates];
-                                            newTemplates[idx] = e.target.value;
-                                            setCmsTemplates(newTemplates);
-                                        }}
-                                        placeholder="Nhập mẫu nội dung..."
-                                    />
+                <Tabs defaultActiveKey="1">
+                    <Tabs.TabPane tab="Cấu hình chung" key="1">
+                        <div className="flex flex-col gap-4">
+                            <div>
+                                <label className="font-bold">Token (Authorization)</label>
+                                <TextArea rows={3} value={token} onChange={e => setToken(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="font-bold">Org Code (Của bạn)</label>
+                                <Input value={orgCode} onChange={e => setOrgCode(e.target.value)} />
+                            </div>
+                            <div>
+                                <label className="font-bold">Mẫu nội dung CMS</label>
+                                <div className="flex flex-col gap-2 mt-2">
+                                    {cmsTemplates.map((template, idx) => (
+                                        <div key={idx} className="flex gap-2">
+                                            <TextArea
+                                                value={template}
+                                                onChange={e => {
+                                                    const newTemplates = [...cmsTemplates];
+                                                    newTemplates[idx] = e.target.value;
+                                                    setCmsTemplates(newTemplates);
+                                                }}
+                                                placeholder="Nhập mẫu nội dung..."
+                                            />
+                                            <Button
+                                                danger
+                                                icon={<DeleteOutlined />}
+                                                onClick={() => {
+                                                    const newTemplates = cmsTemplates.filter((_, i) => i !== idx);
+                                                    setCmsTemplates(newTemplates);
+                                                }}
+                                            />
+                                        </div>
+                                    ))}
                                     <Button
-                                        danger
-                                        icon={<DeleteOutlined />}
-                                        onClick={() => {
-                                            const newTemplates = cmsTemplates.filter((_, i) => i !== idx);
-                                            setCmsTemplates(newTemplates);
-                                        }}
-                                    />
+                                        type="dashed"
+                                        icon={<PlusOutlined />}
+                                        onClick={() => setCmsTemplates([...cmsTemplates, ''])}
+                                        block
+                                    >
+                                        Thêm mẫu
+                                    </Button>
                                 </div>
-                            ))}
-                            <Button
-                                type="dashed"
-                                icon={<PlusOutlined />}
-                                onClick={() => setCmsTemplates([...cmsTemplates, ''])}
-                                block
-                            >
-                                Thêm mẫu
-                            </Button>
+                            </div>
                         </div>
-                    </div>
-                </div>
+                    </Tabs.TabPane>
+                    <Tabs.TabPane tab="🤖 Cấu hình Tự động CMS" key="2">
+                        <div className="flex flex-col gap-3">
+                            <div className="bg-blue-50 p-2 rounded text-xs text-blue-700">
+                                ℹ️ Cấu hình nội dung CMS riêng cho từng Mã Khách Hàng (Người gửi). Khi dùng chức năng "Tự động CMS", hệ thống sẽ tìm mã khách hàng trong bảng này để điền nội dung tương ứng.
+                            </div>
+
+                            <div className="max-h-[300px] overflow-y-auto border rounded-lg">
+                                <Table
+                                    dataSource={cmsAutoConfigs}
+                                    rowKey="orgCode"
+                                    pagination={false}
+                                    size="small"
+                                    columns={[
+                                        { title: 'Mã KH', dataIndex: 'orgCode', width: 100 },
+                                        {
+                                            title: 'Loại',
+                                            dataIndex: 'ticketType',
+                                            width: 100,
+                                            render: (t) => t === 'support'
+                                                ? <Tag color="blue">Hỗ trợ</Tag>
+                                                : <Tag color="orange">Khiếu nại</Tag>
+                                        },
+                                        {
+                                            title: 'Nội dung mẫu',
+                                            dataIndex: 'content',
+                                            // Bỏ ellipsis: true, thay bằng render custom
+                                            render: (text) => (
+                                                <div style={{
+                                                    whiteSpace: 'pre-wrap', // Quan trọng: Giữ định dạng xuống dòng
+                                                    maxHeight: '80px',      // Giới hạn chiều cao để không phá vỡ bảng
+                                                    overflowY: 'auto',      // Hiện thanh cuộn nếu quá dài
+                                                    fontSize: '12px'
+                                                }}>
+                                                    {text}
+                                                </div>
+                                            )
+                                        },
+                                        {
+                                            title: 'Xóa',
+                                            width: 60,
+                                            align: 'center',
+                                            render: (_, __, idx) => (
+                                                <Button type="text" danger icon={<DeleteOutlined />} onClick={() => {
+                                                    const newCfgs = cmsAutoConfigs.filter((_, i) => i !== idx);
+                                                    setCmsAutoConfigs(newCfgs);
+                                                }} />
+                                            )
+                                        }
+                                    ]}
+                                />
+                            </div>
+
+                            <NewConfigRow onAdd={(newItem) => setCmsAutoConfigs([...cmsAutoConfigs, newItem])} />
+                        </div>
+                    </Tabs.TabPane>
+                </Tabs>
+
             </Modal>
 
             {/* Bulk CMS Creation Modal */}
@@ -1860,179 +2147,84 @@ const Options: React.FC = () => {
                 isCreating={isBulkCreating}
                 onStartCreation={async () => {
                     Modal.confirm({
-                        title: 'Xác nhận tạo CMS',
-                        content: `Bạn có muốn tạo ${bulkCMSItems.length} ticket CMS?`,
+                        title: 'Xác nhận thực hiện',
+                        content: `Bạn có muốn xử lý ${bulkCMSItems.length} yêu cầu?`,
                         onOk: async () => {
                             setIsBulkCreating(true);
                             bulkCreationAbortRef.current = false;
 
                             for (let i = 0; i < bulkCMSItems.length; i++) {
-                                if (bulkCreationAbortRef.current) {
-                                    message.info('Đã dừng tạo CMS');
-                                    break;
-                                }
+                                if (bulkCreationAbortRef.current) break;
 
                                 const item = bulkCMSItems[i];
-
-                                // Update status to processing
-                                setBulkCMSItems(prev => prev.map((it, idx) =>
-                                    idx === i ? { ...it, status: 'processing' } : it
-                                ));
+                                // Update status processing...
+                                setBulkCMSItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: 'processing' } : it));
 
                                 try {
-                                    // Calculate expiration date
-                                    const now = new Date();
-                                    const expirationDate = new Date(now);
-                                    expirationDate.setDate(expirationDate.getDate() + (item.ticketType === 'support' ? 1 : 7));
-                                    const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
+                                    let success = false;
+                                    let ticketCode = item.ticketId;
 
-                                    // Get ttkSrvIdL3 from serviceCode mapping
-                                    const SERVICE_CODE_MAPPING: { [key: string]: string } = {
-                                        "CTN004": "363", "CTN005": "566", "CTN002": "335", "CTN003": "336",
-                                        "TTN006": "311", "RTN001": "307", "RTN002": "706", "RTN004": "1147",
-                                        "RTN003": "726", "TTN002": "346", "TTN005": "310", "TTN001": "315",
-                                        "TTN004": "309", "TTN003": "367", "TTN007": "707", "CTN012": "1266",
-                                        "CTN001": "334", "CTN019": "1187", "CTN028": "1646", "CTN022": "1306",
-                                        "CTN020": "1206", "CTN018": "1186", "CTN007": "668", "CTN016": "1146",
-                                        "PTN010": "1506", "CTN021": "1226", "CTN025": "1606", "ETN054": "1547",
-                                        "ETN053": "1546", "ETN031": "646", "ETN032": "647", "ETN033": "766",
-                                        "ETN037": "786", "ETN052": "1486", "CTN010": "926", "CTN024": "1526",
-                                        "CTN023": "1527", "CTN009": "846", "ETN017": "329", "ETN007": "318",
-                                        "ETN039": "1026", "ETN019": "332", "ETN009": "320", "ETN030": "468",
-                                        "ETN050": "1366", "ETN040": "989", "ETN044": "1107", "ETN045": "1106",
-                                        "ETN001": "312", "ETN011": "324", "ETN055": "1626", "ETN022": "526",
-                                        "ETN020": "333", "ETN010": "321", "ETN029": "347", "ETN048": "1326",
-                                        "ETN051": "1426", "ETN047": "1246", "ETN046": "1166", "ETN049": "1346",
-                                        "ETN016": "328", "ETN006": "317", "ETN041": "966", "ETN013": "326",
-                                        "ETN003": "314", "ETN024": "342", "ETN028": "345", "ETN027": "344",
-                                        "ETN015": "327", "ETN005": "316", "ETN012": "325", "ETN002": "313",
-                                        "ETN035": "807", "ETN034": "806", "ETN036": "808", "ETN018": "330",
-                                        "ETN008": "319", "HCC003": "688", "HCC004": "689", "HCC001": "686",
-                                        "HCC002": "687", "KT1001": "348", "KT1005": "352", "KT1006": "353",
-                                        "KT1007": "354", "KT1003": "350", "KT1014": "360", "KT1015": "361",
-                                        "KT1016": "362", "KT1002": "349", "KT1008": "322", "KT1009": "355",
-                                        "KT1010": "356", "KT1004": "351", "KT1011": "357", "KT1012": "358",
-                                        "KT1013": "359", "PTN012": "1267", "PTN003": "746", "PTN001": "337",
-                                        "PTN005": "906", "PTN006": "907", "PTN009": "986", "PTN008": "946",
-                                        "PTN004": "747", "PHBC02": "1006", "CTN006": "586", "TDT001": "364",
-                                        "ETN021": "341", "TDT002": "338", "TDT004": "340", "TDT003": "339",
-                                        "CTN008": "826", "PTN002": "546"
-                                    };
+                                    if (item.action === 'create') {
+                                        // --- LOGIC TẠO MỚI (CŨ) ---
+                                        const response: any = await new Promise((resolve) => {
+                                            chrome.runtime.sendMessage({
+                                                event: "CONTENTMY",
+                                                type: "CREATE_CMS_TICKET_V2",
+                                                payload: {
+                                                    maVanDon: item.order.itemCode,
+                                                    serviceCode: item.order.serviceCode || '',
+                                                    ticketType: item.ticketType,
+                                                    content: item.content
+                                                }
+                                            }, resolve);
+                                        });
 
-                                    const serviceCode = item.order.serviceCode || '';
-                                    const ttkSrvIdL3 = SERVICE_CODE_MAPPING[serviceCode] || "1206";
-
-                                    const form = new FormData();
-                                    form.append("file", "");
-                                    form.append("type", "DVBC");
-
-                                    const troubleticketData = {
-                                        ttkType: "2",
-                                        ttkContactName: "Bưu cục Bồng Sơn 1",
-                                        ttkSource: "1",
-                                        ttkSeverity: "1",
-                                        ttkReason: item.ticketType === 'support' ? "134" : "534",
-                                        ttkContactNumber: "02563861718",
-                                        ttkContactEmail: "",
-                                        ttkContent: item.content,
-                                        accntCodeRef: "",
-                                        accntName: "",
-                                        accntMobile: "",
-                                        ttkSrvIdL2: "62",
-                                        ttkSrvIdL3: ttkSrvIdL3,
-                                        ttkExpiration: expiration,
-                                        ttkContactAddr: "",
-                                        accntAddr: "",
-                                        accntCode: "",
-                                        accntPostcode: "",
-                                        accntProvince: "",
-                                        accntDistrict: "",
-                                        accntWards: "",
-                                        accntEmail: "",
-                                        contactPostcode: "",
-                                        contactProvince: "",
-                                        contactDistrict: "",
-                                        contactWards: "",
-                                        accntAddrDetail: "",
-                                        ttkContactAddrDetail: "",
-                                        ttkSrvId: 1,
-                                        parcelId: item.order.itemCode,
-                                        postageData: {
-                                            parcelId: item.order.itemCode,
-                                            poAcc: "",
-                                            poName: "",
-                                            managerOrg: "",
-                                            poWeigh: "",
-                                            poRate: "",
-                                            poClassify: "",
-                                            poSenderName: "",
-                                            poSenderPhone: "",
-                                            poSenderAddress: "",
-                                            poSenderAddressDetail: "",
-                                            poReceiverName: "",
-                                            poReceiverPhone: "",
-                                            poReceiverAddress: "",
-                                            poReceiverAddressDetail: "",
-                                            poParcelDirection: "",
-                                            poSend: "",
-                                            poSendName: "",
-                                            poSenderEmail: "",
-                                            poStatus: "",
-                                            poMethod: ""
+                                        if (response && response.status === 'success') {
+                                            ticketCode = response.ticketCode;
+                                            success = true;
+                                            // Wait before forwarding if needed
+                                            if (item.destOrgCode) await delay(3000);
+                                        } else {
+                                            throw new Error(response?.error || 'Failed to create');
                                         }
-                                    };
-
-                                    form.append("troubleticketData", new Blob([JSON.stringify(troubleticketData)], { type: "application/json" }));
-
-                                    const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
-                                        method: "POST",
-                                        body: form,
-                                        credentials: "include"
-                                    });
-
-                                    const result = await response.json();
-
-                                    if (result.result === true && result.code) {
-                                        await delay(3000);
-                                        // Success - forward if destOrgCode exists
-                                        if (item.destOrgCode && item.orgInfo) {
-                                            try {
-                                                const forwardForm = new FormData();
-                                                forwardForm.append("dataOrg", new Blob([JSON.stringify([{
-                                                    tempId: 72,
-                                                    orgCode: item.orgInfo.orgCode,
-                                                    orgName: `${item.orgInfo.orgCode} - ${item.orgInfo.name}`,
-                                                    filename: "", comment: item.content, file: "", type: 2, number: 1
-                                                }])], { type: "application/json" }));
-                                                forwardForm.append("ids", result.code);
-
-                                                await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
-                                                    method: "PUT",
-                                                    body: forwardForm,
-                                                    credentials: "include"
-                                                });
-                                            } catch (error) {
-                                                console.error('Error forwarding:', error);
-                                            }
-                                        }
-
-                                        setBulkCMSItems(prev => prev.map((it, idx) =>
-                                            idx === i ? { ...it, status: 'success' } : it
-                                        ));
                                     } else {
-                                        throw new Error('Failed to create ticket');
+                                        // --- LOGIC CHUYỂN TIẾP (MỚI) ---
+                                        // Action là 'forward', ticketId đã có sẵn, chỉ cần gửi nội dung
+                                        success = true; // Giả định bước đầu OK để vào logic forward bên dưới
                                     }
-                                } catch (error) {
-                                    console.error('Error creating ticket:', error);
-                                    setBulkCMSItems(prev => prev.map((it, idx) =>
-                                        idx === i ? { ...it, status: 'error', error: 'Không thể tạo CMS' } : it
-                                    ));
+
+                                    // --- LOGIC FORWARD (DÙNG CHUNG CHO CẢ TẠO MỚI VÀ CHUYỂN TIẾP) ---
+                                    // Nếu là Tạo mới: Forward đến bưu cục đích với nội dung tạo.
+                                    // Nếu là Forward (nhắc nhở): Forward đến bưu cục đích với nội dung "Hỗ trợ gấp".
+                                    if (success && item.destOrgCode && item.orgInfo && ticketCode) {
+                                        const dataOrgObj = [{
+                                            tempId: 72,
+                                            orgCode: item.orgInfo.orgCode,
+                                            orgName: `${item.orgInfo.orgCode} - ${item.orgInfo.name}`,
+                                            filename: "", comment: item.content, file: "", type: 2, number: 1
+                                        }];
+
+                                        await new Promise(resolve => {
+                                            chrome.runtime.sendMessage({
+                                                event: 'CONTENTMY',
+                                                type: 'FORWARD_CMS_TICKET',
+                                                payload: {
+                                                    ticketId: ticketCode,
+                                                    dataOrgObj: dataOrgObj
+                                                }
+                                            }, resolve);
+                                        });
+                                    }
+
+                                    setBulkCMSItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: 'success' } : it));
+
+                                } catch (error: any) {
+                                    console.error('Error:', error);
+                                    setBulkCMSItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: 'error', error: error.message } : it));
                                 }
 
-                                // Wait 1s before next
-                                if (i < bulkCMSItems.length - 1) {
-                                    await new Promise(resolve => setTimeout(resolve, 1000));
-                                }
+                                // Delay
+                                if (i < bulkCMSItems.length - 1) await new Promise(resolve => setTimeout(resolve, 1000));
                             }
 
                             setIsBulkCreating(false);
@@ -2145,16 +2337,8 @@ const ExtraInfoEditor: React.FC<{ maVanDon: string, initialValue?: string, onUpd
 const BulkCMSModal: React.FC<{
     open: boolean;
     onCancel: () => void;
-    items: Array<{
-        order: ExtendedOrder;
-        ticketType: 'support' | 'complaint';
-        content: string;
-        destOrgCode: string;
-        orgInfo: { orgCode: string; name: string } | null;
-        status: 'pending' | 'processing' | 'success' | 'error';
-        error?: string;
-    }>;
-    setItems: React.Dispatch<React.SetStateAction<Array<any>>>;
+    items: BulkCMSItem[]; // Sử dụng Interface đã khai báo ở Bước 1
+    setItems: React.Dispatch<React.SetStateAction<BulkCMSItem[]>>; // Sửa luôn chỗ này cho đồng bộ (tránh any)
     templates: string[];
     isCreating: boolean;
     onStartCreation: () => void;
@@ -2162,18 +2346,24 @@ const BulkCMSModal: React.FC<{
 }> = ({ open, onCancel, items, setItems, templates, isCreating, onStartCreation, onStop }) => {
     const [globalTicketType, setGlobalTicketType] = useState<'support' | 'complaint'>('support');
     const [globalContent, setGlobalContent] = useState<string>('');
-
+    const [viewingHistory, setViewingHistory] = useState<ExtendedOrder | null>(null);
     // Update all items when global values change
     useEffect(() => {
         if (!isCreating) {
             setItems(prev => prev.map(item => ({
                 ...item,
                 ticketType: globalTicketType,
-                content: globalContent
+                // content: globalContent
             })));
         }
-    }, [globalTicketType, globalContent, isCreating, setItems]);
-
+    }, [globalTicketType, isCreating, setItems]);
+    const handleGlobalContentChange = (newContent: string) => {
+        setGlobalContent(newContent);
+        setItems(prev => prev.map(item => ({
+            ...item,
+            content: newContent
+        })));
+    };
     const getStatusIcon = (status: string) => {
         switch (status) {
             case 'pending': return '⏳';
@@ -2264,7 +2454,7 @@ const BulkCMSModal: React.FC<{
                                         placeholder="📋 Chọn mẫu nội dung..."
                                         style={{ flex: 1 }}
                                         size="large"
-                                        onChange={(value) => setGlobalContent(value.replace(/\\n/g, '\n'))}
+                                        onChange={(value) => handleGlobalContentChange(value.replace(/\\n/g, '\n'))}
                                         allowClear
                                     >
                                         {templates.map((template, tIdx) => (
@@ -2277,7 +2467,7 @@ const BulkCMSModal: React.FC<{
                             </div>
                             <TextArea
                                 value={globalContent}
-                                onChange={(e) => setGlobalContent(e.target.value)}
+                                onChange={(e) => handleGlobalContentChange(e.target.value)}
                                 rows={4}
                                 placeholder="✏️ Nhập nội dung CMS cho tất cả đơn hàng..."
                                 className="rounded-lg text-base"
@@ -2293,11 +2483,29 @@ const BulkCMSModal: React.FC<{
                         <div key={idx} className={`border-2 rounded-lg p-3 transition-all ${getStatusColor(item.status)}`}>
                             <div className="flex items-center justify-between gap-4">
                                 <div className="flex items-center gap-3 flex-1">
-                                    <span className="text-2xl">{getStatusIcon(item.status)}</span>
+                                    {/* Thay đổi icon dựa trên Action */}
+                                    <span className="text-2xl">
+                                        {item.action === 'create' ? '🆕' : '🔔'}
+                                    </span>
                                     <div className="flex-1">
                                         <div className="flex items-center gap-2 mb-1">
-                                            <span className="font-bold text-blue-700">{item.order.itemCode}</span>
+                                            <Tooltip title="Xem lịch sử hành trình">
+                                                <span
+                                                    className="font-bold text-blue-700 cursor-pointer hover:underline hover:text-blue-500"
+                                                    onClick={() => setViewingHistory(item.order)} // Sự kiện click mở lịch sử
+                                                >
+                                                    {item.order.itemCode} <HistoryOutlined className="text-xs ml-1" />
+                                                </span>
+                                            </Tooltip>
                                             <span className="text-sm text-gray-600">- {item.order.receiverName}</span>
+                                        </div>
+                                        <div className="mt-1 text-xs">
+                                            {item.action === 'create' ? (
+                                                <Tag color="green">Tạo mới</Tag>
+                                            ) : (
+                                                <Tag color="orange">Chuyển tiếp {item.ticketId}</Tag>
+                                            )}
+                                            <span className="font-mono text-gray-700">{item.content}</span>
                                         </div>
                                         <div className="flex gap-4 text-xs text-gray-600 items-center">
                                             <span>Service: <span className="font-semibold text-blue-600">{item.order.serviceCode || 'N/A'}</span></span>
@@ -2363,7 +2571,7 @@ const BulkCMSModal: React.FC<{
                         size="large"
                         block
                         onClick={onStartCreation}
-                        disabled={isCreating || items.length === 0 || items.every(it => it.status !== 'pending') || !globalContent.trim()}
+                        disabled={isCreating || items.length === 0 || items.every(it => it.status !== 'pending')}
                         loading={isCreating}
                         className="rounded-lg"
                         icon={isCreating ? null : <PlusOutlined />}
@@ -2382,6 +2590,44 @@ const BulkCMSModal: React.FC<{
                     )}
                 </div>
             </div>
+            <Modal
+                title={
+                    <span className="text-blue-700">
+                        📜 Lịch sử: {viewingHistory?.itemCode}
+                    </span>
+                }
+                open={!!viewingHistory}
+                onCancel={() => setViewingHistory(null)}
+                footer={null}
+                width={700}
+                zIndex={1001} // Đảm bảo nổi lên trên modal tạo CMS
+            >
+                <div className="max-h-[60vh] overflow-y-auto">
+                    {viewingHistory?.history?.orderStatusHistoryDtoList?.length ? (
+                        <div className="flex flex-col gap-3">
+                            {viewingHistory.history.orderStatusHistoryDtoList.map((h, idx) => (
+                                <div key={idx} className="border-b pb-2 last:border-0">
+                                    <div className="flex justify-between">
+                                        <span className="font-bold text-blue-600">{h.traceDate}</span>
+                                        <span className="text-gray-500 text-xs">{h.address}</span>
+                                    </div>
+                                    <div className="font-semibold text-gray-800 mt-1">{h.statusText}</div>
+                                    {h.statusDetail && (
+                                        <div 
+                                            className="text-gray-500 text-sm italic mt-1 bg-gray-50 p-2 rounded" 
+                                            dangerouslySetInnerHTML={{ __html: h.statusDetail }}
+                                        />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-center text-gray-400 py-8">
+                            Không có dữ liệu lịch sử
+                        </div>
+                    )}
+                </div>
+            </Modal>
         </Modal>
     );
 };
@@ -2398,38 +2644,7 @@ const CreateCMSTicketButton: React.FC<{
     const [orgInfo, setOrgInfo] = useState<{ orgCode: string; name: string } | null>(null);
     const [templates, setTemplates] = useState<string[]>([]);
 
-    // Mapping serviceCode -> ttkSrvIdL3
-    const SERVICE_CODE_MAPPING: { [key: string]: string } = {
-        "CTN004": "363", "CTN005": "566", "CTN002": "335", "CTN003": "336",
-        "TTN006": "311", "RTN001": "307", "RTN002": "706", "RTN004": "1147",
-        "RTN003": "726", "TTN002": "346", "TTN005": "310", "TTN001": "315",
-        "TTN004": "309", "TTN003": "367", "TTN007": "707", "CTN012": "1266",
-        "CTN001": "334", "CTN019": "1187", "CTN028": "1646", "CTN022": "1306",
-        "CTN020": "1206", "CTN018": "1186", "CTN007": "668", "CTN016": "1146",
-        "PTN010": "1506", "CTN021": "1226", "CTN025": "1606", "ETN054": "1547",
-        "ETN053": "1546", "ETN031": "646", "ETN032": "647", "ETN033": "766",
-        "ETN037": "786", "ETN052": "1486", "CTN010": "926", "CTN024": "1526",
-        "CTN023": "1527", "CTN009": "846", "ETN017": "329", "ETN007": "318",
-        "ETN039": "1026", "ETN019": "332", "ETN009": "320", "ETN030": "468",
-        "ETN050": "1366", "ETN040": "989", "ETN044": "1107", "ETN045": "1106",
-        "ETN001": "312", "ETN011": "324", "ETN055": "1626", "ETN022": "526",
-        "ETN020": "333", "ETN010": "321", "ETN029": "347", "ETN048": "1326",
-        "ETN051": "1426", "ETN047": "1246", "ETN046": "1166", "ETN049": "1346",
-        "ETN016": "328", "ETN006": "317", "ETN041": "966", "ETN013": "326",
-        "ETN003": "314", "ETN024": "342", "ETN028": "345", "ETN027": "344",
-        "ETN015": "327", "ETN005": "316", "ETN012": "325", "ETN002": "313",
-        "ETN035": "807", "ETN034": "806", "ETN036": "808", "ETN018": "330",
-        "ETN008": "319", "HCC003": "688", "HCC004": "689", "HCC001": "686",
-        "HCC002": "687", "KT1001": "348", "KT1005": "352", "KT1006": "353",
-        "KT1007": "354", "KT1003": "350", "KT1014": "360", "KT1015": "361",
-        "KT1016": "362", "KT1002": "349", "KT1008": "322", "KT1009": "355",
-        "KT1010": "356", "KT1004": "351", "KT1011": "357", "KT1012": "358",
-        "KT1013": "359", "PTN012": "1267", "PTN003": "746", "PTN001": "337",
-        "PTN005": "906", "PTN006": "907", "PTN009": "986", "PTN008": "946",
-        "PTN004": "747", "PHBC02": "1006", "CTN006": "586", "TDT001": "364",
-        "ETN021": "341", "TDT002": "338", "TDT004": "340", "TDT003": "339",
-        "CTN008": "826", "PTN002": "546"
-    };
+
 
     // Check if should show button
     const shouldShow =
@@ -2536,192 +2751,100 @@ const CreateCMSTicketButton: React.FC<{
             onOk: async () => {
                 setLoading(true);
                 try {
-                    // Calculate expiration date
-                    const now = new Date();
-                    const expirationDate = new Date(now);
-                    expirationDate.setDate(expirationDate.getDate() + (ticketType === 'support' ? 1 : 7));
-                    const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
-
-                    // Get ttkSrvIdL3 from serviceCode mapping
-                    const serviceCode = record.serviceCode || '';
-                    const ttkSrvIdL3 = SERVICE_CODE_MAPPING[serviceCode] || "1206"; // Default to CTN020 if not found
-
-                    const form = new FormData();
-                    form.append("file", "");
-                    form.append("type", "DVBC");
-
-                    const troubleticketData = {
-                        ttkType: "2",
-                        ttkContactName: "Bưu cục Bồng Sơn 1",
-                        ttkSource: "1",
-                        ttkSeverity: "1",
-                        ttkReason: ticketType === 'support' ? "134" : "534",
-                        ttkContactNumber: "02563861718",
-                        ttkContactEmail: "",
-                        ttkContent: content,
-                        accntCodeRef: "",
-                        accntName: "",
-                        accntMobile: "",
-                        ttkSrvIdL2: "62",
-                        ttkSrvIdL3: ttkSrvIdL3,
-                        ttkExpiration: expiration,
-                        ttkContactAddr: "",
-                        accntAddr: "",
-                        accntCode: "",
-                        accntPostcode: "",
-                        accntProvince: "",
-                        accntDistrict: "",
-                        accntWards: "",
-                        accntEmail: "",
-                        contactPostcode: "",
-                        contactProvince: "",
-                        contactDistrict: "",
-                        contactWards: "",
-                        accntAddrDetail: "",
-                        ttkContactAddrDetail: "",
-                        ttkSrvId: 1,
-                        parcelId: record.itemCode,
-                        postageData: {
-                            parcelId: record.itemCode,
-                            poAcc: "",
-                            poName: "",
-                            managerOrg: "",
-                            poWeigh: "",
-                            poRate: "",
-                            poClassify: "",
-                            poSenderName: "",
-                            poSenderPhone: "",
-                            poSenderAddress: "",
-                            poSenderAddressDetail: "",
-                            poReceiverName: "",
-                            poReceiverPhone: "",
-                            poReceiverAddress: "",
-                            poReceiverAddressDetail: "",
-                            poParcelDirection: "",
-                            poSend: "",
-                            poSendName: "",
-                            poSenderEmail: "",
-                            poStatus: "",
-                            poMethod: ""
-                        }
-                    };
-
-                    form.append(
-                        "troubleticketData",
-                        new Blob([JSON.stringify(troubleticketData)], { type: "application/json" })
-                    );
-
-                    const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
-                        method: "POST",
-                        body: form,
-                        credentials: "include"
+                    // GỬI MESSAGE SANG BACKGROUND THAY VÌ FETCH TRỰC TIẾP
+                    const response: any = await new Promise((resolve) => {
+                        chrome.runtime.sendMessage({
+                            event: "CONTENTMY",
+                            type: "CREATE_CMS_TICKET_V2", // Sử dụng V2 mới
+                            payload: {
+                                maVanDon: record.itemCode,
+                                serviceCode: record.serviceCode || '',
+                                ticketType: ticketType,
+                                content: content
+                            }
+                        }, resolve);
                     });
 
-                    const result = await response.json();
+                    // Xử lý lỗi kết nối
+                    if (chrome.runtime.lastError) {
+                        message.error('Lỗi kết nối Extension: ' + chrome.runtime.lastError.message);
+                        setLoading(false);
+                        return;
+                    }
 
-                    if (result.result === true && result.code) {
+                    if (response && response.status === 'success') {
+                        const ticketCode = response.ticketCode;
                         message.success('✅ Tạo CMS thành công');
                         setModalOpen(false);
                         setContent('');
 
-                        // Refresh CMS data
+                        // Refresh CMS data (Giữ nguyên logic cũ)
                         const cmsData = await new Promise<any>((resolve) => {
                             const timeout = setTimeout(() => resolve(null), 5000);
                             chrome.runtime.sendMessage({
                                 event: "CONTENTMY",
                                 type: "FETCH_CMS_DATA",
                                 payload: { maVanDon: record.itemCode }
-                            }, (response) => {
+                            }, (res) => {
                                 clearTimeout(timeout);
-                                resolve(response?.status === 'success' ? response.data : null);
+                                resolve(res?.status === 'success' ? res.data : null);
                             });
                         });
                         updateOrderState(record.orderHdrId, { cmsData });
 
-                        // Ask for forwarding
+                        // Xử lý Chuyển tiếp (Forwarding) nếu có OrgCode
                         if (destOrgCode && destOrgCode.length === 6) {
-                            // Fetch org info
+                            // Fetch org info để lấy tên (nếu chưa có)
+                            // Lưu ý: Logic này bạn có thể tái sử dụng orgInfo state nếu đã có
                             try {
-                                const orgResponse = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${destOrgCode}`, {
-                                    headers: {
-                                        "accept": "*/*",
-                                        "x-requested-with": "XMLHttpRequest"
-                                    },
-                                    method: "GET",
-                                    mode: "cors",
-                                    credentials: "include"
-                                });
+                                // Nếu orgInfo state đã có dữ liệu thì dùng luôn, không cần fetch lại
+                                let currentOrgInfo = orgInfo;
+                                if (!currentOrgInfo) {
+                                    // Fallback fetch nếu cần (thường đã có khi nhập input)
+                                    // Ở đây ta giả định luồng UI đã set orgInfo rồi
+                                }
 
-                                const orgData = await orgResponse.json();
-                                if (orgData && orgData.length > 0) {
-                                    const orgInfo = { orgCode: orgData[0].orgCode, name: orgData[0].name };
-
+                                if (currentOrgInfo) {
                                     Modal.confirm({
                                         title: 'Chuyển tiếp ticket',
-                                        content: `Bạn có muốn chuyển tiếp ticket đến ${orgInfo.orgCode} - ${orgInfo.name}?`,
+                                        content: `Bạn có muốn chuyển tiếp ticket đến ${currentOrgInfo.orgCode} - ${currentOrgInfo.name}?`,
                                         onOk: async () => {
-                                            try {
-                                                const forwardForm = new FormData();
+                                            // GỬI MESSAGE FORWARD SANG BACKGROUND
+                                            const dataOrgObj = [{
+                                                tempId: 72,
+                                                orgCode: currentOrgInfo!.orgCode,
+                                                orgName: `${currentOrgInfo!.orgCode} - ${currentOrgInfo!.name}`,
+                                                filename: "", comment: content, file: "", type: 2, number: 1
+                                            }];
 
-                                                forwardForm.append(
-                                                    "dataOrg",
-                                                    new Blob([
-                                                        JSON.stringify([{
-                                                            tempId: 72,
-                                                            orgCode: orgInfo.orgCode,
-                                                            orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
-                                                            filename: "",
-                                                            comment: content,
-                                                            file: "",
-                                                            type: 2,
-                                                            number: 1
-                                                        }])
-                                                    ], { type: "application/json" })
-                                                );
-
-                                                forwardForm.append("ids", result.code);
-
-                                                const forwardResponse = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
-                                                    method: "PUT",
-                                                    body: forwardForm,
-                                                    credentials: "include"
-                                                });
-
-                                                if (forwardResponse.ok) {
-                                                    message.success('✅ Đã chuyển tiếp thành công');
-                                                    // Refresh CMS again
-                                                    const updatedCmsData = await new Promise<any>((resolve) => {
-                                                        const timeout = setTimeout(() => resolve(null), 5000);
-                                                        chrome.runtime.sendMessage({
-                                                            event: "CONTENTMY",
-                                                            type: "FETCH_CMS_DATA",
-                                                            payload: { maVanDon: record.itemCode }
-                                                        }, (response) => {
-                                                            clearTimeout(timeout);
-                                                            resolve(response?.status === 'success' ? response.data : null);
-                                                        });
-                                                    });
-                                                    updateOrderState(record.orderHdrId, { cmsData: updatedCmsData });
-                                                } else {
-                                                    message.error('❌ Lỗi khi chuyển tiếp');
+                                            chrome.runtime.sendMessage({
+                                                event: 'CONTENTMY',
+                                                type: 'FORWARD_CMS_TICKET',
+                                                payload: {
+                                                    ticketId: ticketCode,
+                                                    dataOrgObj: dataOrgObj
                                                 }
-                                            } catch (error) {
-                                                console.error('Error forwarding:', error);
-                                                message.error('❌ Lỗi khi chuyển tiếp');
-                                            }
+                                            }, (fwdRes) => {
+                                                if (fwdRes && fwdRes.status === 'success') {
+                                                    message.success('✅ Đã chuyển tiếp thành công');
+                                                    // Refresh CMS again...
+                                                } else {
+                                                    message.error('❌ Lỗi khi chuyển tiếp: ' + (fwdRes?.error || 'Unknown'));
+                                                }
+                                            });
                                         }
                                     });
                                 }
                             } catch (error) {
-                                console.error('Error fetching org info:', error);
+                                console.error('Error handling forwarding:', error);
                             }
                         }
                     } else {
-                        message.error('❌ Không thể tạo CMS');
+                        message.error(`❌ Tạo thất bại: ${response?.error || 'Lỗi không xác định'}`);
                     }
                 } catch (error) {
                     console.error('Error creating ticket:', error);
-                    message.error('❌ Lỗi khi tạo CMS');
+                    message.error('❌ Lỗi hệ thống khi tạo CMS');
                 } finally {
                     setLoading(false);
                 }
@@ -2756,9 +2879,7 @@ const CreateCMSTicketButton: React.FC<{
                         <div className="text-xs text-gray-600 mb-1">Service Code</div>
                         <div className="font-bold text-blue-700">
                             {record.serviceCode || 'Không xác định'}
-                            <span className="text-sm text-gray-500 ml-2">
-                                (ttkSrvIdL3: {SERVICE_CODE_MAPPING[record.serviceCode || ''] || '1206'})
-                            </span>
+                            {/* Đã xóa phần hiển thị ttkSrvIdL3 vì logic mapping giờ nằm ở background */}
                         </div>
                     </div>
 
@@ -2840,6 +2961,7 @@ const CreateCMSTicketButton: React.FC<{
                         ✅ Tạo Ticket
                     </Button>
                 </div>
+                
             </Modal>
         </>
     );
@@ -2927,43 +3049,40 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
             onOk: async () => {
                 setLoading(true);
                 try {
-                    const form = new FormData();
+                    const dataOrgObj = [
+                        {
+                            tempId: 72,
+                            orgCode: orgInfo.orgCode,
+                            orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
+                            filename: "",
+                            comment: comment,
+                            file: "",
+                            type: 2,
+                            number: 1
+                        }
+                    ];
 
-                    form.append(
-                        "dataOrg",
-                        new Blob([
-                            JSON.stringify([
-                                {
-                                    tempId: 72,
-                                    orgCode: orgInfo.orgCode,
-                                    orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
-                                    filename: "",
-                                    comment: comment,
-                                    file: "",
-                                    type: 2,
-                                    number: 1
-                                }
-                            ])
-                        ], { type: "application/json" })
-                    );
-
-                    form.append("ids", ticket.ticketId);
-
-                    const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
-                        method: "PUT",
-                        body: form,
-                        credentials: "include"
+                    // GỬI MESSAGE SANG BACKGROUND
+                    const response: any = await new Promise((resolve) => {
+                        chrome.runtime.sendMessage({
+                            event: 'CONTENTMY',
+                            type: 'FORWARD_CMS_TICKET',
+                            payload: {
+                                ticketId: ticket.ticketId,
+                                dataOrgObj: dataOrgObj
+                            }
+                        }, resolve);
                     });
 
-                    if (response.ok) {
+                    if (response && response.status === 'success') {
                         message.success('✅ Đã chuyển tiếp thành công');
                         setComment('');
                     } else {
-                        message.error('❌ Lỗi khi chuyển tiếp');
+                        message.error(`❌ Lỗi khi chuyển tiếp: ${response?.error || 'Unknown'}`);
                     }
                 } catch (error) {
                     console.error('Error sending:', error);
-                    message.error('❌ Lỗi khi chuyển tiếp');
+                    message.error('❌ Lỗi hệ thống khi chuyển tiếp');
                 } finally {
                     setLoading(false);
                 }
@@ -3072,5 +3191,42 @@ const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, it
         </div>
     );
 };
+const NewConfigRow = ({ onAdd }: { onAdd: (item: CMSAutoConfig) => void }) => {
+    const [code, setCode] = useState('');
+    const [type, setType] = useState<'support' | 'complaint'>('support');
+    const [content, setContent] = useState('');
 
+    const handleAdd = () => {
+        if (!code || !content) return message.error("Thiếu thông tin");
+        onAdd({ orgCode: code, ticketType: type, content: content });
+        setCode('');
+        setContent('');
+    };
+
+    return (
+        <div className="flex gap-2 items-start"> {/* items-start để căn trên nếu textarea cao */}
+            <Input
+                value={code}
+                onChange={e => setCode(e.target.value)}
+                placeholder="Mã KH"
+                style={{ width: 120 }}
+            />
+            <Select
+                value={type}
+                onChange={setType}
+                style={{ width: 120 }}
+                options={[{ value: 'support', label: 'Hỗ trợ' }, { value: 'complaint', label: 'Khiếu nại' }]}
+            />
+            {/* Thay Input thường bằng TextArea */}
+            <Input.TextArea
+                value={content}
+                onChange={e => setContent(e.target.value)}
+                placeholder="Nội dung (xuống dòng thoải mái)..."
+                style={{ flex: 1 }}
+                autoSize={{ minRows: 1, maxRows: 4 }} // Tự động giãn từ 1 đến 4 dòng
+            />
+            <Button type="primary" onClick={handleAdd} icon={<PlusOutlined />} />
+        </div>
+    );
+};
 export default Options;
