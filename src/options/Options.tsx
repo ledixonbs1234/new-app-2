@@ -68,6 +68,11 @@ const Options: React.FC = () => {
     const [filterPendingCMSDelivered, setFilterPendingCMSDelivered] = useState<boolean>(false);
     // Thêm state để quản lý trạng thái đang đóng
     const [isBulkClosing, setIsBulkClosing] = useState(false);
+    // States cho Auto Close CMS
+    const [bulkCloseModalOpen, setBulkCloseModalOpen] = useState(false);
+    const [bulkCloseItems, setBulkCloseItems] = useState<any[]>([]);
+    const [isAutoClosing, setIsAutoClosing] = useState(false);
+    const [isAutoClosingProcessing, setIsAutoClosingProcessing] = useState(false);
 
     useEffect(() => {
         // First try to get from chrome storage
@@ -785,6 +790,57 @@ const Options: React.FC = () => {
 
         setBulkCMSItems(validItems);
         setBulkCMSModalOpen(true);
+    };
+
+    // Hàm Tự động đóng CMS
+    const handleAutoCloseCMS = async () => {
+        // Xác định danh sách đơn hàng cần xử lý (Phát thành công + Chưa đóng CMS)
+        const targetStatus = ['14', '23', '25', '26']; // Phát thành công
+
+        // Lọc danh sách candidate
+        const candidateOrders = orders.filter(order => {
+            if (!targetStatus.includes(order.status)) return false;
+
+            // Kiểm tra cmsData đã được load
+            if (order.cmsData === undefined) return false;
+
+            // Phải có CMS Ticket
+            if (!order.cmsData?.tickets || order.cmsData.tickets.length === 0) return false;
+
+            // Kiểm tra ticket mới nhất chưa đóng
+            const latestTicket = order.cmsData.tickets[0];
+            const lastAction = latestTicket.actions?.[latestTicket.actions.length - 1];
+
+            // Nếu action cuối cùng đã là Đóng thì bỏ qua
+            if (lastAction?.content?.includes("Đóng yêu cầu")) {
+                return false;
+            }
+
+            return true;
+        });
+
+        if (candidateOrders.length === 0) {
+            message.warning("Không tìm thấy đơn hàng nào cần đóng CMS (Phát TC + Chưa đóng). Hãy tải dữ liệu chi tiết trước!");
+            return;
+        }
+
+        setIsAutoClosing(true);
+        message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_close', duration: 0 });
+
+        // Xây dựng danh sách items cần đóng
+        const closeItems = candidateOrders.map(order => ({
+            order,
+            status: 'pending' as const,
+            ticketId: order.cmsData.tickets[0].ticketId,
+            ticketCode: order.cmsData.tickets[0].ticketCode,
+            error: ''
+        }));
+
+        setIsAutoClosing(false);
+        message.success({ content: `Đã lập danh sách ${closeItems.length} ticket cần đóng!`, key: 'auto_close' });
+
+        setBulkCloseItems(closeItems);
+        setBulkCloseModalOpen(true);
     };
 
     const fetchOrders = async (customStatus?: string[]) => {
@@ -1896,6 +1952,18 @@ const Options: React.FC = () => {
                                 Tự động CMS
                             </Button>
                         </Tooltip>
+                        <Tooltip title="Tự động quét đơn Phát TC chưa đóng CMS và chuẩn bị đóng">
+                            <Button
+                                type="primary"
+                                style={{ background: 'linear-gradient(45deg, #13C2C2, #52C41A)', border: 'none' }}
+                                icon={<span role="img" aria-label="robot">🤖</span>}
+                                onClick={handleAutoCloseCMS}
+                                loading={isAutoClosing}
+                                className="shadow-md hover:shadow-lg transition-all"
+                            >
+                                Tự động đóng CMS
+                            </Button>
+                        </Tooltip>
                     </Space.Compact>
 
                     {/* Action Buttons */}
@@ -2122,6 +2190,199 @@ const Options: React.FC = () => {
                     </Tabs.TabPane>
                 </Tabs>
 
+            </Modal>
+
+            {/* Bulk Close CMS Modal */}
+            <Modal
+                title={<span className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-green-600">🔒 Đóng CMS ({bulkCloseItems.length} ticket)</span>}
+                open={bulkCloseModalOpen}
+                onCancel={() => {
+                    if (isAutoClosingProcessing) {
+                        Modal.confirm({
+                            title: 'Xác nhận hủy',
+                            content: 'Bạn có chắc muốn hủy quá trình đóng CMS?',
+                            onOk: () => {
+                                setIsAutoClosingProcessing(false);
+                                setBulkCloseModalOpen(false);
+                            }
+                        });
+                    } else {
+                        setBulkCloseModalOpen(false);
+                    }
+                }}
+                width={1000}
+                footer={[
+                    <Button key="cancel" onClick={() => setBulkCloseModalOpen(false)}>
+                        Hủy
+                    </Button>,
+                    <Button
+                        key="start"
+                        type="primary"
+                        danger
+                        loading={isAutoClosingProcessing}
+                        disabled={bulkCloseItems.length === 0 || isAutoClosingProcessing}
+                        onClick={() => {
+                            Modal.confirm({
+                                title: 'Xác nhận đóng CMS',
+                                content: `Bạn có muốn đóng ${bulkCloseItems.length} ticket CMS? Hành động này không thể hoàn tác.`,
+                                okText: "Xác nhận",
+                                cancelText: "Hủy",
+                                onOk: async () => {
+                                    setIsAutoClosingProcessing(true);
+                                    let hideMessage = message.loading(`Đang đóng 0/${bulkCloseItems.length} ticket...`, 0);
+
+                                    let successCount = 0;
+                                    let failCount = 0;
+
+                                    for (let i = 0; i < bulkCloseItems.length; i++) {
+                                        const item = bulkCloseItems[i];
+
+                                        // Update UI
+                                        setBulkCloseItems(prev => prev.map((it, idx) =>
+                                            idx === i ? { ...it, status: 'processing' } : it
+                                        ));
+
+                                        hideMessage();
+                                        hideMessage = message.loading(`Đang đóng ${i + 1}/${bulkCloseItems.length}: ${item.order.itemCode}...`, 0);
+
+                                        try {
+                                            // Step 1: Save Result (PTC)
+                                            const formData = new FormData();
+                                            formData.append('actType', '4');
+                                            formData.append('actResult', '490'); // PTC result code
+                                            formData.append('ttkId', item.ticketId);
+                                            formData.append('actContent', 'PTC');
+                                            formData.append('isProcess', 'true');
+                                            formData.append('isCompensated', 'false');
+
+                                            const saveRes = await fetch('https://cms.vnpost.vn/api/admin/complaints/save-result', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'accept': '*/*',
+                                                    'x-requested-with': 'XMLHttpRequest'
+                                                },
+                                                body: formData,
+                                                credentials: 'include'
+                                            });
+
+                                            const saveData = await saveRes.json();
+                                             if (!saveData.result || saveData.message !== 'Success') {
+                                                 throw new Error(saveData.message || 'Failed to save result');
+                                             }
+
+                                            // Delay 1s giữa save result và change status
+                                            await new Promise(resolve => setTimeout(resolve, 1000));
+
+                                            // Step 2: Change Status
+                                            const changeRes = await fetch('https://cms.vnpost.vn/api/admin/complaints/changestatus', {
+                                                method: 'POST',
+                                                headers: {
+                                                    'accept': '*/*',
+                                                    'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                                                    'x-requested-with': 'XMLHttpRequest'
+                                                },
+                                                body: `ids=${item.ticketId}`,
+                                                credentials: 'include'
+                                            });
+
+                                            const changeData = await changeRes.json();
+                                            if (!changeData.result || changeData.message !== 'Success') {
+                                                throw new Error(changeData.message || 'Failed to change status');
+                                            }
+
+                                            successCount++;
+                                            setBulkCloseItems(prev => prev.map((it, idx) =>
+                                                idx === i ? { ...it, status: 'success' } : it
+                                            ));
+
+                                        } catch (error: any) {
+                                            console.error(`Error closing ${item.order.itemCode}:`, error);
+                                            failCount++;
+                                            setBulkCloseItems(prev => prev.map((it, idx) =>
+                                                idx === i ? { ...it, status: 'error', error: error.message } : it
+                                            ));
+                                        }
+
+                                        // Delay giữa các request
+                                        await new Promise(resolve => setTimeout(resolve, 800));
+                                    }
+
+                                    hideMessage();
+                                    setIsAutoClosingProcessing(false);
+
+                                    if (failCount === 0) {
+                                        message.success(`✅ Đã đóng thành công ${successCount} ticket!`);
+                                    } else {
+                                        message.warning(`⚠️ Đã đóng ${successCount}, lỗi ${failCount} ticket.`);
+                                    }
+
+                                    // Refresh CMS data for all successful orders
+                                    for (const item of bulkCloseItems.filter(it => it.status === 'success')) {
+                                        const cmsData = await new Promise<any>((resolve) => {
+                                            const timeout = setTimeout(() => resolve(null), 5000);
+                                            chrome.runtime.sendMessage({
+                                                event: "CONTENTMY",
+                                                type: "FETCH_CMS_DATA",
+                                                payload: { maVanDon: item.order.itemCode }
+                                            }, (response) => {
+                                                clearTimeout(timeout);
+                                                resolve(response?.status === 'success' ? response.data : null);
+                                            });
+                                        });
+                                        updateOrderState(item.order.orderHdrId, { cmsData });
+                                    }
+                                }
+                            });
+                        }}
+                    >
+                        🔒 Đóng CMS ({bulkCloseItems.length} ticket)
+                    </Button>
+                ]}
+                className="modern-modal"
+            >
+                <div className="max-h-[60vh] overflow-y-auto space-y-2">
+                    {bulkCloseItems.map((item, idx) => {
+                        const getStatusIcon = (status: string) => {
+                            switch (status) {
+                                case 'pending': return '⏳';
+                                case 'processing': return '🔄';
+                                case 'success': return '✅';
+                                case 'error': return '❌';
+                                default: return '⏳';
+                            }
+                        };
+
+                        const getStatusColor = (status: string) => {
+                            switch (status) {
+                                case 'pending': return 'bg-gray-50 border-gray-200';
+                                case 'processing': return 'bg-blue-50 border-blue-400 animate-pulse';
+                                case 'success': return 'bg-green-50 border-green-400';
+                                case 'error': return 'bg-red-50 border-red-400';
+                                default: return 'bg-gray-50 border-gray-200';
+                            }
+                        };
+
+                        return (
+                            <div key={idx} className={`border-2 rounded-lg p-3 transition-all ${getStatusColor(item.status)}`}>
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3 flex-1">
+                                        <span className="text-2xl">{getStatusIcon(item.status)}</span>
+                                        <div className="flex-1">
+                                            <div className="font-bold text-blue-700">{item.order.itemCode}</div>
+                                            <div className="text-sm text-gray-600">{item.order.receiverName}</div>
+                                            <div className="text-xs text-gray-500">Ticket: {item.ticketCode} ({item.ticketId})</div>
+                                        </div>
+                                    </div>
+                                    {item.error && (
+                                        <div className="text-xs text-red-600 text-right ml-2 max-w-xs">
+                                            {item.error}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
             </Modal>
 
             {/* Bulk CMS Creation Modal */}
@@ -2613,8 +2874,8 @@ const BulkCMSModal: React.FC<{
                                     </div>
                                     <div className="font-semibold text-gray-800 mt-1">{h.statusText}</div>
                                     {h.statusDetail && (
-                                        <div 
-                                            className="text-gray-500 text-sm italic mt-1 bg-gray-50 p-2 rounded" 
+                                        <div
+                                            className="text-gray-500 text-sm italic mt-1 bg-gray-50 p-2 rounded"
                                             dangerouslySetInnerHTML={{ __html: h.statusDetail }}
                                         />
                                     )}
@@ -2961,7 +3222,7 @@ const CreateCMSTicketButton: React.FC<{
                         ✅ Tạo Ticket
                     </Button>
                 </div>
-                
+
             </Modal>
         </>
     );
