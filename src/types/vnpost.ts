@@ -113,3 +113,24 @@ export interface StoredImage extends ImportedImage {
     blob?: Blob;
     objectUrl?: string;
 }
+
+export interface ExtendedOrder extends OrderHdr {
+    detail?: OrderDetail;
+    history?: OrderHistoryResponse;
+    extraInfo?: string;
+    cmsData?: any; // Tickets
+    lastUpdated?: number;
+    loading?: boolean;
+}
+
+export interface BulkCMSItem {
+    order: ExtendedOrder;
+    ticketType: 'support' | 'complaint';
+    content: string;
+    destOrgCode: string;
+    orgInfo: { orgCode: string; name: string } | null;
+    status: 'pending' | 'processing' | 'success' | 'error';
+    error?: string;
+    action?: 'create' | 'forward';
+    ticketId?: string;
+}

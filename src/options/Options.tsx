@@ -1,35 +1,31 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Button, Input, Table, Card, Tag, Space, message, Modal, Typography, Tooltip, Tabs, Descriptions, DatePicker, Select } from 'antd';
+import { Button, Input, Table, Card, Tag, Space, message, Modal, Typography, Tooltip, Tabs, Descriptions, DatePicker } from 'antd';
 import dayjs from 'dayjs';
 import { CopyOutlined, SettingOutlined, SyncOutlined, FileTextOutlined, HistoryOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import { OrderHdr, OrderDetail, OrderHistoryResponse } from '../types/vnpost';
+import { OrderDetail, OrderHistoryResponse } from '../types/vnpost';
 import { Timeline } from 'antd';
 import { UndoOutlined, CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, CarOutlined, HomeOutlined } from '@ant-design/icons';
 import { delay } from '../contentScript/utils';
+import CMSTicketItem from './components/CMSTicketItem';
+import NewConfigRow from './components/NewConfigRow';
+import CreateCMSModal from './components/CreateCMSModal';
+import ExtraInfoEditor from './components/ExtraInfoEditor';
+import BulkCMSModal from './components/BulkCMSModal';
+import { handleBulkCloseCMS } from './modals/bulkCloseModal';
+import { ExtendedOrder, BulkCMSItem } from '../types/vnpost';
+import { handleAutoGenerateCMS, handleAutoCloseCMS } from '../features/autoProcess';
+import { useFiltering } from '../features/filters';
+import { useOrderData } from '../hooks';
+import { fetchAccountSettings, fetchOrderHistory } from '../services/api';
+import { 
+    getCMSTemplates, saveCMSTemplates, getCMSAutoConfigs, saveCMSAutoConfigs, 
+    fetchCMSData, getExtraInfo,
+    createCMSTicket, forwardCMSTicket
+} from '../services/chromeMessage';
 const { Title } = Typography;
 const { TextArea } = Input;
 const { RangePicker } = DatePicker;
 
-interface ExtendedOrder extends OrderHdr {
-    detail?: OrderDetail;
-    history?: OrderHistoryResponse;
-    extraInfo?: string;
-    cmsData?: any; // Tickets
-    lastUpdated?: number;
-    loading?: boolean;
-}
-interface BulkCMSItem {
-    order: ExtendedOrder;
-    ticketType: 'support' | 'complaint';
-    content: string;
-    destOrgCode: string;
-    orgInfo: { orgCode: string; name: string } | null;
-    status: 'pending' | 'processing' | 'success' | 'error';
-    error?: string;
-    // Đây là 2 trường mới bạn cần thêm:
-    action?: 'create' | 'forward';
-    ticketId?: string;
-}
 // Interface cho cấu hình tự động
 interface CMSAutoConfig {
     orgCode: string;       // Mã khách hàng (VD: C00...)
@@ -75,79 +71,74 @@ const Options: React.FC = () => {
     const [isAutoClosingProcessing, setIsAutoClosingProcessing] = useState(false);
 
     useEffect(() => {
-        // First try to get from chrome storage
-        chrome.storage.local.get(['accessToken', 'orgCode'], (result) => {
-            if (result.accessToken) setToken(result.accessToken);
-            if (result.orgCode) setOrgCode(result.orgCode);
-        });
+        const initializeOptions = async () => {
+            // First try to get from chrome storage
+            chrome.storage.local.get(['accessToken', 'orgCode'], (result) => {
+                if (result.accessToken) setToken(result.accessToken);
+                if (result.orgCode) setOrgCode(result.orgCode);
+            });
 
-        // Load CMS templates from Firebase
-        chrome.runtime.sendMessage({
-            event: 'CONTENTMY',
-            type: 'GET_CMS_TEMPLATES',
-            payload: {}
-        }, (response) => {
-            if (response?.status === 'success' && response.templates) {
-                setCmsTemplates(response.templates);
+            // Load CMS templates from Firebase
+            try {
+                const response = await getCMSTemplates();
+                if (response?.status === 'success' && response.templates) {
+                    setCmsTemplates(response.templates);
+                }
+            } catch (err) {
+                console.error('Error loading CMS templates:', err);
             }
-        });
 
-        // Auto-fetch token from my.vnpost.vn localStorage
-        chrome.tabs.query({ url: "*://my.vnpost.vn/*" }, (tabs) => {
-            if (tabs.length > 0) {
-                chrome.scripting.executeScript({
-                    target: { tabId: tabs[0].id! },
-                    func: () => localStorage.getItem('accessToken')
-                }, (results) => {
-                    if (results && results[0]?.result) {
-                        const fetchedToken = results[0].result;
-                        setToken(fetchedToken);
-
-                        // Fetch account settings to get orgCode and orgName
-                        fetch("https://api-pre-my.vnpost.vn/myvnp-web/v1/Account/getAccountSetting", {
-                            headers: {
-                                "authorization": fetchedToken,
-                                "capikey": "19001111"
-                            },
-                            method: "GET",
-                            mode: "cors",
-                            credentials: "include"
-                        })
-                            .then(res => res.json())
-                            .then(data => {
-                                if (data.orgUserList && data.orgUserList.length > 0) {
-                                    const org = data.orgUserList[0];
-                                    setOrgCode(org.orgCode);
-                                    setSenderInfo({
-                                        name: org.orgName,
-                                        code: org.orgCode
-                                    });
-
-                                    // Save to chrome storage
-                                    chrome.storage.local.set({
-                                        accessToken: fetchedToken,
-                                        orgCode: org.orgCode
-                                    });
-
-                                    message.success('✅ Đã tự động lấy token và thông tin tài khoản');
-                                }
-                            })
-                            .catch(err => {
-                                console.error('Error fetching account settings:', err);
-                            });
-                    }
-                });
+            // Load CMS auto configs
+            try {
+                const response = await getCMSAutoConfigs();
+                if (response?.status === 'success' && Array.isArray(response.configs)) {
+                    setCmsAutoConfigs(response.configs);
+                }
+            } catch (err) {
+                console.error('Error loading CMS auto configs:', err);
             }
-        });
-        chrome.runtime.sendMessage({
-            event: 'CONTENTMY',
-            type: 'GET_CMS_AUTO_CONFIGS',
-            payload: {}
-        }, (response) => {
-            if (response?.status === 'success' && Array.isArray(response.configs)) {
-                setCmsAutoConfigs(response.configs);
-            }
-        });
+
+            // Auto-fetch token from my.vnpost.vn localStorage
+            chrome.tabs.query({ url: "*://my.vnpost.vn/*" }, (tabs) => {
+                if (tabs.length > 0) {
+                    chrome.scripting.executeScript({
+                        target: { tabId: tabs[0].id! },
+                        func: () => localStorage.getItem('accessToken')
+                    }, (results) => {
+                        if (results && results[0]?.result) {
+                            const fetchedToken = results[0].result;
+                            setToken(fetchedToken);
+
+                            // Fetch account settings to get orgCode and orgName
+                            fetchAccountSettings(fetchedToken)
+                                .then(data => {
+                                    if (data.orgUserList && data.orgUserList.length > 0) {
+                                        const org = data.orgUserList[0];
+                                        setOrgCode(org.orgCode);
+                                        setSenderInfo({
+                                            name: org.orgName,
+                                            code: org.orgCode
+                                        });
+
+                                        // Save to chrome storage
+                                        chrome.storage.local.set({
+                                            accessToken: fetchedToken,
+                                            orgCode: org.orgCode
+                                        });
+
+                                        message.success('✅ Đã tự động lấy token và thông tin tài khoản');
+                                    }
+                                })
+                                .catch(err => {
+                                    console.error('Error fetching account settings:', err);
+                                });
+                        }
+                    });
+                }
+            });
+        };
+
+        initializeOptions();
     }, []);
 
     // Helper functions - must be defined before use
@@ -167,16 +158,6 @@ const Options: React.FC = () => {
         const now = new Date();
         const diffTime = Math.abs(now.getTime() - date.getTime());
         return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    };
-
-    const calculateDuration = (startStr: string, endStr: string) => {
-        const start = parseDate(startStr);
-        const end = parseDate(endStr);
-        if (!start || !end) return null;
-        const diff = end.getTime() - start.getTime();
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        return `${days} ngày ${hours} giờ`;
     };
 
     // Effect to handle single item search with debounce
@@ -201,198 +182,27 @@ const Options: React.FC = () => {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [searchText]);
 
-    const filteredOrders = orders.filter(order => {
-        // Search text filter
-        if (searchText) {
-            const lower = searchText.toLowerCase();
-            const matchesSearch = (
-                order.itemCode?.toLowerCase().includes(lower) ||
-                order.receiverName?.toLowerCase().includes(lower) ||
-                order.receiverPhone?.includes(searchText) ||
-                order.detail?.receiverPhone?.includes(searchText)
-            );
-            if (!matchesSearch) return false;
-        }
-
-        // No CMS filter
-        if (filterNoCMS) {
-            // Chỉ hiển thị đơn hàng khi:
-            // 1. cmsData đã được fetch (không undefined)
-            // 2. Và tickets là mảng rỗng (chưa có CMS)
-            if (order.cmsData === undefined) return false; // Chưa fetch CMS, bỏ qua
-            const hasCMS = order.cmsData?.tickets && order.cmsData.tickets.length > 0;
-            if (hasCMS) return false; // Có CMS, bỏ qua
-
-            // 3. Loại bỏ đơn hàng đã Chuyển hoàn (không cần lập CMS)
-            const history = order.history?.orderStatusHistoryDtoList || [];
-            const isReturn = history.some(h => {
-                const statusLower = (h.statusText || "").toLowerCase();
-                return statusLower.includes("chuyển hoàn");
-            });
-            if (isReturn) return false;
-        }
-
-        // Long delivery duration filter
-        if (filterLongDelivery) {
-            const history = order.history?.orderStatusHistoryDtoList || [];
-            const firstDelivery = history.slice().reverse().find(h =>
-                h.statusText === "Đang phát hàng" || h.statusText === "Đã xác nhận đến phát"
-            );
-            if (firstDelivery) {
-                const startDate = parseDate(firstDelivery.traceDate);
-                if (startDate) {
-                    const now = new Date();
-                    const diffDays = Math.floor((now.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-                    if (diffDays < LONG_DELIVERY_THRESHOLD) return false;
-                } else {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-        if (filterPendingCMSDelivered) {
-            // 1. Phải có CMS Data
-            if (!order.cmsData || !order.cmsData.tickets || order.cmsData.tickets.length === 0) {
-                return false;
-            }
-
-            // 2. Lấy ticket mới nhất và action cuối cùng
-            const latestTicket = order.cmsData.tickets[0]; // Giả định ticket đầu tiên là mới nhất
-            const actions = latestTicket.actions || [];
-
-            // Nếu không có action nào, coi như chưa đóng -> Giữ lại (return true)
-            // Nếu có action, kiểm tra nội dung cuối cùng
-            if (actions.length > 0) {
-                const lastAction = actions[actions.length - 1]; // Action cuối cùng (mới nhất theo mảng đã sort)
-                // Nội dung bắt đầu bằng "Đóng yêu cầu" -> Loại bỏ (vì đã đóng rồi)
-                if (lastAction.content && lastAction.content.trim().startsWith("Đóng yêu cầu")) {
-                    return false;
-                }
-            }
-
-            // 3. Kiểm tra lịch sử hành trình: Phải Phát TC và Không Hủy Phát TC
-            const history = order.history?.orderStatusHistoryDtoList || [];
-            const hasSuccess = history.some(h => h.statusText.toLowerCase().includes("phát hàng thành công"));
-            const hasCancel = history.some(h => h.statusText.toLowerCase().includes("hủy phát hàng thành công"));
-
-            // Điều kiện: Có phát thành công VÀ Không bị hủy
-            if (!hasSuccess || hasCancel) {
-                return false;
-            }
-        }
-
-        return true;
+    const filteredOrders = useFiltering({
+        orders,
+        searchText,
+        filterNoCMS,
+        filterLongDelivery,
+        filterPendingCMSDelivered,
+        LONG_DELIVERY_THRESHOLD
     });
-    // Hàm xử lý Đóng hàng loạt
-    const handleBulkCloseCMS = async () => {
-        if (selectedRowKeys.length === 0) {
-            message.warning('Vui lòng chọn ít nhất một đơn hàng');
-            return;
+    // Hàm xử lý Đóng hàng loạt - wrapper call imported function
+    const handleBulkCloseClick = async () => {
+        setIsBulkClosing(true);
+        try {
+            await handleBulkCloseCMS(
+                selectedRowKeys,
+                orders,
+                () => setSelectedRowKeys([]),
+                updateOrderState
+            );
+        } finally {
+            setIsBulkClosing(false);
         }
-
-        // Lọc ra các đơn hàng có CMS Ticket chưa đóng
-        // Logic: Có cmsData, có tickets, và ticket mới nhất chưa có nội dung "Đóng yêu cầu"
-        const ordersToClose = orders.filter(o => {
-            if (!selectedRowKeys.includes(o.orderHdrId)) return false;
-
-            if (!o.cmsData || !o.cmsData.tickets || o.cmsData.tickets.length === 0) return false;
-
-            const latestTicket = o.cmsData.tickets[0];
-            const lastAction = latestTicket.actions?.[latestTicket.actions.length - 1];
-
-            // Nếu action cuối cùng đã là Đóng thì bỏ qua
-            if (lastAction?.content?.includes("Đóng yêu cầu")) {
-                return false;
-            }
-            return true;
-        });
-
-        if (ordersToClose.length === 0) {
-            message.info("Các đơn hàng đã chọn đều chưa có CMS hoặc đã được đóng.");
-            return;
-        }
-
-        Modal.confirm({
-            title: `Xác nhận đóng ${ordersToClose.length} ticket CMS`,
-            content: (
-                <div>
-                    <p>Hệ thống sẽ thực hiện:</p>
-                    <ul className="list-disc pl-5">
-                        <li>Lưu kết quả: <b>PTC (Phát thành công)</b></li>
-                        <li>Trạng thái: <b>Đóng hồ sơ</b></li>
-                    </ul>
-                    <p className="text-red-500 mt-2">Lưu ý: Chỉ thực hiện với các đơn đã thực sự phát xong!</p>
-                </div>
-            ),
-            okText: "Thực hiện Đóng",
-            cancelText: "Hủy",
-            onOk: async () => {
-                setIsBulkClosing(true);
-                const hide = message.loading(`Đang đóng 0/${ordersToClose.length} ticket...`, 0);
-
-                let successCount = 0;
-                let failCount = 0;
-
-                for (let i = 0; i < ordersToClose.length; i++) {
-                    const order = ordersToClose[i];
-                    const ticketId = order.cmsData.tickets[0].ticketId; // Lấy ticket mới nhất
-
-                    hide(); // update loading message
-                    message.loading(`Đang đóng ${i + 1}/${ordersToClose.length}: ${order.itemCode}...`, 0);
-
-                    try {
-                        // Gửi message xuống content script
-                        const response = await new Promise<any>((resolve) => {
-                            chrome.runtime.sendMessage({
-                                event: 'CONTENTMY',
-                                type: 'CLOSE_CMS_TICKET',
-                                payload: { ticketId: ticketId }
-                            }, resolve);
-                        });
-
-                        if (response && response.status === 'success') {
-                            successCount++;
-                            // Cập nhật lại UI CMS local (giả lập đã đóng) để không phải fetch lại ngay
-                            // Hoặc gọi fetch CMS lại:
-                            const updatedCmsData = await new Promise<any>((resolve) => {
-                                const timeout = setTimeout(() => resolve(null), 3000);
-                                chrome.runtime.sendMessage({
-                                    event: "CONTENTMY",
-                                    type: "FETCH_CMS_DATA",
-                                    payload: { maVanDon: order.itemCode }
-                                }, (res) => {
-                                    clearTimeout(timeout);
-                                    resolve(res?.status === 'success' ? res.data : null);
-                                });
-                            });
-                            updateOrderState(order.orderHdrId, { cmsData: updatedCmsData });
-
-                        } else {
-                            console.error(`Failed to close ${order.itemCode}:`, response?.error);
-                            failCount++;
-                        }
-                    } catch (error) {
-                        console.error(`Error closing ${order.itemCode}:`, error);
-                        failCount++;
-                    }
-
-                    // Delay nhẹ để tránh spam server quá gắt
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-
-                hide();
-                setIsBulkClosing(false);
-                if (failCount === 0) {
-                    message.success(`✅ Đã đóng thành công toàn bộ ${successCount} ticket!`);
-                } else {
-                    message.warning(`⚠️ Đã đóng ${successCount}, lỗi ${failCount} ticket.`);
-                }
-
-                // Clear selection sau khi làm xong
-                setSelectedRowKeys([]);
-            }
-        });
     };
 
     const handleFetchAllDetails = async () => {
@@ -417,6 +227,9 @@ const Options: React.FC = () => {
         message.success({ content: 'Đã tải xong lịch sử', key: 'fetching_all' });
     };
 
+    // Sử dụng hook để handle single item search
+    const { handleFetchSingleOrder } = useOrderData();
+
     const handleSingleItemSearch = async (itemCode: string) => {
         // Check if already in current list
         const existingOrder = orders.find(o => o.itemCode === itemCode);
@@ -428,156 +241,20 @@ const Options: React.FC = () => {
             return;
         }
 
-        if (!token || !orgCode) {
-            message.error('Vui lòng cấu hình Token và OrgCode trước');
-            return;
-        }
-
         setSingleSearchLoading(true);
-        message.loading({ content: `🔍 Đang tìm kiếm ${itemCode}...`, key: 'single_search', duration: 0 });
-
         try {
-            // Step 1: Search for orderHdrId
-            const searchRes = await fetch(
-                `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchByOrderCodeOrItemCode?searchValue=${itemCode}`,
-                {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': token,
-                        'Capikey': '19001111'
-                    },
-                    mode: 'cors',
-                    credentials: 'include'
-                }
-            );
-
-            if (!searchRes.ok) {
-                message.error({ content: '❌ Không tìm thấy mã vận đơn này', key: 'single_search' });
-                setSingleSearchLoading(false);
-                return;
+            const newOrder = await handleFetchSingleOrder(itemCode, token, orgCode, senderInfo || undefined);
+            
+            if (newOrder) {
+                // Clear table and show only this order
+                setOrders([newOrder]);
+                // Clear search text
+                setSearchText('');
+                // Open modal
+                setCurrentDetailOrder(newOrder);
+                setDetailModalActiveTab('1');
+                setDetailModalOpen(true);
             }
-
-            const searchData = await searchRes.json();
-
-            if (!searchData || !searchData.orderHdrId) {
-                message.error({ content: '❌ Không tìm thấy mã vận đơn này', key: 'single_search' });
-                setSingleSearchLoading(false);
-                return;
-            }
-
-            // Check if orgCode matches
-            if (searchData.orgCode !== orgCode) {
-                message.warning({
-                    content: `⚠️ Đơn hàng này không thuộc về khách hàng ${senderInfo?.name || orgCode}`,
-                    key: 'single_search',
-                    duration: 5
-                });
-                setSingleSearchLoading(false);
-                return;
-            }
-
-            message.loading({ content: '📦 Đang tải thông tin chi tiết...', key: 'single_search', duration: 0 });
-
-            // Step 2: Fetch full detail
-            const detailRes = await fetch(
-                `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${searchData.orderHdrId}`,
-                {
-                    headers: {
-                        'Authorization': token,
-                        'Capikey': '19001111'
-                    },
-                    mode: 'cors',
-                    credentials: 'include'
-                }
-            );
-
-            if (!detailRes.ok) {
-                message.error({ content: '❌ Lỗi khi tải chi tiết đơn hàng', key: 'single_search' });
-                setSingleSearchLoading(false);
-                return;
-            }
-
-            const orderData: OrderHdr = await detailRes.json();
-
-            // Step 3: Fetch history, extraInfo, cmsData in parallel
-            const [historyData, extraInfo, cmsData] = await Promise.all([
-                // History
-                fetch(
-                    `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${itemCode}`,
-                    {
-                        headers: {
-                            'Authorization': token,
-                            'Capikey': '19001111'
-                        }
-                    }
-                )
-                    .then(res => res.json())
-                    .catch(() => null),
-
-                // Extra Info
-                new Promise<string>((resolve) => {
-                    chrome.runtime.sendMessage(
-                        {
-                            event: 'CONTENTMY',
-                            type: 'GET_EXTRA_INFO',
-                            payload: { maVanDon: itemCode }
-                        },
-                        (response) => {
-                            resolve(response?.status === 'success' ? response.data : '');
-                        }
-                    );
-                }),
-
-                // CMS Data
-                new Promise<any>((resolve) => {
-                    const timeout = setTimeout(() => resolve(null), 5000);
-                    chrome.runtime.sendMessage(
-                        {
-                            event: 'CONTENTMY',
-                            type: 'FETCH_CMS_DATA',
-                            payload: { maVanDon: itemCode }
-                        },
-                        (response) => {
-                            clearTimeout(timeout);
-                            resolve(response?.status === 'success' ? response.data : null);
-                        }
-                    );
-                })
-            ]);
-
-            // Step 4: Create extended order object
-            const newOrder: ExtendedOrder = {
-                ...orderData,
-                detail: orderData as any, // OrderHdr already contains detail info
-                history: historyData,
-                extraInfo: extraInfo,
-                cmsData: cmsData,
-                lastUpdated: Date.now(),
-                loading: false
-            };
-
-            // Step 5: Clear table and show only this order
-            setOrders([newOrder]);
-
-            // Step 6: Clear search text
-            setSearchText('');
-
-            // Step 7: Open modal
-            setCurrentDetailOrder(newOrder);
-            setDetailModalActiveTab('1');
-            setDetailModalOpen(true);
-
-            message.success({
-                content: `✅ Đã tìm thấy đơn hàng ${itemCode}`,
-                key: 'single_search'
-            });
-
-        } catch (error) {
-            console.error('Error in single item search:', error);
-            message.error({
-                content: '❌ Lỗi khi tìm kiếm mã vận đơn',
-                key: 'single_search'
-            });
         } finally {
             setSingleSearchLoading(false);
         }
@@ -596,252 +273,59 @@ const Options: React.FC = () => {
         });
     };
 
-    const saveSettings = () => {
+    const saveSettings = async () => {
         // Save to chrome.storage
         chrome.storage.local.set({
             accessToken: token,
             orgCode: orgCode,
             cmsAutoConfigs: cmsAutoConfigs
-        }, () => {
+        });
+
+        try {
             // Save CMS templates to Firebase
-            chrome.runtime.sendMessage({
-                event: 'CONTENTMY',
-                type: 'SAVE_CMS_TEMPLATES',
-                payload: { templates: cmsTemplates }
-            }, (response) => {
-                if (response?.status === 'success') {
-                    message.success('Đã lưu cài đặt');
-                    setShowSettings(false);
-                } else {
-                    message.error('Lỗi khi lưu mẫu CMS');
-                }
-            });
-            // 2. --- THÊM MỚI: Save CMS Auto Configs to Firebase ---
-            chrome.runtime.sendMessage({
-                event: 'CONTENTMY',
-                type: 'SAVE_CMS_AUTO_CONFIGS',
-                payload: { configs: cmsAutoConfigs }
-            }, (response) => {
-                if (response?.status === 'success') {
-                    message.success('Đã đồng bộ cấu hình tự động lên hệ thống');
-                } else {
-                    message.error('Lỗi khi lưu cấu hình tự động');
-                }
-            });
+            const templateResponse = await saveCMSTemplates(cmsTemplates);
+            if (templateResponse?.status !== 'success') {
+                message.error('Lỗi khi lưu mẫu CMS');
+                return;
+            }
+
+            // Save CMS Auto Configs to Firebase
+            const configResponse = await saveCMSAutoConfigs(cmsAutoConfigs);
+            if (configResponse?.status !== 'success') {
+                message.error('Lỗi khi lưu cấu hình tự động');
+                return;
+            }
+
             message.success('Đã lưu cài đặt bao gồm cấu hình tự động CMS');
             setShowSettings(false);
-        });
+        } catch (err) {
+            console.error('Error saving settings:', err);
+            message.error('Lỗi khi lưu cài đặt');
+        }
     };
 
-    const handleAutoGenerateCMS = async () => {
-        // 1. Xác định danh sách đơn hàng cần xử lý (Phát hàng + KTC)
-        const targetStatus = ['11', '12', '13', '15', '27'];
-
-        // 2. Lọc danh sách candidate
-        const candidateOrders = orders.filter(order => {
-            if (!targetStatus.includes(order.status)) return false;
-
-            // QUAN TRỌNG: Bỏ điều kiện check chưa có CMS.
-            // Chúng ta cần xử lý cả đơn đã có CMS nhưng cần nhắc lại.
-            // Tuy nhiên, vẫn cần check cmsData !== undefined để đảm bảo đã load dữ liệu
-            if (order.cmsData === undefined) return false;
-
-            // Check chuyển hoàn/trả lại (giữ nguyên logic loại bỏ)
-            const history = order.history?.orderStatusHistoryDtoList || [];
-            const isReturn = history.some(h => {
-                const statusLower = (h.statusText || "").toLowerCase();
-                return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công");
-            });
-            if (isReturn) return false;
-
-            return true;
-        });
-
-        if (candidateOrders.length === 0) {
-            message.warning("Không tìm thấy đơn hàng nào thỏa mãn (Phát hàng/KTC). Hãy tải dữ liệu chi tiết và CMS trước!");
-            return;
-        }
-
-        setIsAutoProcessing(true);
-        message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_map', duration: 0 });
-
-        const todayStr = dayjs().format("DD/MM/YYYY");
-
-        const items = await Promise.all(candidateOrders.map(async (order) => {
-            // Tìm cấu hình
-            const config = cmsAutoConfigs.find(cfg => cfg.orgCode === order.senderCode);
-
-            // Nội dung chuẩn từ cấu hình
-            const configContent = config ? config.content : `Hỗ trợ đơn hàng ${order.itemCode}`;
-            const ticketType = config ? config.ticketType : 'support';
-
-            // Logic lấy OrgCode đích (giữ nguyên)
-            const historyList = order.history?.orderStatusHistoryDtoList || [];
-            let destOrgCode = '';
-            for (const historyItem of historyList) {
-                const addressMatch = historyItem.address?.match(/(\d{6})/);
-                if (addressMatch) {
-                    destOrgCode = addressMatch[1];
-                    break;
-                }
-            }
-
-            // Fetch Org Info (giữ nguyên)
-            let orgInfo: { orgCode: string; name: string } | null = null;
-            if (destOrgCode && destOrgCode.length === 6) {
-                try {
-                    const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${destOrgCode}`, {
-                        headers: { "accept": "*/*", "x-requested-with": "XMLHttpRequest" },
-                        credentials: "include"
-                    });
-                    const data = await response.json();
-                    if (data && data.length > 0) {
-                        orgInfo = { orgCode: data[0].orgCode, name: data[0].name };
-                    }
-                } catch (e) { console.error(e); }
-            }
-
-            // --- LOGIC MỚI: QUYẾT ĐỊNH CREATE HAY FORWARD ---
-            let action: 'create' | 'forward' = 'create';
-            let finalContent = configContent;
-            let targetTicketId = '';
-            let shouldInclude = true;
-
-            const existingTickets = order.cmsData?.tickets || [];
-
-            if (existingTickets.length > 0) {
-                // Đã có ticket. Kiểm tra xem có ticket nào chứa nội dung mẫu chưa
-                // Tìm ticket mới nhất mà trong history của nó có chứa nội dung config
-                // Hoặc đơn giản: Check ticket mới nhất xem trạng thái thế nào
-
-                const latestTicket = existingTickets[0]; // Giả sử ticket đầu tiên là mới nhất
-                const actions = latestTicket.actions || [];
-
-                // Kiểm tra xem trong ticket này đã từng có nội dung giống config chưa
-                // So sánh tương đối (includes) và chuẩn hóa chữ thường
-                const normalizedConfigContent = configContent.toLowerCase().trim();
-
-                const matchingAction = actions.find((act: any) =>
-                    act.content && act.content.toLowerCase().includes(normalizedConfigContent)
-                );
-
-                if (matchingAction) {
-                    // Đã có nội dung này rồi. Kiểm tra ngày.
-                    // Action date format thường là "dd/mm/yyyy HH:mm"
-                    const actionDatePart = matchingAction.date.split(' ')[0]; // lấy dd/mm/yyyy
-
-                    if (actionDatePart === todayStr) {
-                        // Đã yêu cầu trong hôm nay -> Bỏ qua
-                        shouldInclude = false;
-                    } else {
-                        // Khác ngày hiện tại -> Chuyển tiếp nhắc nhở
-                        action = 'forward';
-                        targetTicketId = latestTicket.ticketId;
-                        finalContent = "Hỗ trợ phát gấp!!, Thank";
-                    }
-                } else {
-                    // Có ticket nhưng chưa có nội dung yêu cầu này -> Có thể tạo mới hoặc forward nội dung yêu cầu vào ticket cũ.
-                    // Theo yêu cầu: "tạo nếu chưa có".
-                    // Tuy nhiên, CMS thường không cho tạo nhiều ticket mở cùng lúc. 
-                    // Tốt nhất: Nếu ticket cũ chưa đóng -> Forward nội dung yêu cầu vào ticket đó.
-                    // Nếu ticket cũ đã đóng -> Tạo mới.
-
-                    const isClosed = actions.length > 0 && actions[actions.length - 1].content.includes("Đóng yêu cầu");
-
-                    if (isClosed) {
-                        action = 'create';
-                    } else {
-                        // Ticket đang mở nhưng chưa có nội dung này -> Forward nội dung cấu hình vào
-                        action = 'forward';
-                        targetTicketId = latestTicket.ticketId;
-                        // Giữ nguyên nội dung gốc (configContent) để gửi vào ticket đang mở
-                    }
-                }
-            } else {
-                // Chưa có ticket nào -> Tạo mới
-                action = 'create';
-            }
-
-            if (!shouldInclude) return null;
-
-            return {
-                order,
-                ticketType,
-                content: finalContent, // Nội dung cuối cùng (Gốc hoặc "Hỗ trợ gấp")
-                destOrgCode,
-                orgInfo,
-                status: 'pending' as const,
-                action,
-                ticketId: targetTicketId
-            };
-        }));
-
-        // Lọc bỏ các null items
-        const validItems = items.filter((item): item is NonNullable<typeof item> => item !== null);
-
-        setIsAutoProcessing(false);
-
-        if (validItems.length === 0) {
-            message.info("Tất cả các đơn hàng thỏa mãn đã được xử lý trong hôm nay.");
-            return;
-        }
-
-        message.success({ content: `Đã lập danh sách ${validItems.length} yêu cầu!`, key: 'auto_map' });
-
-        setBulkCMSItems(validItems);
-        setBulkCMSModalOpen(true);
+    const handleAutoGenerateCMSClick = () => {
+        handleAutoGenerateCMS(
+            orders,
+            cmsAutoConfigs,
+            setIsAutoProcessing,
+            setBulkCMSItems,
+            setBulkCMSModalOpen
+        );
     };
 
     // Hàm Tự động đóng CMS
-    const handleAutoCloseCMS = async () => {
-        // Xác định danh sách đơn hàng cần xử lý (Phát thành công + Chưa đóng CMS)
-        const targetStatus = ['14', '23', '25', '26']; // Phát thành công
-
-        // Lọc danh sách candidate
-        const candidateOrders = orders.filter(order => {
-            if (!targetStatus.includes(order.status)) return false;
-
-            // Kiểm tra cmsData đã được load
-            if (order.cmsData === undefined) return false;
-
-            // Phải có CMS Ticket
-            if (!order.cmsData?.tickets || order.cmsData.tickets.length === 0) return false;
-
-            // Kiểm tra ticket mới nhất chưa đóng
-            const latestTicket = order.cmsData.tickets[0];
-            const lastAction = latestTicket.actions?.[latestTicket.actions.length - 1];
-
-            // Nếu action cuối cùng đã là Đóng thì bỏ qua
-            if (lastAction?.content?.includes("Đóng yêu cầu")) {
-                return false;
-            }
-
-            return true;
-        });
-
-        if (candidateOrders.length === 0) {
-            message.warning("Không tìm thấy đơn hàng nào cần đóng CMS (Phát TC + Chưa đóng). Hãy tải dữ liệu chi tiết trước!");
-            return;
-        }
-
-        setIsAutoClosing(true);
-        message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_close', duration: 0 });
-
-        // Xây dựng danh sách items cần đóng
-        const closeItems = candidateOrders.map(order => ({
-            order,
-            status: 'pending' as const,
-            ticketId: order.cmsData.tickets[0].ticketId,
-            ticketCode: order.cmsData.tickets[0].ticketCode,
-            error: ''
-        }));
-
-        setIsAutoClosing(false);
-        message.success({ content: `Đã lập danh sách ${closeItems.length} ticket cần đóng!`, key: 'auto_close' });
-
-        setBulkCloseItems(closeItems);
-        setBulkCloseModalOpen(true);
+    const handleAutoCloseCMSClick = () => {
+        handleAutoCloseCMS(
+            orders,
+            setIsAutoClosing,
+            setBulkCloseItems,
+            setBulkCloseModalOpen
+        );
     };
+
+    // Use hook to handle fetchOrders
+    const { handleFetchOrders: hookFetchOrders } = useOrderData();
 
     const fetchOrders = async (customStatus?: string[]) => {
         if (!token || !orgCode) {
@@ -851,50 +335,14 @@ const Options: React.FC = () => {
         }
 
         const statusToFetch = customStatus || filterStatus;
-
-        const fmt = (d: dayjs.Dayjs) => d.format('YYYY-MM-DD HH:mm');
-        const dateRangeParam = [fmt(dateRange[0]), fmt(dateRange[1])];
-
         setLoading(true);
+
         try {
-            const response = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/searchAllByParamV2?page=0&size=1000`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': token,
-                    'Capikey': '19001111'
-                },
-                body: JSON.stringify({
-                    orderType: "1",
-                    isInternational: "0",
-                    lstStatus: statusToFetch,
-                    orgCode: [orgCode],
-                    toDateFromDate: dateRangeParam
-                })
-            });
-
-            if (!response.ok) throw new Error('Failed to fetch orders');
-
-            const data: OrderHdr[] = await response.json();
-            data.reverse();
-
-            // Load cache
-            const cacheResult = await new Promise<any>((resolve) =>
-                chrome.storage.local.get('ordersCache', resolve)
-            );
-            const cache = cacheResult.ordersCache || {};
-
-            const extendedOrders: ExtendedOrder[] = data.map(order => {
-                const cached = cache[order.orderHdrId];
-                if (cached && cached.lastUpdated && (Date.now() - cached.lastUpdated < 3 * 60 * 60 * 1000)) {
-                    return { ...order, ...cached, loading: false };
-                }
-                return { ...order, loading: false };
-            });
-
-            setOrders(extendedOrders);
-            processOrdersQueue(extendedOrders);
-
+            const extendedOrders = await hookFetchOrders(token, orgCode, statusToFetch, dateRange);
+            if (extendedOrders) {
+                setOrders(extendedOrders);
+                processOrdersQueue(extendedOrders);
+            }
         } catch (error) {
             console.error(error);
             message.error('Lỗi khi tải danh sách đơn hàng');
@@ -916,11 +364,8 @@ const Options: React.FC = () => {
         currentOrders.forEach((order) => {
             initCache(order.orderHdrId);
 
-            // History Promise
-            const historyPromise = fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${order.itemCode}`, {
-                headers: { 'Authorization': token, 'Capikey': '19001111' }
-            })
-                .then(res => res.json())
+            // History Promise - using service
+            const historyPromise = fetchOrderHistory(order.itemCode, token)
                 .then(historyData => {
                     updateOrderState(order.orderHdrId, { history: historyData });
                     cacheUpdates[order.orderHdrId].history = historyData;
@@ -929,19 +374,12 @@ const Options: React.FC = () => {
                 .catch(() => null);
             promises.push(historyPromise);
 
-            // Extra Info Promise
-            const extraPromise = new Promise(resolve => {
-                chrome.runtime.sendMessage({
-                    event: "CONTENTMY",
-                    type: "GET_EXTRA_INFO",
-                    payload: { maVanDon: order.itemCode }
-                }, (response) => {
-                    const extraInfo = response?.status === 'success' ? response.data : '';
-                    updateOrderState(order.orderHdrId, { extraInfo });
-                    cacheUpdates[order.orderHdrId].extraInfo = extraInfo;
-                    cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
-                    resolve(null);
-                });
+            // Extra Info Promise - using service
+            const extraPromise = getExtraInfo(order.itemCode).then((response: any) => {
+                const extraInfo = response?.status === 'success' ? response.data : '';
+                updateOrderState(order.orderHdrId, { extraInfo });
+                cacheUpdates[order.orderHdrId].extraInfo = extraInfo;
+                cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
             });
             promises.push(extraPromise);
         });
@@ -953,12 +391,13 @@ const Options: React.FC = () => {
                 const others = currentOrders.slice(1);
                 initCache(probeOrder.orderHdrId);
 
-                // Fetch Probe (Timeout 10s)
+                // Fetch Probe (Timeout 10s) - using service
                 const probeResult: any = await new Promise(r => {
                     const t = setTimeout(() => r(null), 10000);
-                    chrome.runtime.sendMessage({
-                        event: "CONTENTMY", type: "FETCH_CMS_DATA", payload: { maVanDon: probeOrder.itemCode }
-                    }, (res) => { clearTimeout(t); r(res); });
+                    fetchCMSData(probeOrder.itemCode).then(res => {
+                        clearTimeout(t);
+                        r(res);
+                    }).catch(() => r(null));
                 });
 
                 if (probeResult?.status === 'success') {
@@ -973,9 +412,7 @@ const Options: React.FC = () => {
                         initCache(order.orderHdrId);
                         // Safety timeout 60s
                         const t = setTimeout(() => rInner(null), 60000);
-                        chrome.runtime.sendMessage({
-                            event: "CONTENTMY", type: "FETCH_CMS_DATA", payload: { maVanDon: order.itemCode }
-                        }, (res) => {
+                        fetchCMSData(order.itemCode).then(res => {
                             clearTimeout(t);
                             if (res?.status === 'success') {
                                 const data = res.data;
@@ -984,7 +421,7 @@ const Options: React.FC = () => {
                                 cacheUpdates[order.orderHdrId].lastUpdated = Date.now();
                             }
                             rInner(null);
-                        });
+                        }).catch(() => rInner(null));
                     }));
 
                     await Promise.all(otherPromises);
@@ -1105,29 +542,13 @@ const Options: React.FC = () => {
             });
             const historyData: OrderHistoryResponse = await historyRes.json();
 
-            // 3. Extra Info (Firebase)
-            const extraInfo = await new Promise<string>((resolve) => {
-                chrome.runtime.sendMessage({
-                    event: "CONTENTMY",
-                    type: "GET_EXTRA_INFO",
-                    payload: { maVanDon: order.itemCode }
-                }, (response) => {
-                    resolve(response?.status === 'success' ? response.data : '');
-                });
-            });
+            // 3. Extra Info (Firebase) - using service
+             const extraInfoRes = await getExtraInfo(order.itemCode);
+             const extraInfo = extraInfoRes?.status === 'success' ? extraInfoRes.data : '';
 
-            // 4. CMS Data
-            const cmsData = await new Promise<any>((resolve) => {
-                const timeout = setTimeout(() => resolve(null), 5000);
-                chrome.runtime.sendMessage({
-                    event: "CONTENTMY",
-                    type: "FETCH_CMS_DATA",
-                    payload: { maVanDon: order.itemCode }
-                }, (response) => {
-                    clearTimeout(timeout);
-                    resolve(response?.status === 'success' ? response.data : null);
-                });
-            });
+             // 4. CMS Data - using service
+             const cmsDataRes = await fetchCMSData(order.itemCode);
+             const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
 
             const updates = {
                 detail: detailData,
@@ -1593,7 +1014,7 @@ const Options: React.FC = () => {
                     </Space.Compact>
 
                     {/* CMS Create Button */}
-                    <CreateCMSTicketButton
+                    <CreateCMSModal
                         record={record}
                         updateOrderState={updateOrderState}
                     />
@@ -1945,7 +1366,7 @@ const Options: React.FC = () => {
                                 type="primary"
                                 style={{ background: 'linear-gradient(45deg, #FF6B6B, #FF8E53)', border: 'none' }}
                                 icon={<span role="img" aria-label="robot">🤖</span>}
-                                onClick={handleAutoGenerateCMS}
+                                onClick={handleAutoGenerateCMSClick}
                                 loading={isAutoProcessing}
                                 className="shadow-md hover:shadow-lg transition-all"
                             >
@@ -1957,7 +1378,7 @@ const Options: React.FC = () => {
                                 type="primary"
                                 style={{ background: 'linear-gradient(45deg, #13C2C2, #52C41A)', border: 'none' }}
                                 icon={<span role="img" aria-label="robot">🤖</span>}
-                                onClick={handleAutoCloseCMS}
+                                onClick={handleAutoCloseCMSClick}
                                 loading={isAutoClosing}
                                 className="shadow-md hover:shadow-lg transition-all"
                             >
@@ -1978,7 +1399,7 @@ const Options: React.FC = () => {
                                 size="small"
                                 type="primary"
                                 icon={<CheckCircleOutlined />}
-                                onClick={handleBulkCloseCMS}
+                                onClick={handleBulkCloseClick}
                                 loading={isBulkClosing}
                                 className="rounded-lg shadow-md bg-emerald-600 border-emerald-600 hover:bg-emerald-500"
                             >
@@ -2316,19 +1737,10 @@ const Options: React.FC = () => {
                                         message.warning(`⚠️ Đã đóng ${successCount}, lỗi ${failCount} ticket.`);
                                     }
 
-                                    // Refresh CMS data for all successful orders
+                                    // Refresh CMS data for all successful orders - using service
                                     for (const item of bulkCloseItems.filter(it => it.status === 'success')) {
-                                        const cmsData = await new Promise<any>((resolve) => {
-                                            const timeout = setTimeout(() => resolve(null), 5000);
-                                            chrome.runtime.sendMessage({
-                                                event: "CONTENTMY",
-                                                type: "FETCH_CMS_DATA",
-                                                payload: { maVanDon: item.order.itemCode }
-                                            }, (response) => {
-                                                clearTimeout(timeout);
-                                                resolve(response?.status === 'success' ? response.data : null);
-                                            });
-                                        });
+                                        const cmsDataRes = await fetchCMSData(item.order.itemCode);
+                                        const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
                                         updateOrderState(item.order.orderHdrId, { cmsData });
                                     }
                                 }
@@ -2426,19 +1838,13 @@ const Options: React.FC = () => {
                                     let ticketCode = item.ticketId;
 
                                     if (item.action === 'create') {
-                                        // --- LOGIC TẠO MỚI (CŨ) ---
-                                        const response: any = await new Promise((resolve) => {
-                                            chrome.runtime.sendMessage({
-                                                event: "CONTENTMY",
-                                                type: "CREATE_CMS_TICKET_V2",
-                                                payload: {
-                                                    maVanDon: item.order.itemCode,
-                                                    serviceCode: item.order.serviceCode || '',
-                                                    ticketType: item.ticketType,
-                                                    content: item.content
-                                                }
-                                            }, resolve);
-                                        });
+                                        // --- LOGIC TẠO MỚI (CŨ) - using service ---
+                                        const response = await createCMSTicket(
+                                            item.order.itemCode,
+                                            item.order.serviceCode || '',
+                                            item.ticketType,
+                                            item.content
+                                        );
 
                                         if (response && response.status === 'success') {
                                             ticketCode = response.ticketCode;
@@ -2465,16 +1871,8 @@ const Options: React.FC = () => {
                                             filename: "", comment: item.content, file: "", type: 2, number: 1
                                         }];
 
-                                        await new Promise(resolve => {
-                                            chrome.runtime.sendMessage({
-                                                event: 'CONTENTMY',
-                                                type: 'FORWARD_CMS_TICKET',
-                                                payload: {
-                                                    ticketId: ticketCode,
-                                                    dataOrgObj: dataOrgObj
-                                                }
-                                            }, resolve);
-                                        });
+                                        // Using service
+                                        await forwardCMSTicket(ticketCode, dataOrgObj);
                                     }
 
                                     setBulkCMSItems(prev => prev.map((it, idx) => idx === i ? { ...it, status: 'success' } : it));
@@ -2491,20 +1889,11 @@ const Options: React.FC = () => {
                             setIsBulkCreating(false);
                             message.success('Hoàn thành tạo CMS');
 
-                            // Refresh CMS data for all orders
+                            // Refresh CMS data for all orders - using service
                             for (const item of bulkCMSItems) {
                                 if (item.status === 'success') {
-                                    const cmsData = await new Promise<any>((resolve) => {
-                                        const timeout = setTimeout(() => resolve(null), 5000);
-                                        chrome.runtime.sendMessage({
-                                            event: "CONTENTMY",
-                                            type: "FETCH_CMS_DATA",
-                                            payload: { maVanDon: item.order.itemCode }
-                                        }, (response) => {
-                                            clearTimeout(timeout);
-                                            resolve(response?.status === 'success' ? response.data : null);
-                                        });
-                                    });
+                                    const cmsDataRes = await fetchCMSData(item.order.itemCode);
+                                    const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
                                     updateOrderState(item.order.orderHdrId, { cmsData });
                                 }
                             }
@@ -2519,975 +1908,4 @@ const Options: React.FC = () => {
     );
 };
 
-const ExtraInfoEditor: React.FC<{ maVanDon: string, initialValue?: string, onUpdate: (val: string) => void }> = ({ maVanDon, initialValue, onUpdate }) => {
-    const [value, setValue] = useState('');
-    const [logs, setLogs] = useState<string>(initialValue || '');
-
-    useEffect(() => {
-        setLogs(initialValue || '');
-    }, [initialValue]);
-
-    const handleAdd = () => {
-        if (!value.trim()) return;
-
-        chrome.runtime.sendMessage({
-            event: "CONTENTMY",
-            type: "UPDATE_EXTRA_INFO",
-            payload: { maVanDon, content: value }
-        }, (response) => {
-            if (response?.status === 'success') {
-                setLogs(response.updatedLog);
-                onUpdate(response.updatedLog);
-                setValue('');
-            }
-        });
-    };
-
-    const handleDeleteLast = () => {
-        if (!confirm('Xóa dòng cuối?')) return;
-        chrome.runtime.sendMessage({
-            event: "CONTENTMY",
-            type: "DELETE_LAST_LINE_EXTRA_INFO",
-            payload: { maVanDon }
-        }, (response) => {
-            if (response?.status === 'success') {
-                setLogs(response.updatedLog);
-                onUpdate(response.updatedLog);
-            }
-        });
-    };
-
-    // Helper to format logs with colors (simple version for React)
-    const renderLogs = () => {
-        if (!logs) return <span className="text-gray-400 italic">Chưa có thông tin</span>;
-        return logs.split('\n').map((line, i) => {
-            const match = line.match(/^(\d{2}-\d{2}-\d{4}\s+\d{2}:\d{2})\s+(.*)$/);
-            if (match) {
-                return (
-                    <div key={i}>
-                        <span className="text-blue-600 font-bold mr-2">[{match[1]}]</span>
-                        <span>{match[2]}</span>
-                    </div>
-                );
-            }
-            return <div key={i}>{line}</div>;
-        });
-    };
-
-    return (
-        <div className="flex flex-col gap-2">
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-3 rounded-xl border border-blue-200 text-xs font-mono max-h-32 overflow-y-auto shadow-sm">
-                {renderLogs()}
-            </div>
-            <div className="flex gap-2">
-                <Input
-                    size="small"
-                    value={value}
-                    onChange={e => setValue(e.target.value)}
-                    onPressEnter={handleAdd}
-                    placeholder="✏️ Nhập ghi chú..."
-                    className="rounded-lg shadow-sm"
-                />
-                <Button size="small" type="primary" onClick={handleAdd} className="rounded-lg shadow-sm">💾 Lưu</Button>
-                {logs && <Button size="small" danger onClick={handleDeleteLast} className="rounded-lg shadow-sm">🗑️</Button>}
-            </div>
-        </div>
-    );
-};
-
-const BulkCMSModal: React.FC<{
-    open: boolean;
-    onCancel: () => void;
-    items: BulkCMSItem[]; // Sử dụng Interface đã khai báo ở Bước 1
-    setItems: React.Dispatch<React.SetStateAction<BulkCMSItem[]>>; // Sửa luôn chỗ này cho đồng bộ (tránh any)
-    templates: string[];
-    isCreating: boolean;
-    onStartCreation: () => void;
-    onStop: () => void;
-}> = ({ open, onCancel, items, setItems, templates, isCreating, onStartCreation, onStop }) => {
-    const [globalTicketType, setGlobalTicketType] = useState<'support' | 'complaint'>('support');
-    const [globalContent, setGlobalContent] = useState<string>('');
-    const [viewingHistory, setViewingHistory] = useState<ExtendedOrder | null>(null);
-    // Update all items when global values change
-    useEffect(() => {
-        if (!isCreating) {
-            setItems(prev => prev.map(item => ({
-                ...item,
-                ticketType: globalTicketType,
-                // content: globalContent
-            })));
-        }
-    }, [globalTicketType, isCreating, setItems]);
-    const handleGlobalContentChange = (newContent: string) => {
-        setGlobalContent(newContent);
-        setItems(prev => prev.map(item => ({
-            ...item,
-            content: newContent
-        })));
-    };
-    const getStatusIcon = (status: string) => {
-        switch (status) {
-            case 'pending': return '⏳';
-            case 'processing': return '🔄';
-            case 'success': return '✅';
-            case 'error': return '❌';
-            default: return '⏳';
-        }
-    };
-
-    const getStatusColor = (status: string) => {
-        switch (status) {
-            case 'pending': return 'bg-gray-50 border-gray-200';
-            case 'processing': return 'bg-blue-50 border-blue-400 animate-pulse';
-            case 'success': return 'bg-green-50 border-green-400';
-            case 'error': return 'bg-red-50 border-red-400';
-            default: return 'bg-gray-50 border-gray-200';
-        }
-    };
-
-    const handleDeleteItem = (index: number) => {
-        setItems(prev => prev.filter((_, i) => i !== index));
-    };
-
-    const handleOrgCodeChange = (index: number, newCode: string) => {
-        setItems(prev => prev.map((item, i) =>
-            i === index ? { ...item, destOrgCode: newCode, orgInfo: null } : item
-        ));
-    };
-
-    const handleCheckOrgCode = async (index: number, code: string) => {
-        if (!code || code.length !== 6) {
-            message.error('Mã bưu cục phải có 6 số');
-            return;
-        }
-
-        try {
-            const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
-                headers: { "accept": "*/*", "x-requested-with": "XMLHttpRequest" },
-                method: "GET",
-                mode: "cors",
-                credentials: "include"
-            });
-            const data = await response.json();
-            if (data && data.length > 0) {
-                const newOrgInfo = { orgCode: data[0].orgCode, name: data[0].name };
-                setItems(prev => prev.map((item, i) =>
-                    i === index ? { ...item, orgInfo: newOrgInfo } : item
-                ));
-                message.success('Đã tìm thấy bưu cục: ' + data[0].name);
-            } else {
-                message.warning('Không tìm thấy bưu cục nào với mã này');
-            }
-        } catch (error) {
-            console.error('Error checking org:', error);
-            message.error('Lỗi khi tra cứu bưu cục');
-        }
-    };
-
-    return (
-        <Modal
-            title={<span className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600">🎫 Tạo nhiều CMS ({items.length} đơn hàng)</span>}
-            open={open}
-            onCancel={onCancel}
-            width={1200}
-            footer={null}
-            className="modern-modal"
-        >
-            <div className="flex flex-col gap-4">
-                {/* Global Controls - Chỉ hiện khi chưa bắt đầu tạo */}
-                {!isCreating && items.some(it => it.status === 'pending') && (
-                    <div className="bg-gradient-to-br from-purple-50 to-pink-50 p-4 rounded-xl border-2 border-purple-300 shadow-lg">
-                        <div className="font-bold text-purple-700 mb-3 text-lg">📝 Nội dung chung cho tất cả đơn hàng</div>
-                        <div className="space-y-3">
-                            <div className="flex gap-2">
-                                <Select
-                                    value={globalTicketType}
-                                    onChange={setGlobalTicketType}
-                                    style={{ width: 250 }}
-                                    size="large"
-                                    options={[
-                                        { value: 'support', label: '🆘 Hỗ Trợ (134, +1 ngày)' },
-                                        { value: 'complaint', label: '⚠️ Khiếu Nại (534, +7 ngày)' }
-                                    ]}
-                                />
-                                {templates.length > 0 && (
-                                    <Select
-                                        placeholder="📋 Chọn mẫu nội dung..."
-                                        style={{ flex: 1 }}
-                                        size="large"
-                                        onChange={(value) => handleGlobalContentChange(value.replace(/\\n/g, '\n'))}
-                                        allowClear
-                                    >
-                                        {templates.map((template, tIdx) => (
-                                            <Select.Option key={tIdx} value={template}>
-                                                {template.substring(0, 80)}{template.length > 80 ? '...' : ''}
-                                            </Select.Option>
-                                        ))}
-                                    </Select>
-                                )}
-                            </div>
-                            <TextArea
-                                value={globalContent}
-                                onChange={(e) => handleGlobalContentChange(e.target.value)}
-                                rows={4}
-                                placeholder="✏️ Nhập nội dung CMS cho tất cả đơn hàng..."
-                                className="rounded-lg text-base"
-                                size="large"
-                            />
-                        </div>
-                    </div>
-                )}
-
-                {/* Orders List */}
-                <div className="max-h-[50vh] overflow-y-auto space-y-2">
-                    {items.map((item, idx) => (
-                        <div key={idx} className={`border-2 rounded-lg p-3 transition-all ${getStatusColor(item.status)}`}>
-                            <div className="flex items-center justify-between gap-4">
-                                <div className="flex items-center gap-3 flex-1">
-                                    {/* Thay đổi icon dựa trên Action */}
-                                    <span className="text-2xl">
-                                        {item.action === 'create' ? '🆕' : '🔔'}
-                                    </span>
-                                    <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
-                                            <Tooltip title="Xem lịch sử hành trình">
-                                                <span
-                                                    className="font-bold text-blue-700 cursor-pointer hover:underline hover:text-blue-500"
-                                                    onClick={() => setViewingHistory(item.order)} // Sự kiện click mở lịch sử
-                                                >
-                                                    {item.order.itemCode} <HistoryOutlined className="text-xs ml-1" />
-                                                </span>
-                                            </Tooltip>
-                                            <span className="text-sm text-gray-600">- {item.order.receiverName}</span>
-                                        </div>
-                                        <div className="mt-1 text-xs">
-                                            {item.action === 'create' ? (
-                                                <Tag color="green">Tạo mới</Tag>
-                                            ) : (
-                                                <Tag color="orange">Chuyển tiếp {item.ticketId}</Tag>
-                                            )}
-                                            <span className="font-mono text-gray-700">{item.content}</span>
-                                        </div>
-                                        <div className="flex gap-4 text-xs text-gray-600 items-center">
-                                            <span>Service: <span className="font-semibold text-blue-600">{item.order.serviceCode || 'N/A'}</span></span>
-                                            <div className="flex items-center gap-1">
-                                                <span>OrgCode:</span>
-                                                <Input
-                                                    size="small"
-                                                    value={item.destOrgCode}
-                                                    onChange={(e) => handleOrgCodeChange(idx, e.target.value)}
-                                                    style={{ width: 80 }}
-                                                    disabled={isCreating}
-                                                    maxLength={6}
-                                                />
-                                                <Button
-                                                    size="small"
-                                                    type="text"
-                                                    icon={<SyncOutlined />}
-                                                    disabled={isCreating || !item.destOrgCode}
-                                                    onClick={() => handleCheckOrgCode(idx, item.destOrgCode)}
-                                                    title="Kiểm tra tên bưu cục"
-                                                />
-                                                {item.orgInfo ? (
-                                                    <span className="font-semibold text-green-600">({item.orgInfo.name})</span>
-                                                ) : (
-                                                    item.destOrgCode && <span className="text-orange-500 italic">(Chưa kiểm tra)</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                        {item.error && <div className="text-red-600 font-semibold text-sm mt-1">❌ {item.error}</div>}
-                                    </div>
-                                </div>
-
-                                {/* Status or Actions */}
-                                {item.status === 'pending' && !isCreating ? (
-                                    <div className="flex items-center">
-                                        <Button
-                                            danger
-                                            type="text"
-                                            icon={<DeleteOutlined />}
-                                            onClick={() => handleDeleteItem(idx)}
-                                            title="Xóa khỏi danh sách"
-                                        />
-                                    </div>
-                                ) : (
-                                    <>
-                                        {item.status === 'processing' && (
-                                            <div className="text-blue-600 font-semibold animate-pulse">Đang tạo...</div>
-                                        )}
-                                        {item.status === 'success' && (
-                                            <div className="text-green-600 font-semibold">Thành công ✓</div>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-2 pt-4 border-t-2">
-                    <Button
-                        type="primary"
-                        size="large"
-                        block
-                        onClick={onStartCreation}
-                        disabled={isCreating || items.length === 0 || items.every(it => it.status !== 'pending')}
-                        loading={isCreating}
-                        className="rounded-lg"
-                        icon={isCreating ? null : <PlusOutlined />}
-                    >
-                        {isCreating ? '🔄 Đang tạo...' : `✅ Tạo ${items.filter(it => it.status === 'pending').length} CMS`}
-                    </Button>
-                    {isCreating && (
-                        <Button
-                            danger
-                            size="large"
-                            onClick={onStop}
-                            className="rounded-lg"
-                        >
-                            ⏹️ Dừng
-                        </Button>
-                    )}
-                </div>
-            </div>
-            <Modal
-                title={
-                    <span className="text-blue-700">
-                        📜 Lịch sử: {viewingHistory?.itemCode}
-                    </span>
-                }
-                open={!!viewingHistory}
-                onCancel={() => setViewingHistory(null)}
-                footer={null}
-                width={700}
-                zIndex={1001} // Đảm bảo nổi lên trên modal tạo CMS
-            >
-                <div className="max-h-[60vh] overflow-y-auto">
-                    {viewingHistory?.history?.orderStatusHistoryDtoList?.length ? (
-                        <div className="flex flex-col gap-3">
-                            {viewingHistory.history.orderStatusHistoryDtoList.map((h, idx) => (
-                                <div key={idx} className="border-b pb-2 last:border-0">
-                                    <div className="flex justify-between">
-                                        <span className="font-bold text-blue-600">{h.traceDate}</span>
-                                        <span className="text-gray-500 text-xs">{h.address}</span>
-                                    </div>
-                                    <div className="font-semibold text-gray-800 mt-1">{h.statusText}</div>
-                                    {h.statusDetail && (
-                                        <div
-                                            className="text-gray-500 text-sm italic mt-1 bg-gray-50 p-2 rounded"
-                                            dangerouslySetInnerHTML={{ __html: h.statusDetail }}
-                                        />
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center text-gray-400 py-8">
-                            Không có dữ liệu lịch sử
-                        </div>
-                    )}
-                </div>
-            </Modal>
-        </Modal>
-    );
-};
-
-const CreateCMSTicketButton: React.FC<{
-    record: ExtendedOrder;
-    updateOrderState: (orderHdrId: string, updates: Partial<ExtendedOrder>) => void;
-}> = ({ record, updateOrderState }) => {
-    const [modalOpen, setModalOpen] = useState(false);
-    const [ticketType, setTicketType] = useState<'support' | 'complaint'>('support');
-    const [content, setContent] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [destOrgCode, setDestOrgCode] = useState('');
-    const [orgInfo, setOrgInfo] = useState<{ orgCode: string; name: string } | null>(null);
-    const [templates, setTemplates] = useState<string[]>([]);
-
-
-
-    // Check if should show button
-    const shouldShow =
-        (record.cmsData === undefined || record.cmsData?.tickets?.length === 0);
-
-    if (!shouldShow) return null;
-
-    const fetchOrgInfo = async (code: string) => {
-        if (code.length !== 6) {
-            setOrgInfo(null);
-            return;
-        }
-
-        try {
-            const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
-                headers: {
-                    "accept": "*/*",
-                    "x-requested-with": "XMLHttpRequest"
-                },
-                method: "GET",
-                mode: "cors",
-                credentials: "include"
-            });
-
-            const data = await response.json();
-            if (data && data.length > 0) {
-                setOrgInfo({ orgCode: data[0].orgCode, name: data[0].name });
-            } else {
-                setOrgInfo(null);
-            }
-        } catch (error) {
-            console.error('Error fetching org info:', error);
-            setOrgInfo(null);
-        }
-    };
-
-    const handleOpenModal = async () => {
-        // Load CMS templates from Firebase
-        chrome.runtime.sendMessage({
-            event: 'CONTENTMY',
-            type: 'GET_CMS_TEMPLATES',
-            payload: {}
-        }, (response) => {
-            if (response?.status === 'success' && response.templates) {
-                setTemplates(response.templates);
-            }
-        });
-
-        // Auto-fetch CMS if not fetched yet
-        if (record.cmsData === undefined) {
-            message.loading({ content: 'Đang kiểm tra CMS...', key: 'fetch_cms', duration: 0 });
-
-            const cmsData = await new Promise<any>((resolve) => {
-                const timeout = setTimeout(() => resolve(null), 5000);
-                chrome.runtime.sendMessage({
-                    event: "CONTENTMY",
-                    type: "FETCH_CMS_DATA",
-                    payload: { maVanDon: record.itemCode }
-                }, (response) => {
-                    clearTimeout(timeout);
-                    resolve(response?.status === 'success' ? response.data : null);
-                });
-            });
-
-            updateOrderState(record.orderHdrId, { cmsData });
-            message.destroy('fetch_cms');
-
-            if (cmsData?.tickets?.length > 0) {
-                message.warning('Đơn hàng đã có ticket CMS');
-                return;
-            }
-        }
-
-        // Extract 6 digits from history address
-        // Lấy address mới nhất có chứa 6 số, bỏ qua các log cuộc gọi
-        const historyList = record.history?.orderStatusHistoryDtoList || [];
-        let extracted = '';
-
-        for (const historyItem of historyList) {
-            const addressMatch = historyItem.address?.match(/(\d{6})/);
-            if (addressMatch) {
-                extracted = addressMatch[1];
-                break; // Lấy cái đầu tiên tìm được (mới nhất)
-            }
-        }
-
-        setDestOrgCode(extracted);
-        if (extracted.length === 6) {
-            fetchOrgInfo(extracted);
-        }
-
-        setModalOpen(true);
-    };
-
-    const handleCreateTicket = () => {
-        if (!content.trim()) {
-            message.warning('Vui lòng nhập nội dung');
-            return;
-        }
-
-        Modal.confirm({
-            title: 'Xác nhận tạo CMS',
-            content: `Bạn có muốn tạo ticket ${ticketType === 'support' ? 'Hỗ Trợ' : 'Khiếu Nại'} cho đơn hàng ${record.itemCode}?`,
-            onOk: async () => {
-                setLoading(true);
-                try {
-                    // GỬI MESSAGE SANG BACKGROUND THAY VÌ FETCH TRỰC TIẾP
-                    const response: any = await new Promise((resolve) => {
-                        chrome.runtime.sendMessage({
-                            event: "CONTENTMY",
-                            type: "CREATE_CMS_TICKET_V2", // Sử dụng V2 mới
-                            payload: {
-                                maVanDon: record.itemCode,
-                                serviceCode: record.serviceCode || '',
-                                ticketType: ticketType,
-                                content: content
-                            }
-                        }, resolve);
-                    });
-
-                    // Xử lý lỗi kết nối
-                    if (chrome.runtime.lastError) {
-                        message.error('Lỗi kết nối Extension: ' + chrome.runtime.lastError.message);
-                        setLoading(false);
-                        return;
-                    }
-
-                    if (response && response.status === 'success') {
-                        const ticketCode = response.ticketCode;
-                        message.success('✅ Tạo CMS thành công');
-                        setModalOpen(false);
-                        setContent('');
-
-                        // Refresh CMS data (Giữ nguyên logic cũ)
-                        const cmsData = await new Promise<any>((resolve) => {
-                            const timeout = setTimeout(() => resolve(null), 5000);
-                            chrome.runtime.sendMessage({
-                                event: "CONTENTMY",
-                                type: "FETCH_CMS_DATA",
-                                payload: { maVanDon: record.itemCode }
-                            }, (res) => {
-                                clearTimeout(timeout);
-                                resolve(res?.status === 'success' ? res.data : null);
-                            });
-                        });
-                        updateOrderState(record.orderHdrId, { cmsData });
-
-                        // Xử lý Chuyển tiếp (Forwarding) nếu có OrgCode
-                        if (destOrgCode && destOrgCode.length === 6) {
-                            // Fetch org info để lấy tên (nếu chưa có)
-                            // Lưu ý: Logic này bạn có thể tái sử dụng orgInfo state nếu đã có
-                            try {
-                                // Nếu orgInfo state đã có dữ liệu thì dùng luôn, không cần fetch lại
-                                let currentOrgInfo = orgInfo;
-                                if (!currentOrgInfo) {
-                                    // Fallback fetch nếu cần (thường đã có khi nhập input)
-                                    // Ở đây ta giả định luồng UI đã set orgInfo rồi
-                                }
-
-                                if (currentOrgInfo) {
-                                    Modal.confirm({
-                                        title: 'Chuyển tiếp ticket',
-                                        content: `Bạn có muốn chuyển tiếp ticket đến ${currentOrgInfo.orgCode} - ${currentOrgInfo.name}?`,
-                                        onOk: async () => {
-                                            // GỬI MESSAGE FORWARD SANG BACKGROUND
-                                            const dataOrgObj = [{
-                                                tempId: 72,
-                                                orgCode: currentOrgInfo!.orgCode,
-                                                orgName: `${currentOrgInfo!.orgCode} - ${currentOrgInfo!.name}`,
-                                                filename: "", comment: content, file: "", type: 2, number: 1
-                                            }];
-
-                                            chrome.runtime.sendMessage({
-                                                event: 'CONTENTMY',
-                                                type: 'FORWARD_CMS_TICKET',
-                                                payload: {
-                                                    ticketId: ticketCode,
-                                                    dataOrgObj: dataOrgObj
-                                                }
-                                            }, (fwdRes) => {
-                                                if (fwdRes && fwdRes.status === 'success') {
-                                                    message.success('✅ Đã chuyển tiếp thành công');
-                                                    // Refresh CMS again...
-                                                } else {
-                                                    message.error('❌ Lỗi khi chuyển tiếp: ' + (fwdRes?.error || 'Unknown'));
-                                                }
-                                            });
-                                        }
-                                    });
-                                }
-                            } catch (error) {
-                                console.error('Error handling forwarding:', error);
-                            }
-                        }
-                    } else {
-                        message.error(`❌ Tạo thất bại: ${response?.error || 'Lỗi không xác định'}`);
-                    }
-                } catch (error) {
-                    console.error('Error creating ticket:', error);
-                    message.error('❌ Lỗi hệ thống khi tạo CMS');
-                } finally {
-                    setLoading(false);
-                }
-            }
-        });
-    };
-
-    return (
-        <>
-            <Button
-                block
-                size="small"
-                icon={<PlusOutlined />}
-                type="dashed"
-                className="rounded-lg shadow-sm hover:shadow-md transition-all border-green-400 text-green-600"
-                onClick={handleOpenModal}
-            >
-                ➕ Tạo CMS
-            </Button>
-
-            <Modal
-                title={<span className="text-lg font-bold text-transparent bg-clip-text bg-gradient-to-r from-green-600 to-emerald-600">➕ Tạo CMS Ticket: {record.itemCode}</span>}
-                open={modalOpen}
-                onCancel={() => setModalOpen(false)}
-                footer={null}
-                width={600}
-                className="modern-modal"
-            >
-                <div className="flex flex-col gap-4">
-                    {/* Service Code Info */}
-                    <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-                        <div className="text-xs text-gray-600 mb-1">Service Code</div>
-                        <div className="font-bold text-blue-700">
-                            {record.serviceCode || 'Không xác định'}
-                            {/* Đã xóa phần hiển thị ttkSrvIdL3 vì logic mapping giờ nằm ở background */}
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="font-bold text-sm">Mã đơn vị (từ lịch sử)</label>
-                        <Input
-                            value={destOrgCode}
-                            onChange={e => {
-                                const val = e.target.value.replace(/\D/g, '').slice(0, 6);
-                                setDestOrgCode(val);
-                                if (val.length === 6) {
-                                    fetchOrgInfo(val);
-                                } else {
-                                    setOrgInfo(null);
-                                }
-                            }}
-                            maxLength={6}
-                            placeholder="Nhập 6 số"
-                            className="rounded-lg"
-                        />
-                        {orgInfo && (
-                            <div className="text-xs text-green-600 mt-1">
-                                ✓ {orgInfo.orgCode} - {orgInfo.name}
-                            </div>
-                        )}
-                    </div>
-
-                    <div>
-                        <label className="font-bold text-sm">Loại ticket</label>
-                        <Select
-                            value={ticketType}
-                            onChange={setTicketType}
-                            className="w-full"
-                            options={[
-                                { value: 'support', label: '🆘 Hỗ Trợ (134, +1 ngày)' },
-                                { value: 'complaint', label: '⚠️ Khiếu Nại (534, +7 ngày)' }
-                            ]}
-                        />
-                    </div>
-
-                    {templates.length > 0 && (
-                        <div>
-                            <label className="font-bold text-sm">Chọn mẫu nội dung</label>
-                            <Select
-                                placeholder="📋 Chọn mẫu có sẵn..."
-                                className="w-full"
-                                onChange={(value) => setContent(value.replace(/\\n/g, '\n'))}
-                                allowClear
-                            >
-                                {templates.map((template, idx) => (
-                                    <Select.Option key={idx} value={template}>
-                                        {template.substring(0, 60)}{template.length > 60 ? '...' : ''}
-                                    </Select.Option>
-                                ))}
-                            </Select>
-                        </div>
-                    )}
-
-                    <div>
-                        <label className="font-bold text-sm">Nội dung</label>
-                        <TextArea
-                            value={content}
-                            onChange={e => setContent(e.target.value)}
-                            rows={4}
-                            placeholder="Nhập nội dung ticket..."
-                            className="rounded-lg"
-                        />
-                    </div>
-
-                    <Button
-                        type="primary"
-                        size="large"
-                        block
-                        onClick={handleCreateTicket}
-                        loading={loading}
-                        disabled={!content.trim()}
-                        className="rounded-lg"
-                    >
-                        ✅ Tạo Ticket
-                    </Button>
-                </div>
-
-            </Modal>
-        </>
-    );
-};
-
-const CMSTicketItem: React.FC<{ ticket: any; itemCode: string }> = ({ ticket, itemCode }) => {
-    const [orgCode, setOrgCode] = useState('');
-    const [orgInfo, setOrgInfo] = useState<{ orgCode: string; name: string } | null>(null);
-    const [comment, setComment] = useState('');
-    const [loading, setLoading] = useState(false)
-    const [templates, setTemplates] = useState<string[]>([]);
-
-    // Extract unit from last action
-    const lastAction = ticket.actions?.[ticket.actions.length - 1];
-    const unitMatch = lastAction?.unit?.match(/(\d{6})/);
-    const defaultOrgCode = unitMatch?.[1] || '';
-
-    // Check if ticket is closed (last action content contains "Đóng yêu cầu")
-    const isTicketClosed = lastAction?.content?.includes('Đóng yêu cầu') || false;
-
-    useEffect(() => {
-        if (defaultOrgCode) {
-            setOrgCode(defaultOrgCode);
-            fetchOrgInfo(defaultOrgCode);
-        }
-    }, [defaultOrgCode]);
-    // --- THÊM USEEFFECT MỚI ĐỂ LẤY TEMPLATES ---
-    useEffect(() => {
-        if (!isTicketClosed) {
-            chrome.runtime.sendMessage({
-                event: 'CONTENTMY',
-                type: 'GET_CMS_TEMPLATES',
-                payload: {}
-            }, (response) => {
-                if (response?.status === 'success' && response.templates) {
-                    setTemplates(response.templates);
-                }
-            });
-        }
-    }, [isTicketClosed]);
-    const fetchOrgInfo = async (code: string) => {
-        if (code.length !== 6) return;
-
-        try {
-            const response = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
-                headers: {
-                    "accept": "*/*",
-                    "x-requested-with": "XMLHttpRequest"
-                },
-                method: "GET",
-                mode: "cors",
-                credentials: "include"
-            });
-
-            const data = await response.json();
-            if (data && data.length > 0) {
-                setOrgInfo({ orgCode: data[0].orgCode, name: data[0].name });
-            } else {
-                setOrgInfo(null);
-            }
-        } catch (error) {
-            console.error('Error fetching org info:', error);
-            setOrgInfo(null);
-        }
-    };
-
-    const handleOrgCodeChange = (value: string) => {
-        setOrgCode(value);
-        if (value.length === 6) {
-            fetchOrgInfo(value);
-        } else {
-            setOrgInfo(null);
-        }
-    };
-
-    const handleSend = () => {
-        if (!orgInfo || !comment.trim()) {
-            message.warning('Vui lòng nhập đầy đủ thông tin');
-            return;
-        }
-
-        Modal.confirm({
-            title: 'Xác nhận chuyển tiếp',
-            content: `Bạn có muốn chuyển tiếp đến ${orgInfo.orgCode} - ${orgInfo.name}?`,
-            onOk: async () => {
-                setLoading(true);
-                try {
-                    const dataOrgObj = [
-                        {
-                            tempId: 72,
-                            orgCode: orgInfo.orgCode,
-                            orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
-                            filename: "",
-                            comment: comment,
-                            file: "",
-                            type: 2,
-                            number: 1
-                        }
-                    ];
-
-                    // GỬI MESSAGE SANG BACKGROUND
-                    const response: any = await new Promise((resolve) => {
-                        chrome.runtime.sendMessage({
-                            event: 'CONTENTMY',
-                            type: 'FORWARD_CMS_TICKET',
-                            payload: {
-                                ticketId: ticket.ticketId,
-                                dataOrgObj: dataOrgObj
-                            }
-                        }, resolve);
-                    });
-
-                    if (response && response.status === 'success') {
-                        message.success('✅ Đã chuyển tiếp thành công');
-                        setComment('');
-                    } else {
-                        message.error(`❌ Lỗi khi chuyển tiếp: ${response?.error || 'Unknown'}`);
-                    }
-                } catch (error) {
-                    console.error('Error sending:', error);
-                    message.error('❌ Lỗi hệ thống khi chuyển tiếp');
-                } finally {
-                    setLoading(false);
-                }
-            }
-        });
-    };
-
-    return (
-        <div className="mb-4 border border-orange-200 rounded-lg p-3 bg-gradient-to-br from-orange-50 to-red-50">
-            <div className="flex justify-between items-center mb-3">
-                <div className="font-bold text-orange-700 bg-white px-3 py-1 rounded-lg shadow-sm">{ticket.ticketCode}</div>
-                <Button
-                    size="small"
-                    icon={<FileTextOutlined />}
-                    onClick={() => {
-                        chrome.runtime.sendMessage({
-                            event: "CONTENTMY",
-                            type: "OPEN_CMS_SEARCH",
-                            payload: { itemCode }
-                        }, (response) => {
-                            if (response?.status === 'success') {
-                                message.success('✅ Đã mở CMS');
-                            } else {
-                                message.error('❌ Không thể mở CMS');
-                            }
-                        });
-                    }}
-                >
-                    Mở CMS
-                </Button>
-            </div>
-
-            {/* Actions */}
-            {ticket.actions?.map((a: any, ai: number) => (
-                <div
-                    key={ai}
-                    className={`p-3 mt-2 rounded-lg ${ai === ticket.actions.length - 1
-                        ? 'bg-gradient-to-r from-green-100 to-emerald-100 border-2 border-green-400'
-                        : 'bg-white border border-slate-200'
-                        }`}
-                >
-                    <div className="font-semibold text-sm text-slate-700 mb-2">
-                        🕐 {a.date} • {a.unit}
-                    </div>
-                    <div className="text-slate-800 whitespace-pre-wrap">{a.content}</div>
-                </div>
-            ))}
-
-            {/* Form chuyển tiếp - Ẩn nếu ticket đã đóng */}
-            {!isTicketClosed && (
-                <div className="mt-4 p-3 bg-white rounded-lg border border-blue-200">
-                    <div className="text-sm font-bold text-blue-700 mb-2">Chuyển tiếp</div>
-                    <div className="flex flex-col gap-2">
-                        <div>
-                            <Input
-                                size="small"
-                                placeholder="Nhập mã đơn vị (6 số)"
-                                value={orgCode}
-                                onChange={(e) => handleOrgCodeChange(e.target.value)}
-                                maxLength={6}
-                                className="rounded"
-                            />
-                            {orgInfo && (
-                                <div className="text-xs text-green-600 mt-1">
-                                    ✓ {orgInfo.orgCode} - {orgInfo.name}
-                                </div>
-                            )}
-                        </div>
-                        {templates.length > 0 && (
-                            <Select
-                                placeholder="📋 Chọn mẫu nội dung..."
-                                size="small"
-                                onChange={(val) => setComment(val)}
-                                allowClear
-                                className="w-full"
-                                dropdownMatchSelectWidth={false}
-                            >
-                                {templates.map((t, idx) => (
-                                    <Select.Option key={idx} value={t}>
-                                        {t.length > 50 ? t.substring(0, 50) + '...' : t}
-                                    </Select.Option>
-                                ))}
-                            </Select>
-                        )}
-                        <TextArea
-                            size="small"
-                            placeholder="Nhập nội dung..."
-                            value={comment}
-                            onChange={(e) => setComment(e.target.value)}
-                            rows={2}
-                            className="rounded"
-                        />
-                        <Button
-                            size="small"
-                            type="primary"
-                            onClick={handleSend}
-                            loading={loading}
-                            disabled={!orgInfo || !comment.trim()}
-                            className="rounded"
-                        >
-                            📤 Gửi
-                        </Button>
-                    </div>
-                </div>
-            )}
-        </div>
-    );
-};
-const NewConfigRow = ({ onAdd }: { onAdd: (item: CMSAutoConfig) => void }) => {
-    const [code, setCode] = useState('');
-    const [type, setType] = useState<'support' | 'complaint'>('support');
-    const [content, setContent] = useState('');
-
-    const handleAdd = () => {
-        if (!code || !content) return message.error("Thiếu thông tin");
-        onAdd({ orgCode: code, ticketType: type, content: content });
-        setCode('');
-        setContent('');
-    };
-
-    return (
-        <div className="flex gap-2 items-start"> {/* items-start để căn trên nếu textarea cao */}
-            <Input
-                value={code}
-                onChange={e => setCode(e.target.value)}
-                placeholder="Mã KH"
-                style={{ width: 120 }}
-            />
-            <Select
-                value={type}
-                onChange={setType}
-                style={{ width: 120 }}
-                options={[{ value: 'support', label: 'Hỗ trợ' }, { value: 'complaint', label: 'Khiếu nại' }]}
-            />
-            {/* Thay Input thường bằng TextArea */}
-            <Input.TextArea
-                value={content}
-                onChange={e => setContent(e.target.value)}
-                placeholder="Nội dung (xuống dòng thoải mái)..."
-                style={{ flex: 1 }}
-                autoSize={{ minRows: 1, maxRows: 4 }} // Tự động giãn từ 1 đến 4 dòng
-            />
-            <Button type="primary" onClick={handleAdd} icon={<PlusOutlined />} />
-        </div>
-    );
-};
 export default Options;
