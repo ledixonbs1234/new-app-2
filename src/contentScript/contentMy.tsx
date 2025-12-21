@@ -135,15 +135,6 @@ var tinhKien = ['kon tum', 'gia lai', 'dak lak', 'binh dinh', 'phu yen', 'khanh 
 // Mảng này sẽ lưu trữ tất cả các MutationObserver đang hoạt động
 // để chúng ta có thể dọn dẹp chúng sau này.
 let activeObservers: MutationObserver[] = [];
-let uiContainer: HTMLDivElement | null = null;
-
-// Định nghĩa cấu trúc của một mục địa chỉ trong data.json
-interface AddressItem {
-    NameXPKD?: string;
-    NameQHKD?: string;
-    NameTTPKD?: string;
-    // Thêm các thuộc tính khác nếu cần
-}
 
 // ==========================================================================
 // Cấu hình & Biến toàn cục
@@ -155,6 +146,66 @@ const GHOST_INPUT_ID: string = "ghost-address-input-suggestion";
 let addressData: AddressItem[] = []; // Mảng chứa các đối tượng địa chỉ
 let currentSuggestion: string | null = null; // Gợi ý hiện tại
 let ghostInput: HTMLInputElement | null = null; // Tham chiếu đến element ghost input
+let checkInterval: number | null = null; // Polling interval cho modal check
+
+// ==========================================================================
+// DOM Selector Constants
+// ==========================================================================
+// Modal selectors
+const MODAL_SELECTOR = 'div[role="dialog"]';
+const MODAL_BODY_SELECTOR = '.ant-modal-body';
+const ANT_TABLE_CONTENT_SELECTOR = '.ant-table-content';
+const ANT_TABLE_TBODY_SELECTOR = '.ant-table-tbody';
+const ANT_TABLE_ROW_SELECTOR = 'tr.ant-table-row';
+
+// Button & UI Selectors
+const COPY_BTN_ID = 'custom-copy-info-btn';
+const COMPLAINT_BTN_ID = 'custom-complaint-btn';
+const SUPPORT_BTN_ID = 'custom-support-btn';
+const EXTRA_INFO_CONTAINER_ID = 'custom-extra-info-container';
+const EXTRA_INFO_ROW_ID = 'custom-extra-info-row';
+const CMS_COL_ID = 'custom-cms-col';
+const CMS_MODAL_OVERLAY_ID = 'custom-cms-modal-overlay';
+
+// Form selectors
+const FORM_CREATE_ORDER_ID = 'form-create-order';
+const FORM_WEIGHT_ID = 'form-create-order_weight';
+const FORM_SALE_ORDER_CODE_ID = 'form-create-order_saleOrderCode';
+const FORM_RECEIVER_ADDRESS_ID = 'form-create-order_receiverAddress';
+
+// ==========================================================================
+// Helper Functions
+// ==========================================================================
+/**
+ * Lấy access token từ localStorage một cách an toàn
+ * @returns Access token hoặc null nếu không tồn tại
+ */
+function getAccessToken(): string | null {
+    try {
+        return localStorage.getItem('accessToken');
+    } catch (error) {
+        console.error('[Helper] Lỗi khi lấy accessToken:', error);
+        return null;
+    }
+}
+
+/**
+ * Lấy text từ một label trong container (dùng th/td)
+ * @param container Element chứa dữ liệu
+ * @param labelText Text label cần tìm
+ * @returns Giá trị tương ứng hoặc 'N/A' nếu không tìm thấy
+ */
+function getTextFromLabel(container: Element, labelText: string): string {
+    const allThs = container.querySelectorAll('th');
+    for (const th of allThs) {
+        if (th.textContent?.trim().includes(labelText)) {
+            const td = th.nextElementSibling as HTMLElement;
+            // Lấy textContent và dọn dẹp khoảng trắng thừa
+            return td?.textContent?.trim().replace(/\s+/g, ' ') ?? 'N/A';
+        }
+    }
+    return 'N/A';
+}
 
 
 window.onload = async () => {
@@ -169,6 +220,16 @@ window.onload = async () => {
         cleanup();
     }
 }
+
+// Cleanup when page is unloading
+window.addEventListener('beforeunload', () => {
+    cleanup();
+});
+
+// Cleanup when extension is disabled/reloaded
+window.addEventListener('unload', () => {
+    cleanup();
+});
 /**
  * Hàm tiện ích để tạo và theo dõi một MutationObserver.
  * Thay vì dùng `new MutationObserver` trực tiếp, hãy dùng hàm này.
@@ -460,6 +521,9 @@ async function createForwardForm(ticketId: string, defaultOrgCode: string, conte
 /**
  * Lắng nghe tin nhắn từ background script và các phần khác của extension.
  * Trình lắng nghe này chỉ được đăng ký MỘT LẦN.
+ * 
+ * ⚠️ IMPORTANT: Tất cả các handler có async operations PHẢI return true
+ * để giữ kênh mở cho sendResponse asynchronous
  */
 chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
     if (message.type === "URL_CHANGED") {
@@ -496,7 +560,7 @@ chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
         sendResponse({ status: 'updated' });
         return true;
     } else if (message.type === "GET_MYPOST_TOKEN") {
-        const token = localStorage.getItem('accessToken');
+        const token = getAccessToken();
         sendResponse({ token: token || null });
         return true; // Giữ kênh mở cho phản hồi bất đồng bộ
     } else if (message.type === "ADD_BATCH_ROWS") {
@@ -510,12 +574,15 @@ chrome.runtime.onMessage.addListener(async (message, _sender, sendResponse) => {
             }
         })();
         return true; // Keep channel open for async response
+    } else {
+        // Default: ignore unknown message types
+        console.warn(`[Content] Unknown message type: ${message.type}`);
     }
 })
 
 // ===== HÀM MỚI: Cập nhật thông tin trong bảng =====
 function updateOrderInfoInTable(maVanDon: string, fullLog: string) {
-    const tableRows = document.querySelectorAll('tr.ant-table-row');
+    const tableRows = document.querySelectorAll(ANT_TABLE_ROW_SELECTOR);
     let updated = false;
 
     tableRows.forEach(row => {
@@ -594,6 +661,18 @@ function cleanup() {
     activeObservers.forEach(observer => observer.disconnect());
     activeObservers = [];
 
+    // Clear polling interval để tránh memory leak
+    if (checkInterval !== null) {
+        clearInterval(checkInterval);
+        checkInterval = null;
+    }
+
+    // Clear any global timeout stored on window object
+    if ((window as any).__tableProcessTimeout) {
+        clearTimeout((window as any).__tableProcessTimeout);
+        (window as any).__tableProcessTimeout = null;
+    }
+
     // Xóa các element UI đã được tạo
     const autoFillContainer = document.getElementById('auto-fill-container');
     if (autoFillContainer) {
@@ -604,8 +683,13 @@ function cleanup() {
         ghostInput.remove();
     }
 
+    // Xóa các CMS overlay nếu còn
+    const cmsOverlay = document.querySelector('#custom-cms-modal-overlay');
+    if (cmsOverlay) {
+        cmsOverlay.remove();
+    }
+
     // Reset các biến trạng thái nếu cần
-    uiContainer = null;
     // Bất kỳ biến toàn cục nào khác cần reset cũng nên được đặt ở đây
 }
 
@@ -973,7 +1057,7 @@ function runOrderLogic() {
 
     // Hàm xử lý ẩn/hiện cột và thay đổi nội dung "Thông Tin Thêm"
     const processOrderTable = () => {
-        const tableContent = document.querySelector('.ant-table-content');
+        const tableContent = document.querySelector(ANT_TABLE_CONTENT_SELECTOR);
         if (!tableContent) {
             console.log("Table content not found yet...");
             return;
@@ -1030,7 +1114,7 @@ function runOrderLogic() {
             return;
         }
 
-        const rows = tbody.querySelectorAll('tr.ant-table-row');
+        const rows = tbody.querySelectorAll(ANT_TABLE_ROW_SELECTOR);
         if (rows.length === 0) {
             console.log("No rows found yet...");
             return;
@@ -1280,7 +1364,7 @@ function runOrderLogic() {
         const checkTableExists = () => {
             const tableContent = document.querySelector('.ant-table-content');
             const tbody = tableContent?.querySelector('tbody.ant-table-tbody');
-            const rows = tbody?.querySelectorAll('tr.ant-table-row');
+            const rows = tbody?.querySelectorAll(ANT_TABLE_ROW_SELECTOR);
 
             return tableContent && tbody && rows && rows.length > 0;
         };
@@ -1447,14 +1531,14 @@ function runOrderLogic() {
         }
 
         // Xóa row cũ nếu có (để cập nhật lại thông tin mới)
-        const existingRow = orderTable.querySelector('#custom-extra-info-row');
+        const existingRow = orderTable.querySelector(`#${EXTRA_INFO_ROW_ID}`);
         if (existingRow) {
             existingRow.remove();
         }
 
         // Tạo row mới để chứa "Thông tin thêm"
         const newRow = document.createElement('tr');
-        newRow.id = 'custom-extra-info-row';
+        newRow.id = EXTRA_INFO_ROW_ID;
 
         // Tạo cell với colspan để chiếm toàn bộ width
         const cell = document.createElement('td');
@@ -1464,7 +1548,7 @@ function runOrderLogic() {
 
         // Tạo container cho "Thông tin thêm"
         const container = document.createElement('div');
-        container.id = 'custom-extra-info-container';
+        container.id = EXTRA_INFO_CONTAINER_ID;
         container.style.display = 'flex';
         container.style.flexDirection = 'column';
         container.style.gap = '8px';
@@ -1813,14 +1897,14 @@ function runOrderLogic() {
         }
 
         // Xóa card CMS cũ nếu có
-        const oldCMSCard = rowContainer.querySelector('#custom-cms-col');
+        const oldCMSCard = rowContainer.querySelector(`#${CMS_COL_ID}`);
         if (oldCMSCard) {
             oldCMSCard.remove();
         }
 
         // Tạo ant-col wrapper cho CMS card
         const cmsCol = document.createElement('div');
-        cmsCol.id = 'custom-cms-col';
+        cmsCol.id = CMS_COL_ID;
         cmsCol.className = 'ant-col ant-col-24';
         cmsCol.style.paddingLeft = '4px';
         cmsCol.style.paddingRight = '4px';
@@ -2180,7 +2264,7 @@ function runOrderLogic() {
         let defaultOrgInfo: { orgCode: string; name: string } | null = null;
 
         try {
-            const token = localStorage.getItem('accessToken');
+            const token = getAccessToken();
             if (token) {
                 const historyResponse = await fetch(
                     `https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${maVanDon}`,
@@ -2220,7 +2304,7 @@ function runOrderLogic() {
 
         // Create modal overlay
         const overlay = document.createElement('div');
-        overlay.id = 'custom-cms-modal-overlay';
+        overlay.id = CMS_MODAL_OVERLAY_ID;
         overlay.style.cssText = `
             position: fixed;
             top: 0;
@@ -2398,7 +2482,7 @@ function runOrderLogic() {
 
                 // Refresh CMS data
                 setTimeout(() => {
-                    const cmsCol = document.querySelector('#custom-cms-col');
+                    const cmsCol = document.querySelector(`#${CMS_COL_ID}`);
                     if (cmsCol) {
                         const modal = document.querySelector('div[role="dialog"]');
                         if (modal) {
@@ -2438,15 +2522,6 @@ function runOrderLogic() {
         addExtraInfoToDialog(modalElement);
 
         // 2.5. Thêm CMS info
-        const getTextFromLabel = (container: Element, labelText: string): string => {
-            const allThs = container.querySelectorAll('th');
-            for (const th of allThs) {
-                if (th.textContent?.trim().includes(labelText)) {
-                    return th.nextElementSibling?.textContent?.trim() ?? '';
-                }
-            }
-            return '';
-        };
         const modalBody = modalElement.querySelector('.ant-modal-body');
         if (modalBody) {
             const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
@@ -2461,7 +2536,7 @@ function runOrderLogic() {
         }
 
         // 3. Kiểm tra xem nút của chúng ta đã được thêm vào chưa
-        const existingButton = modalElement.querySelector('#custom-copy-info-btn');
+        const existingButton = modalElement.querySelector(`#${COPY_BTN_ID}`);
         if (existingButton) {
             console.log('Các nút đã tồn tại, chỉ cập nhật thông tin thêm');
             return; // Đã có nút rồi, không cần thêm nút copy/khiếu nại nữa
@@ -2471,7 +2546,7 @@ function runOrderLogic() {
 
         // 4. Tạo nút mới
         const copyButton = document.createElement('button');
-        copyButton.id = 'custom-copy-info-btn';
+        copyButton.id = COPY_BTN_ID;
         copyButton.textContent = 'Copy Thông tin';
         // Thêm các class yêu cầu
         copyButton.className = 'ant-btn ant-btn-default btn-outline-warning';
@@ -2486,20 +2561,6 @@ function runOrderLogic() {
                 console.error("Không tìm thấy modal body!");
                 return;
             }
-
-            // --- Hàm trợ giúp để lấy text an toàn ---
-            const getTextFromLabel = (container: Element, labelText: string): string => {
-                const allThs = container.querySelectorAll('th');
-                for (const th of allThs) {
-                    // Dùng includes để linh hoạt hơn (ví dụ: "Họ và tên" và "Họ và tên ")
-                    if (th.textContent?.trim().includes(labelText)) {
-                        const td = th.nextElementSibling as HTMLElement;
-                        // Lấy textContent và dọn dẹp khoảng trắng
-                        return td?.textContent?.trim().replace(/\s+/g, ' ') ?? 'N/A';
-                    }
-                }
-                return 'N/A';
-            };
 
             // --- Trích xuất thông tin ---
             // Mã vận đơn nằm ở card "Đơn hàng"
@@ -2555,19 +2616,19 @@ function runOrderLogic() {
         console.log('Đã thêm nút "Copy Thông tin".');
 
         // --- BẮT ĐẦU PHẦN CODE MỚI ---
-        const existingComplaintButton = modalElement.querySelector('#custom-complaint-btn');
+        const existingComplaintButton = modalElement.querySelector(`#${COMPLAINT_BTN_ID}`);
         if (existingComplaintButton) {
             return; // Đã có nút rồi, không làm gì cả
         }
 
-        const copy1Button = modalElement.querySelector('#custom-copy-info-btn');
+        const copy1Button = modalElement.querySelector(`#${COPY_BTN_ID}`);
         if (!copy1Button) {
             // Chờ nút copy được tạo ở lần kiểm tra sau
             return;
         }
 
         const complaintButton = document.createElement('button');
-        complaintButton.id = 'custom-complaint-btn';
+        complaintButton.id = COMPLAINT_BTN_ID;
         complaintButton.textContent = 'Khiếu nại';
         complaintButton.className = 'ant-btn ant-btn-default'; // Thay đổi class nếu muốn
         complaintButton.style.marginLeft = '8px';
@@ -2578,17 +2639,6 @@ function runOrderLogic() {
                 console.error("Không tìm thấy modal body!");
                 return;
             }
-
-            // Hàm trợ giúp để lấy text Mã vận đơn
-            const getTextFromLabel = (container: Element, labelText: string): string => {
-                const allThs = container.querySelectorAll('th');
-                for (const th of allThs) {
-                    if (th.textContent?.trim().includes(labelText)) {
-                        return th.nextElementSibling?.textContent?.trim() ?? '';
-                    }
-                }
-                return '';
-            };
 
             const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Đơn hàng'))?.closest('.ant-card');
             if (!orderCard) {
@@ -2604,7 +2654,7 @@ function runOrderLogic() {
             }
 
             console.log(`Bắt đầu quy trình Khiếu nại cho mã: ${itemCode}`);
-            const token = localStorage.getItem('accessToken');
+            const token = getAccessToken();
 
             chrome.runtime.sendMessage({
                 event: "CONTENTMY",
@@ -2621,7 +2671,7 @@ function runOrderLogic() {
         copy1Button.insertAdjacentElement('afterend', complaintButton);
         console.log('Đã thêm nút "Khiếu nại".');
         const complaintButton1 = document.createElement('button');
-        complaintButton1.id = 'custom-complaint-btn';
+        complaintButton1.id = SUPPORT_BTN_ID;
         complaintButton1.textContent = 'Hỗ trợ';
         complaintButton1.className = 'ant-btn ant-btn-default'; // Thay đổi class nếu muốn
         complaintButton1.style.marginLeft = '8px';
@@ -2632,17 +2682,6 @@ function runOrderLogic() {
                 console.error("Không tìm thấy modal body!");
                 return;
             }
-
-            // Hàm trợ giúp để lấy text Mã vận đơn
-            const getTextFromLabel = (container: Element, labelText: string): string => {
-                const allThs = container.querySelectorAll('th');
-                for (const th of allThs) {
-                    if (th.textContent?.trim().includes(labelText)) {
-                        return th.nextElementSibling?.textContent?.trim() ?? '';
-                    }
-                }
-                return '';
-            };
 
             const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title')).find(el => el.textContent?.includes('Đơn hàng'))?.closest('.ant-card');
             if (!orderCard) {
@@ -2658,7 +2697,7 @@ function runOrderLogic() {
             }
 
             console.log(`Bắt đầu quy trình Hỗ trợ cho mã: ${itemCode}`);
-            const token = localStorage.getItem('accessToken');
+            const token = getAccessToken();
 
             chrome.runtime.sendMessage({
                 event: "CONTENTMY",
@@ -2680,11 +2719,9 @@ function runOrderLogic() {
 
     // Đơn giản hóa: Check modal định kỳ thay vì dùng observer phức tạp
     let lastProcessedMaVanDon = '';
-    // @ts-ignore - checkInterval is used to store the interval reference
-    let checkInterval: number | null = null;
 
     const checkAndProcessModal = () => {
-        const modalElement = document.querySelector('div[role="dialog"]') as HTMLElement;
+        const modalElement = document.querySelector(MODAL_SELECTOR) as HTMLElement;
 
         // Nếu không có modal hoặc modal bị ẩn
         if (!modalElement || modalElement.style.display === 'none' || !modalElement.offsetParent) {
@@ -2697,7 +2734,7 @@ function runOrderLogic() {
         }
 
         // Modal đang mở, check mã vận đơn
-        const modalBody = modalElement.querySelector('.ant-modal-body');
+        const modalBody = modalElement.querySelector(MODAL_BODY_SELECTOR);
         if (!modalBody) return;
 
         const orderCard = Array.from(modalBody.querySelectorAll('.ant-card-head-title'))
@@ -2724,17 +2761,16 @@ function runOrderLogic() {
             lastProcessedMaVanDon = currentMaVanDon;
 
             // Xóa container "Thông tin thêm" cũ
-            const oldContainer = modalElement.querySelector('#custom-extra-info-container');
+            const oldContainer = modalElement.querySelector(`#${EXTRA_INFO_CONTAINER_ID}`);
             if (oldContainer) {
                 console.log('[Modal Check] Xóa container thông tin thêm cũ');
                 oldContainer.remove();
             }
 
             // Xóa các nút cũ để tạo lại
-            const oldCopyBtn = modalElement.querySelector('#custom-copy-info-btn');
-            const oldComplaintBtn = modalElement.querySelector('#custom-complaint-btn');
-            const oldSupportBtn = modalElement.querySelector('#custom-support-btn');
-
+            const oldCopyBtn = modalElement.querySelector(`#${COPY_BTN_ID}`);
+            const oldComplaintBtn = modalElement.querySelector(`#${COMPLAINT_BTN_ID}`);
+            const oldSupportBtn = modalElement.querySelector(`#${SUPPORT_BTN_ID}`);
             if (oldCopyBtn) oldCopyBtn.remove();
             if (oldComplaintBtn) oldComplaintBtn.remove();
             if (oldSupportBtn) oldSupportBtn.remove();
