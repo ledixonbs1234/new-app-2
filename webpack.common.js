@@ -40,8 +40,8 @@ module.exports = {
                 test:/\.css$/i,
 
             },{
-                type:'asserts/resource',
-                use:'assert/resource',
+                type:'asset/resource',
+                use:'asset/resource',
                 test:/\.(png|jpg|jpeg)$/
             }
         ]
