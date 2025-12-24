@@ -32,7 +32,7 @@ export const handleAutoGenerateCMS = async (
         const history = order.history?.orderStatusHistoryDtoList || [];
         const isReturn = history.some(h => {
             const statusLower = (h.statusText || "").toLowerCase();
-            return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công");
+            return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công")||statusLower.includes("phát hoàn");
         });
         if (isReturn) return false;
 

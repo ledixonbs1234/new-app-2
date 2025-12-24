@@ -1141,70 +1141,79 @@ async function handleDataChange(
       accountPortal = data.username;
       passwordPortal = data.password;
 
-      // Mở hoặc tìm tab Portal
-      const initialTab = await createOrActiveTab(
-        "https://portalkhl.vnpost.vn/search-order",
-        "portalkhl.vnpost.vn",
-        true,
-      );
-
-      if (!initialTab || !initialTab.id) {
-        console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
-        updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
-        return;
-      }
-      const tabId = initialTab.id;
-
-      console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
-
-      // --- Sử dụng hàm ensurePortalLogin ---
-      const loginResult = await ensurePortalLogin(tabId);
-      const loginSuccess = loginResult.success;
-      // --- Kết thúc sử dụng hàm ensurePortalLogin ---
-
-      if (!loginSuccess) {
-        console.error("Đăng nhập Portal thất bại");
-        updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
-        return;
+      var data1 = await loginDirect(accountPortal, passwordPortal);
+      if (data1) {
+        saveToken(data1);
+        token = data1;
       }
 
-      console.log("Đăng nhập Portal thành công, đang lấy token...");
 
-      // Lấy token từ sessionStorage sau khi đăng nhập thành công
-      try {
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          func: () => {
-            const accessToken = sessionStorage.getItem("accessToken");
-            if (accessToken) {
-              try {
-                const parsed = JSON.parse(accessToken);
-                return parsed.accessToken || null;
-              } catch (e) {
-                console.error("Lỗi parse authData:", e);
-                return null;
-              }
-            }
-            return null;
-          },
-        });
 
-        if (results && results[0] && results[0].result) {
-          const tokenTemp = results[0].result;
-          console.log("Đã lấy được token từ sessionStorage thành công");
-          saveToken(tokenTemp);
-          token = tokenTemp;
-          updateToPhone("message", "Đăng nhập và lấy token thành công!");
-        } else {
-          console.error("Không lấy được token từ sessionStorage");
-          updateToPhone("message", "Lỗi: Không lấy được token từ Portal.");
-          return;
-        }
-      } catch (error: any) {
-        console.error("Lỗi khi lấy token:", error);
-        updateToPhone("message", `Lỗi khi lấy token: ${error.message}`);
-        return;
-      }
+
+        // // Mở hoặc tìm tab Portal
+        // const initialTab = await createOrActiveTab(
+        //   "https://portalkhl.vnpost.vn/search-order",
+        //   "portalkhl.vnpost.vn",
+        //   true,
+        // );
+
+        // if (!initialTab || !initialTab.id) {
+        //   console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
+        //   updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
+        //   return;
+        // }
+        // const tabId = initialTab.id;
+
+        // console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
+
+        // // --- Sử dụng hàm ensurePortalLogin ---
+        // const loginResult = await ensurePortalLogin(tabId);
+        // const loginSuccess = loginResult.success;
+        // // --- Kết thúc sử dụng hàm ensurePortalLogin ---
+
+        // if (!loginSuccess) {
+        //   console.error("Đăng nhập Portal thất bại");
+        //   updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
+        //   return;
+        // }
+
+        // console.log("Đăng nhập Portal thành công, đang lấy token...");
+
+        // // Lấy token từ sessionStorage sau khi đăng nhập thành công
+        // try {
+        //   const results = await chrome.scripting.executeScript({
+        //     target: { tabId: tabId },
+        //     func: () => {
+        //       const accessToken = sessionStorage.getItem("accessToken");
+        //       if (accessToken) {
+        //         try {
+        //           const parsed = JSON.parse(accessToken);
+        //           return parsed.accessToken || null;
+        //         } catch (e) {
+        //           console.error("Lỗi parse authData:", e);
+        //           return null;
+        //         }
+        //       }
+        //       return null;
+        //     },
+        //   });
+
+        //   if (results && results[0] && results[0].result) {
+        //     const tokenTemp = results[0].result;
+        //     console.log("Đã lấy được token từ sessionStorage thành công");
+        //     saveToken(tokenTemp);
+        //     token = tokenTemp;
+        //     updateToPhone("message", "Đăng nhập và lấy token thành công!");
+        //   } else {
+        //     console.error("Không lấy được token từ sessionStorage");
+        //     updateToPhone("message", "Lỗi: Không lấy được token từ Portal.");
+        //     return;
+        //   }
+      // } catch (error: any) {
+      //   console.error("Lỗi khi lấy token:", error);
+      //   updateToPhone("message", `Lỗi khi lấy token: ${error.message}`);
+      //   return;
+      // }
     }
   } else {
     //       await processWithGemini(`[21/06/2025 10:33:47] Kim Vân: 1.13 hoà hảo 299k 45n trắng dc 6 phùng hưng ph hàng mã hk hà nội dt 0974568086
@@ -1529,10 +1538,10 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       }
       if (request.type === "GET_CMS_AUTO_CONFIGS") {
         handleGetCMSAutoConfigs(sendResponse);
-        return true; 
+        return true;
       } else if (request.type === "SAVE_CMS_AUTO_CONFIGS") {
         handleSaveCMSAutoConfigs(request.payload, sendResponse);
-        return true; 
+        return true;
       }
 
       if (request.type === "CREATE_CMS_TICKET_V2") {
@@ -4123,6 +4132,7 @@ const loginDirect = async (
         random: Math.random(),
       }),
     });
+    console.log("LoginDirect response data:", data);
     return data.body.tokenFe || null;
   } catch (error) {
     console.error("Error in loginDirect:", error);

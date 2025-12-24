@@ -151,7 +151,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
       }}
     >
       {/* Controls */}
-      <div
+      {/* <div
         style={{
           position: "absolute",
           top: 12,
@@ -180,7 +180,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
             <Button icon={<UndoOutlined />} onClick={handleReset} size="small" />
           </Tooltip>
         </Space>
-      </div>
+      </div> */}
 
       {/* Info Overlay */}
       <div
