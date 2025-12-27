@@ -168,7 +168,7 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
     console.log("[GiaoTich] ❌ Not sending - fieldGroup is NONE or panel closed");
     return;
   }
-// 1. Kiểm tra DOM xem panel có mở không
+  // 1. Kiểm tra DOM xem panel có mở không
   const container = document.getElementById(SIDE_PANEL_ID);
   const iframe = container?.querySelector('iframe') as HTMLIFrameElement;
 
@@ -176,7 +176,7 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
     console.log("[GiaoTich] ❌ Not sending - panel closed");
     return;
   }
-  
+
 
   console.log("[GiaoTich] 📤 notifySidePanelZoom via postMessage:", fieldGroup);
 
@@ -188,9 +188,9 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
   // 2. Gửi bằng postMessage trực tiếp vào Iframe
   // targetOrigin là URL của extension để bảo mật
   const extensionOrigin = chrome.runtime.getURL(""); // vd: chrome-extension://abcdef.../
-  
+
   // Gửi tin nhắn
-  iframe.contentWindow?.postMessage(message,extensionOrigin);
+  iframe.contentWindow?.postMessage(message, extensionOrigin);
 }
 /**
  * Gửi message đến side panel để chuyển sang ảnh tiếp theo
@@ -686,26 +686,30 @@ function checkPress(e: KeyboardEvent): void {
     }
   }
 }
+function setChiDanPhat() {
+  var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
+  if (phoneSender) {
+    if (phoneSender.textContent.includes("2412279") || phoneSender.textContent.includes("2412278")) {
+      var info1 = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea") as HTMLTextAreaElement;
+      if (info1) {
+        // nếu info trống
+        if (info1.value.trim() === "") {
+          info1.value = `Cho xem hàng.
+KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP mới xử lý  Shop sẽ không đồng ý yc bồi thường 100% giá trị`;
+          info1.dispatchEvent(new Event('input', { bubbles: true }));
+          info1.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+      }
+
+    }
+  }
+}
 
 async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: string): Promise<void> {
   switch (eleId) {
     case ELEMENT_IDS.RECEIVER_NAME:
-      var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
-      if (phoneSender) {
-        if (phoneSender.textContent.includes("2412279")) {
-          var info = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea") as HTMLTextAreaElement;
-          if (info) {
-            // nếu info trống
-            if (info.value.trim() === "") {
-              info.value = `Cho xem hàng.
-KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP mới xử lý  Shop sẽ không đồng ý yc bồi thường 100% giá trị`;
-              info.dispatchEvent(new Event('input', { bubbles: true }));
-              info.dispatchEvent(new Event('change', { bubbles: true }))
-            }
-          }
+      setChiDanPhat();
 
-        }
-      }
       const receiverName = ele.value;
       if (receiverName) {
         const tenKhongDau = removeAccents(receiverName).toLowerCase();
@@ -767,6 +771,7 @@ KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP 
       break;
 
     case ELEMENT_IDS.RECEIVER_PHONE:
+      setChiDanPhat();
       const weightInput = document.getElementById(ELEMENT_IDS.WEIGHT) as HTMLInputElement;
       if (weightInput) {
         weightInput.focus();
@@ -805,6 +810,7 @@ KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP 
       break;
 
     case ELEMENT_IDS.TT_NUMBER:
+      setChiDanPhat();
       var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
       if (phoneSender && phoneSender.textContent.includes("14159")) {
         const serviceInfo = document.getElementsByName("serviceCode")[0] as HTMLInputElement | undefined;
@@ -866,6 +872,7 @@ KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP 
       break;
 
     case ELEMENT_IDS.WEIGHT:
+      setChiDanPhat();
       // Click vào dịch vụ input để mở popup
       // const serviceInput = getElementByXpath(ELEMENT_IDS.SERVICE_INPUT_XPATH) as HTMLElement;
       // if (serviceInput) {
