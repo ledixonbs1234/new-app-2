@@ -1,7 +1,5 @@
 importScripts("firebase-app-compat.js", "firebase-database-compat.js");
 importScripts("xlsxtool.js");
-
-import { debug } from "util";
 import {
   BuuGuiProps,
   DataSnapshotProps,
@@ -20,6 +18,13 @@ import {
   waitForTabLoadAfterAction,
 } from "./util";
 import { delay, createOrActiveTab } from "./util";
+import {
+  saveImage,
+  getAllImages,
+  deleteImage,
+  initDB
+} from "../sidepanel/utils/imageDB";
+import { ImportedImage } from "../types/vnpost";
 // import firebase from 'firebase/compat/app';
 //day la ban moi nhat
 // Khai báo biến toàn cục từ importScripts để TypeScript nhận diện
@@ -163,156 +168,6 @@ async function openSidePanelForTab(tabId: number): Promise<void> {
     console.error("Failed to open side panel for tab:", error);
   }
 }
-
-// /**
-//  * Inject sidepanel as an iframe into a specific tab's page.
-//  * Uses chrome.scripting.executeScript to run a DOM script in the tab.
-//  */
-// async function openSidePanelInPage(tabId: number): Promise<void> {
-//   try {
-//     const url = chrome.runtime.getURL('sidepanel.html');
-//     await chrome.scripting.executeScript({
-//       target: { tabId },
-//       func: (url: string) => {
-//         try {
-//           const existing = document.getElementById('inpage-sidepanel-container');
-//           if (existing) {
-//             // If already injected, focus it
-//             (existing as HTMLElement).style.display = 'block';
-//             return true;
-//           }
-
-//           const container = document.createElement('div');
-//           container.id = 'inpage-sidepanel-container';
-//           container.style.position = 'fixed';
-//           container.style.top = '0';
-//           container.style.right = '0';
-//           container.style.height = '100vh';
-//           container.style.width = '360px';
-//           container.style.zIndex = '2147483647';
-//           container.style.boxShadow = '-2px 0 8px rgba(0,0,0,0.2)';
-//           container.style.backgroundColor = '#ffffff';
-//           container.style.display = 'flex';
-//           container.style.flexDirection = 'column';
-
-//           // Header with close button
-//           const header = document.createElement('div');
-//           header.style.display = 'flex';
-//           header.style.justifyContent = 'flex-end';
-//           header.style.alignItems = 'center';
-//           header.style.height = '36px';
-//           header.style.padding = '4px 6px';
-//           header.style.flex = '0 0 auto';
-//           header.style.background = '#fff';
-//           header.style.borderBottom = '1px solid rgba(0,0,0,0.06)';
-//           header.style.boxSizing = 'border-box';
-
-//           const closeBtn = document.createElement('button');
-//           closeBtn.textContent = '✕';
-//           closeBtn.style.border = 'none';
-//           closeBtn.style.background = 'transparent';
-//           closeBtn.style.cursor = 'pointer';
-//           closeBtn.style.fontSize = '16px';
-//           closeBtn.style.padding = '4px 8px';
-//           closeBtn.style.lineHeight = '16px';
-//           closeBtn.setAttribute('aria-label', 'Đóng Side Panel');
-//           header.appendChild(closeBtn);
-//           container.appendChild(header);
-
-//           // Iframe
-//           const iframe = document.createElement('iframe');
-//           iframe.src = url;
-//           iframe.style.border = 'none';
-//           iframe.style.width = '100%';
-//           iframe.style.flex = '1 1 auto';
-//           iframe.style.height = 'calc(100% - 36px)';
-//           iframe.setAttribute('title', 'Side Panel');
-//           iframe.setAttribute('allow', 'clipboard-read; clipboard-write;');
-//           container.appendChild(iframe);
-
-//           // Resizer
-//           const resizer = document.createElement('div');
-//           resizer.style.position = 'absolute';
-//           resizer.style.left = '-6px';
-//           resizer.style.top = '0';
-//           resizer.style.bottom = '0';
-//           resizer.style.width = '6px';
-//           resizer.style.cursor = 'ew-resize';
-//           resizer.style.touchAction = 'none';
-//           resizer.setAttribute('role', 'separator');
-//           resizer.style.zIndex = '2147483648';
-//           container.appendChild(resizer);
-
-//           // Append to body
-//           document.body.appendChild(container);
-
-//           let isResizing = false;
-//           const onMove = (ev: PointerEvent) => {
-//             if (!isResizing) return;
-//             const dx = window.innerWidth - ev.clientX;
-//             const newWidth = Math.max(320, Math.min(900, dx));
-//             container.style.width = newWidth + 'px';
-//           };
-
-//           const stopResize = (ev?: PointerEvent) => {
-//             if (!isResizing) return;
-//             isResizing = false;
-//             (document.body.style as any).cursor = '';
-//             try {
-//               if (ev && (ev as any).pointerId && (resizer as any).releasePointerCapture) {
-//                 try { (resizer as any).releasePointerCapture((ev as any).pointerId); } catch(e) {}
-//               }
-//             } catch (e) {
-//               // ignore
-//             }
-//             // detach move handler
-//             document.removeEventListener('pointermove', onMove);
-//             document.removeEventListener('pointerup', stopResize);
-//             document.removeEventListener('pointercancel', stopResize);
-//           };
-
-//           const startResize = (ev: PointerEvent) => {
-//             // Only start resizing on primary button
-//             if (ev.button !== 0) return;
-//             isResizing = true;
-//             (document.body.style as any).cursor = 'ew-resize';
-//             ev.preventDefault();
-//             try {
-//               if ((resizer as any).setPointerCapture) {
-//                 (resizer as any).setPointerCapture((ev as any).pointerId);
-//               }
-//             } catch (e) {
-//               // ignore
-//             }
-//             // attach move handler dynamically so hover doesn't resize
-//             document.addEventListener('pointermove', onMove);
-//             // attach pointerup and pointercancel to stop
-//             document.addEventListener('pointerup', stopResize);
-//             document.addEventListener('pointercancel', stopResize);
-//           };
-
-//           resizer.addEventListener('pointerdown', startResize, false);
-
-//           // Close handler
-//           closeBtn.addEventListener('click', () => {
-//             container.remove();
-//           });
-
-//           // Mark as injected for re-use detection
-//           container.setAttribute('data-extension-sidepanel', '1');
-//           return true;
-//         } catch (e) {
-//           console.error('Failed to inject sidepanel iframe:', e);
-//           return false;
-//         }
-//       },
-//       args: [url]
-//     });
-//   } catch (err) {
-//     console.error('Failed to inject side panel into page:', err);
-//     throw err;
-//   }
-// }
 
 /**
  * Remove sidepanel iframe from page if exists
@@ -466,7 +321,7 @@ async function initFirebase(): Promise<void> {
   // --- KẾT THÚC Listener MỚI ---
 
   // Khởi tạo các giá trị timestamp lần đầu
-
+  startImageListener();
   console.log(
     "Firebase initialized, listening for scanned items and commands on key:",
     keyMessage,
@@ -1150,65 +1005,65 @@ async function handleDataChange(
 
 
 
-        // // Mở hoặc tìm tab Portal
-        // const initialTab = await createOrActiveTab(
-        //   "https://portalkhl.vnpost.vn/search-order",
-        //   "portalkhl.vnpost.vn",
-        //   true,
-        // );
+      // // Mở hoặc tìm tab Portal
+      // const initialTab = await createOrActiveTab(
+      //   "https://portalkhl.vnpost.vn/search-order",
+      //   "portalkhl.vnpost.vn",
+      //   true,
+      // );
 
-        // if (!initialTab || !initialTab.id) {
-        //   console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
-        //   updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
-        //   return;
-        // }
-        // const tabId = initialTab.id;
+      // if (!initialTab || !initialTab.id) {
+      //   console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal.");
+      //   updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
+      //   return;
+      // }
+      // const tabId = initialTab.id;
 
-        // console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
+      // console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
 
-        // // --- Sử dụng hàm ensurePortalLogin ---
-        // const loginResult = await ensurePortalLogin(tabId);
-        // const loginSuccess = loginResult.success;
-        // // --- Kết thúc sử dụng hàm ensurePortalLogin ---
+      // // --- Sử dụng hàm ensurePortalLogin ---
+      // const loginResult = await ensurePortalLogin(tabId);
+      // const loginSuccess = loginResult.success;
+      // // --- Kết thúc sử dụng hàm ensurePortalLogin ---
 
-        // if (!loginSuccess) {
-        //   console.error("Đăng nhập Portal thất bại");
-        //   updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
-        //   return;
-        // }
+      // if (!loginSuccess) {
+      //   console.error("Đăng nhập Portal thất bại");
+      //   updateToPhone("message", "Lỗi: Đăng nhập Portal thất bại.");
+      //   return;
+      // }
 
-        // console.log("Đăng nhập Portal thành công, đang lấy token...");
+      // console.log("Đăng nhập Portal thành công, đang lấy token...");
 
-        // // Lấy token từ sessionStorage sau khi đăng nhập thành công
-        // try {
-        //   const results = await chrome.scripting.executeScript({
-        //     target: { tabId: tabId },
-        //     func: () => {
-        //       const accessToken = sessionStorage.getItem("accessToken");
-        //       if (accessToken) {
-        //         try {
-        //           const parsed = JSON.parse(accessToken);
-        //           return parsed.accessToken || null;
-        //         } catch (e) {
-        //           console.error("Lỗi parse authData:", e);
-        //           return null;
-        //         }
-        //       }
-        //       return null;
-        //     },
-        //   });
+      // // Lấy token từ sessionStorage sau khi đăng nhập thành công
+      // try {
+      //   const results = await chrome.scripting.executeScript({
+      //     target: { tabId: tabId },
+      //     func: () => {
+      //       const accessToken = sessionStorage.getItem("accessToken");
+      //       if (accessToken) {
+      //         try {
+      //           const parsed = JSON.parse(accessToken);
+      //           return parsed.accessToken || null;
+      //         } catch (e) {
+      //           console.error("Lỗi parse authData:", e);
+      //           return null;
+      //         }
+      //       }
+      //       return null;
+      //     },
+      //   });
 
-        //   if (results && results[0] && results[0].result) {
-        //     const tokenTemp = results[0].result;
-        //     console.log("Đã lấy được token từ sessionStorage thành công");
-        //     saveToken(tokenTemp);
-        //     token = tokenTemp;
-        //     updateToPhone("message", "Đăng nhập và lấy token thành công!");
-        //   } else {
-        //     console.error("Không lấy được token từ sessionStorage");
-        //     updateToPhone("message", "Lỗi: Không lấy được token từ Portal.");
-        //     return;
-        //   }
+      //   if (results && results[0] && results[0].result) {
+      //     const tokenTemp = results[0].result;
+      //     console.log("Đã lấy được token từ sessionStorage thành công");
+      //     saveToken(tokenTemp);
+      //     token = tokenTemp;
+      //     updateToPhone("message", "Đăng nhập và lấy token thành công!");
+      //   } else {
+      //     console.error("Không lấy được token từ sessionStorage");
+      //     updateToPhone("message", "Lỗi: Không lấy được token từ Portal.");
+      //     return;
+      //   }
       // } catch (error: any) {
       //   console.error("Lỗi khi lấy token:", error);
       //   updateToPhone("message", `Lỗi khi lấy token: ${error.message}`);
@@ -1448,6 +1303,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   // --- KẾT THÚC KIỂM TRA ---
 
   (async () => {
+
     if (request.event === "CONTENT") {
       if (request.message === "SEND_CAPCHAR") {
         updateToPhone("showcapchar", request.content, request.keyMessage);
@@ -1552,7 +1408,21 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
     } // Thêm các event khác nếu cần
-  })();
+    if (request.type === "TRIGGER_SYNC_IMAGES") {
+      console.log("[BG] Nhận lệnh sync thủ công từ Sidepanel");
+
+      // Gọi hàm sync (không await để trả response ngay, hoặc await tùy logic)
+      bgSyncImages().then(() => {
+        // Gửi message IMAGES_UPDATED khi xong
+        chrome.runtime.sendMessage({ type: "IMAGES_UPDATED" }).catch(() => { });
+      });
+
+      // Trả về success ngay lập tức để Sidepanel không bị treo
+      sendResponse({ status: "processing" });
+      return true;
+    }
+  }
+  )();
   return true; // Quan trọng: Luôn trả về true để giữ kênh message mở cho các xử lý bất đồng bộ
 });
 const preParePrintMaHieus = async (maHieus: string[]) => {
@@ -6112,4 +5982,131 @@ async function handleSaveCMSAutoConfigs(
     console.error("[BG] Lỗi khi lưu cấu hình tự động:", error);
     sendResponse({ status: "error", error: error.message });
   }
+}
+
+// ==========================================
+// BACKGROUND FIREBASE SYNC SERVICE (FIX CSP)
+// ==========================================
+
+const downloadCache = new Map<string, Promise<Blob>>();
+const CACHE_DURATION = 5000;
+
+// Helper: Download Blob (Bypass CSP/CORS)
+async function downloadImageBlob(url: string): Promise<Blob> {
+  if (downloadCache.has(url)) return downloadCache.get(url)!;
+
+  const promise = fetch(url).then(async (res) => {
+    if (!res.ok) throw new Error(res.statusText);
+    return await res.blob();
+  });
+
+  downloadCache.set(url, promise);
+  setTimeout(() => downloadCache.delete(url), CACHE_DURATION);
+  return promise;
+}
+
+// Hàm Sync Chính: Sử dụng biến toàn cục `db` có sẵn trong background.ts
+async function bgSyncImages() {
+  console.log("[BG-Sync] Bắt đầu đồng bộ ảnh...");
+
+  if (!db) {
+    console.error("[BG-Sync] Firebase DB chưa khởi tạo!");
+    return;
+  }
+
+  try {
+    // 1. Khởi tạo IndexedDB trong Background
+    await initDB();
+
+    // 2. Lấy keyMessage để biết path
+    const key = await chromeStorageGet("keyMessage"); // Hàm có sẵn trong util.ts của bạn
+    if (!key) return;
+
+    const path = `PORTAL/CHILD/${key}/imported_images`;
+
+    // Dùng style cũ: db.ref().once('value') hoặc .get()
+    const snapshot = await db.ref(path).get();
+
+    if (!snapshot.exists()) {
+      console.log("[BG-Sync] Không có dữ liệu ảnh trên Firebase.");
+      return;
+    }
+
+    const firebaseImages = snapshot.val() as Record<string, ImportedImage>;
+    const firebaseIds = new Set(Object.keys(firebaseImages));
+
+    // 3. Dọn dẹp ảnh thừa (Có trong Local nhưng ko có trên Firebase)
+    const localImages = await getAllImages();
+    for (const img of localImages) {
+      if (!firebaseIds.has(img.imageId)) {
+        await deleteImage(img.imageId);
+        console.log(`[BG-Sync] Đã xóa ảnh thừa: ${img.imageId}`);
+      }
+    }
+
+    // 4. Tải ảnh mới (Chạy song song giới hạn - Concurrency Limit)
+    const CONCURRENCY = 3;
+    const ids = Array.from(firebaseIds);
+    let updatedCount = 0;
+
+    for (let i = 0; i < ids.length; i += CONCURRENCY) {
+      const batch = ids.slice(i, i + CONCURRENCY);
+
+      await Promise.all(
+        batch.map(async (id) => {
+          const meta = firebaseImages[id];
+
+          // Kiểm tra xem đã có trong DB chưa để tránh tải lại
+          // (Logic đơn giản: Nếu chưa có blob hoặc timestamp khác thì tải)
+          const existing = localImages.find(l => l.imageId === id);
+          const needDownload = !existing || existing.timestamp !== meta.timestamp || !existing.blob;
+
+          if (needDownload) {
+            try {
+              console.log(`[BG-Sync] Đang tải: ${id}`);
+              const blob = await downloadImageBlob(meta.url);
+              await saveImage(id, meta, blob);
+              updatedCount++;
+            } catch (e) {
+              console.error(`[BG-Sync] Lỗi tải ${id}:`, e);
+              // Lưu metadata đễ vẫn hiện placeholder nếu tải lỗi
+              await saveImage(id, meta);
+            }
+          }
+        })
+      );
+    }
+
+    // 5. Báo cho Sidepanel biết đã xong
+    if (updatedCount > 0 || ids.length > 0) {
+      console.log(`[BG-Sync] Hoàn tất. Cập nhật ${updatedCount} ảnh.`);
+      chrome.runtime.sendMessage({ type: "IMAGES_UPDATED" }).catch(() => {
+        // Bỏ qua lỗi nếu sidepanel không mở
+      });
+    }
+
+  } catch (err) {
+    console.error("[BG-Sync] Lỗi nghiêm trọng:", err);
+  }
+}
+
+// Hàm khởi động Listener (Gọi hàm này trong initFirebase hoặc sau khi db đã có)
+let isImageListenerRunning = false;
+async function startImageListener() {
+  if (isImageListenerRunning || !db) return;
+
+  const key = await chromeStorageGet("keyMessage");
+  if (!key) return;
+
+  const path = `PORTAL/CHILD/${key}/imported_images`;
+  console.log(`[BG-Sync] Đang lắng nghe thay đổi tại: ${path}`);
+
+  // Dùng style cũ: db.ref().on()
+  db.ref(path).on("value", (snapshot: any) => {
+    // Debounce nhẹ để tránh spam nếu dữ liệu thay đổi liên tục
+    console.log("[BG-Sync] Firebase thay đổi -> Trigger Sync");
+    bgSyncImages();
+  });
+
+  isImageListenerRunning = true;
 }

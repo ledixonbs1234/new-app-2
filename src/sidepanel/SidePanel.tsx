@@ -111,89 +111,67 @@ const SidePanel: React.FC = () => {
   // =================================================================
   // INIT & LOAD DATA
   // =================================================================
+useEffect(() => {
+    // 1. Load data từ IDB ngay lập tức (hiển thị cái đang có)
+    loadImages(); 
 
-  useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-    
-    // Initial Load
-    loadImages();
-    
-    // Setup Listener
-    const setupRealtimeListener = async () => {
-      try {
-        unsubscribe = await listenToFirebaseImages(async () => {
-          // Re-sync khi có thay đổi
-          await syncAllImages({
-            onProgress: (p) => setSyncProgress(p),
-            onImageDownloaded: async () => {
-              const updated = await getAllImages();
-              setImages(updated);
-            }
-          });
-          const updated = await getAllImages();
-          setImages(updated);
-          // Logic revalidate index...
-          const savedIndex = localStorage.getItem("sidepanel_selected_index");
-          if (savedIndex !== null) {
-            const index = parseInt(savedIndex, 10);
-            if (index >= 0 && index < updated.length) {
-              if (index !== selectedIndex) setSelectedIndex(index);
-            } else {
-              setSelectedIndex(0);
-            }
-          }
-        });
-      } catch (err) { console.error(err); }
-    };
-    setupRealtimeListener();
+    // 2. Lắng nghe tín hiệu từ Background
+    // Khi Background báo "IMAGES_UPDATED", ta chỉ cần load lại từ IDB
+    const stopListening = listenToFirebaseImages(async () => {
+        // Data đã nằm trong IDB rồi, chỉ cần query ra
+        const updated = await getAllImages();
+        setImages(updated);
+        setLoading(false);
+    });
 
-    // Broadcast Status
-    chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: true });
+    // 3. Trigger một lần sync thủ công khi mở panel để đảm bảo data mới nhất
+    syncAllImages(); 
 
     return () => {
-      if (unsubscribe) unsubscribe();
-      if (saveDebounceTimerRef.current) clearTimeout(saveDebounceTimerRef.current);
-      chrome.runtime.sendMessage({ type: "SIDEPANEL_STATUS", isOpen: false });
+        stopListening();
     };
-  }, []);
+}, []);
 
-  const loadImages = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      await initDB();
-      const local = await getAllImages();
-      if (local.length > 0) {
-        setImages(local);
-        setLoading(false);
-      }
-      
-      await syncAllImages({
-        onProgress: (p) => setSyncProgress(p),
-        onImageDownloaded: async () => {
-          const updated = await getAllImages();
-          setImages(updated);
-        }
-      });
-      
-      const final = await getAllImages();
-      setImages(final);
-      setLoading(false);
+const loadImages = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-      if (final.length > 0) {
-        const savedIndex = localStorage.getItem("sidepanel_selected_index");
-        if (savedIndex !== null) {
-          const index = parseInt(savedIndex, 10);
-          if (index >= 0 && index < final.length) setSelectedIndex(index);
-        }
-      } else {
-        setError("Không có hình ảnh nào được tìm thấy");
+    // 1. Khởi tạo DB
+    await initDB();
+
+    // 2. Lấy dữ liệu ĐANG CÓ trong cache (IndexedDB) hiển thị ngay lập tức
+    // Điều này giúp UI hiện lên ngay, không cần chờ mạng
+    const local = await getAllImages();
+    
+    if (local.length > 0) {
+      setImages(local);
+      // Logic khôi phục vị trí đã chọn
+      const savedIndex = localStorage.getItem("sidepanel_selected_index");
+      if (savedIndex !== null) {
+        const index = parseInt(savedIndex, 10);
+        if (index >= 0 && index < local.length) setSelectedIndex(index);
       }
-    } catch (err: any) {
-      setError(err.message || "Lỗi tải ảnh");
-      setLoading(false);
+      setLoading(false); // Có dữ liệu cũ thì tắt loading luôn cho mượt
     }
-  };
+
+    // 3. Gửi tín hiệu cho Background bắt đầu đồng bộ ảnh MỚI
+    // Lưu ý: Hàm này giờ chỉ gửi tin nhắn rồi return ngay, KHÔNG chờ tải xong
+    await syncAllImages(); 
+    
+    // Nếu chưa có ảnh nào (lần đầu cài), ta vẫn để loading quay
+    // Việc cập nhật ảnh mới sẽ do useEffect (listener) đảm nhận khi Background báo về
+    if (local.length === 0) {
+        // Có thể set timeout để tắt loading nếu không có ảnh nào trả về sau 5s
+        setTimeout(() => setLoading(false), 5000);
+    }
+
+  } catch (err: any) {
+    console.error(err);
+    setError(err.message || "Lỗi tải ảnh");
+    setLoading(false);
+  }
+};
 
   const handleRefresh = () => loadImages();
 
