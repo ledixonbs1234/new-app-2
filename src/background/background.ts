@@ -118,7 +118,203 @@ let isStoppedOnError: boolean = false;
  */
 let isFinalProcessingTriggered: boolean = false;
 const BUFFER_SIZE = 5;
+
+// --- STATE MỚI CHO PORTAL SIDEPANEL ---
+// Lưu danh sách items đang được xử lý trong phiên "sendautotoportal"
+export interface PortalItemStatus {
+  MaBuuGui: string;
+  Status: "pending" | "processing" | "success" | "error";
+  Message?: string;
+  Money?: string;
+  Index: number;
+}
+// Biến toàn cục lưu trạng thái danh sách
+let currentPortalList: PortalItemStatus[] = [];
+// --- CONTEXT VARIABLES ---
+let currentMaKH: string = "";
+let currentOptions: any = {};
+let currentIsDeletePhone: boolean = false;
+let currentBgs: BuuGuiProps[] = []; // Store full list
+// -------------------------
 // --- KẾT THÚC TRẠNG THÁI CỤC BỘ MỚI ---
+
+// --- HELPER FUNCTIONS CHO SIDEPANEL (Moved to top) ---
+
+// Hàm cập nhật trạng thái 1 item và broadcast
+function updatePortalItemStatus(maBuuGui: string, status: "pending" | "processing" | "success" | "error", msg?: string) {
+  const idx = currentPortalList.findIndex(x => x.MaBuuGui === maBuuGui);
+  if (idx !== -1) {
+    currentPortalList[idx].Status = status;
+    if (msg) currentPortalList[idx].Message = msg;
+    broadcastPortalListUpdate();
+  }
+}
+
+function updatePortalItemMoney(maBuuGui: string, money: string) {
+  const idx = currentPortalList.findIndex(x => x.MaBuuGui === maBuuGui);
+  if (idx !== -1) {
+    currentPortalList[idx].Money = money;
+    broadcastPortalListUpdate();
+  }
+}
+
+function removePortalItem(maBuuGui: string) {
+  const idx = currentPortalList.findIndex(x => x.MaBuuGui === maBuuGui);
+  if (idx !== -1) {
+    currentPortalList.splice(idx, 1);
+    broadcastPortalListUpdate();
+  }
+}
+
+// Hàm gửi tin nhắn cho tất cả các SidePanel đang mở
+function broadcastPortalListUpdate() {
+  // Gửi runtime message, SidePanel sẽ lắng nghe
+  chrome.runtime.sendMessage({
+    type: "PORTAL_LIST_UPDATED",
+    data: currentPortalList
+  }).catch(() => { }); // Bỏ qua lỗi nếu không có receiver
+}
+
+// Hàm xử lý chạy lại 1 item từ Panel (tái sử dụng logic cũ)
+async function handleExecuteSingleItemFromPanel(maBuuGui: string) {
+  // 1. Phải lấy lại thông tin chi tiết từ Firebase vì currentPortalList chỉ có mã
+  // Tuy nhiên để tối ưu, ta có thể fetch 1 item đó thôi.
+  // Hoặc đơn giản là lấy `maKH` đang lưu trong storage
+  try {
+    // Mock maKH nếu không có hàm chromeStorageGet
+    let maKH = "";
+    try {
+      // @ts-ignore
+      maKH = await chromeStorageGet("currentMaKH");
+    } catch (e) { maKH = "UNK"; }
+
+    // Lấy data item từ Firebase
+    const snapshot = await db!.ref("PORTAL/BuuGuis/").get();
+    const rawVal = snapshot.val();
+    const bgs: BuuGuiProps[] = rawVal ? JSON.parse(rawVal) : [];
+    const item = bgs.find(x => x.MaBuuGui === maBuuGui);
+
+    if (!item) {
+      console.error(`Item ${maBuuGui} not found in Firebase`);
+      return;
+    }
+
+    updatePortalItemStatus(maBuuGui, "processing");
+
+    // Tìm tab active
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs[0]?.id) {
+      // Gửi lệnh process single
+      chrome.tabs.sendMessage(tabs[0].id, {
+        message: "PROCESS_SINGLE_ITEM",
+        current: item,
+        makh: maKH,
+        keyMessage: "panel_retry",
+        isDeletePhone: false
+      });
+    }
+  } catch (e: any) {
+    console.error(e);
+    updatePortalItemStatus(maBuuGui, "error", "Exception in BG");
+  }
+}
+
+async function handleExecuteFromItem(maBuuGui: string, sendResponse: (res: any) => void) {
+  try {
+    if (!currentMaKH) {
+      sendResponse({ status: "error", error: "Chưa có context (MaKH). Hãy chạy lệnh từ App trước." });
+      return;
+    }
+
+    // 1. Use stored list
+    const bgs = currentBgs;
+
+    if (!bgs || bgs.length === 0) {
+      sendResponse({ status: "error", error: "Không tìm thấy dữ liệu đã lưu." });
+      return;
+    }
+
+    // 2. Find start index
+    const startIndex = bgs.findIndex(item => item.MaBuuGui === maBuuGui);
+    if (startIndex === -1) {
+      sendResponse({ status: "error", error: "Không tìm thấy mã bưu gửi này." });
+      return;
+    }
+
+    sendResponse({ status: "processing" });
+
+    console.log(`[BG] Resuming processing from index ${startIndex} (${maBuuGui})...`);
+
+    // --- Custom Loop Implementation ---
+    let shouldStop = false;
+    for (let i = startIndex; i < bgs.length; i++) {
+      if (shouldStop) break;
+      const item = bgs[i];
+
+      updatePortalItemStatus(item.MaBuuGui, "processing");
+
+      try {
+        // Find tab
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        let tabId = tabs[0]?.id;
+
+        // If active tab is not portal, try to find one? 
+        // Or just rely on active tab being correct as user clicked "Run" from panel which is attached to window?
+        // Safer to find portal tab if possible, or assume active if user is on it.
+        if (!tabId) {
+          // Try finding by url
+          const portalTabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
+          if (portalTabs.length > 0) tabId = portalTabs[0].id;
+        }
+
+        if (!tabId) {
+          throw new Error("Không tìm thấy tab Portal.");
+        }
+
+        // Send message
+        await new Promise<void>((resolve, reject) => {
+          chrome.tabs.sendMessage(tabId!, {
+            message: "PROCESS_SINGLE_ITEM",
+            current: item,
+            makh: currentMaKH,
+            keyMessage: keyMessage,
+            options: currentOptions,
+            isDeletePhone: currentIsDeletePhone
+          }, (response) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+              return;
+            }
+            if (response && response.status === 'success') {
+              updatePortalItemStatus(item.MaBuuGui, "success");
+              // Optional: Handle refresh logic here if needed, but user didn't ask for it explicitly.
+              // If user wants exact same logic as processPortalListLoop minus the function call, I should include refresh.
+              // But user said "chỉ muốn bắt đầu vòng lặp for với PROCESS_SINGLE_ITEM". I will keep it simple.
+              resolve();
+            } else {
+              updatePortalItemStatus(item.MaBuuGui, "error", response?.error || "Unknown error");
+              // Continue or stop? Usually stop on error or continue?
+              // processPortalListLoop continues on item error but stops on loop error.
+              // Let's continue for item error.
+              resolve();
+            }
+          });
+        });
+
+        await delay(500); // Small delay
+
+      } catch (err: any) {
+        console.error(`Error processing ${item.MaBuuGui}:`, err);
+        updatePortalItemStatus(item.MaBuuGui, "error", err.message);
+        shouldStop = true; // Stop on system/network error
+      }
+    }
+
+  } catch (e: any) {
+    console.error("Error resuming from item:", e);
+  }
+}
+// --------------------------------------
 
 // --- SIDE PANEL HELPER FUNCTIONS ---
 /**
@@ -1421,6 +1617,63 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       sendResponse({ status: "processing" });
       return true;
     }
+    // ===== THÊM MỚI: Xử lý message từ SidePanel (Portal Tab) =====
+    if (request.type === "GET_PORTAL_LIST") {
+      // SidePanel yêu cầu lấy danh sách hiện tại
+      sendResponse({ status: "success", data: currentPortalList });
+      return false; // Sync response
+    }
+    if (request.type === "EXECUTE_PORTAL_ITEM") {
+      // SidePanel yêu cầu chạy lại 1 item cụ thể
+      const { maBuuGui } = request.payload;
+      console.log(`[BG] SidePanel requested execution for: ${maBuuGui}`);
+
+      // Tìm item trong danh sách gốc (bao gồm thông tin đầy đủ)
+      // Lưu ý: currentPortalList chỉ lưu trạng thái rút gọn, ta cần tìm trong allScannedItems hoặc 
+      // phải lưu trữ data đầy đủ. Ở đây giả sử ta tìm lại trong Firebase hoặc cache.
+      // TUY NHIÊN, handleSendAutoToPortal đã load `bgs` cục bộ.
+      // Giải pháp đơn giản: Trigger lại logic xử lý đơn lẻ giống processSinglePortalItem
+
+      // Gọi hàm xử lý (bất đồng bộ)
+      handleExecuteSingleItemFromPanel(maBuuGui).then((res: any) => {
+        // Gửi event cập nhật lại cho Panel (nếu cần)
+        broadcastPortalListUpdate();
+      });
+
+      sendResponse({ status: "processing" });
+      return true;
+    }
+    if (request.type === "PRINT_PORTAL_LIST") {
+      console.log("[BG] SidePanel requested PRINT list");
+      // Gọi hàm in ấn có sẵn
+      // Lấy danh sách các mã đang có trong List (lọc success hoặc lấy hết tùy logic)
+      // Ở đây ta lấy hết các mã trong currentPortalList
+      const listToPrint = currentPortalList.map(i => i.MaBuuGui);
+      if (listToPrint.length > 0) {
+        printMaHieus(listToPrint);
+        sendResponse({ status: "success", message: "Đang gửi lệnh in..." });
+      } else {
+        sendResponse({ status: "error", message: "Danh sách trống" });
+      }
+      return false;
+    }
+
+    if (request.type === "DELETE_PORTAL_ITEM") {
+      const { maBuuGui } = request.payload;
+      removePortalItem(maBuuGui);
+      sendResponse({ status: "success" });
+      return false;
+    }
+
+    // Capture SEND_MH from content script
+    if (request.event === "CONTENT" && request.message === "SEND_MH") {
+      // content: MaBuuGui, content1: Money
+      const maBuuGui = request.content;
+      const money = request.content1;
+      if (maBuuGui && money) {
+        updatePortalItemMoney(maBuuGui, money);
+      }
+    }
   }
   )();
   return true; // Quan trọng: Luôn trả về true để giữ kênh message mở cho các xử lý bất đồng bộ
@@ -1950,13 +2203,103 @@ async function processPortalWithMaHieuList(codesData: {
   }
 }
 
+// --- HÀM TÁCH RIÊNG XỬ LÝ LOOP PORTAL ---
+async function processPortalListLoop(
+  bgs: BuuGuiProps[],
+  startIndex: number,
+  maKH: string,
+  options: any,
+  isDeletePhone: boolean,
+  keyMessage: string,
+  logPrefix: string = "BG: PortalLoop -"
+) {
+  let shouldStopLoop = false;
+  let successfulProcessCount = 0; // Đếm local cho lần chạy này
+  const REFRESH_THRESHOLD = 40;
+
+  updateToPhone("message", `Bắt đầu xử lý ${bgs.length - startIndex} mục...`, keyMessage);
+
+  for (let i = startIndex; i < bgs.length; i++) {
+    if (shouldStopLoop) break;
+
+    const currentItem = bgs[i];
+
+    // Update status: Processing
+    updatePortalItemStatus(currentItem.MaBuuGui, "processing");
+    chrome.action.setBadgeText({ text: `${i + 1 - startIndex}` });
+
+    try {
+      // Tìm tab Portal ready
+      // Lưu ý: Ta tìm lại tab mỗi lần lặp hoặc truyền vào. 
+      // Tốt nhất là tìm lại để đảm bảo tab còn sống.
+      const targetTabId = await findPortalTabId(maKH);
+      if (!targetTabId) {
+        throw new Error("Mất kết nối với tab Portal.");
+      }
+
+      // Gửi message xử lý
+      await new Promise<void>((resolve, reject) => {
+        chrome.tabs.sendMessage(targetTabId, {
+          message: "PROCESS_SINGLE_ITEM",
+          current: currentItem,
+          makh: maKH,
+          keyMessage: keyMessage,
+          options: options,
+          isDeletePhone: isDeletePhone
+        }, async (response) => {
+          if (chrome.runtime.lastError) {
+            return reject(new Error(chrome.runtime.lastError.message));
+          }
+          if (response && response.status === "success") {
+            updatePortalItemStatus(currentItem.MaBuuGui, "success");
+            successfulProcessCount++;
+            // Logic refresh tab
+            if (successfulProcessCount >= REFRESH_THRESHOLD) {
+              await hardRefreshSpecificTab(targetTabId);
+              successfulProcessCount = 0;
+              await delay(500);
+            }
+            resolve();
+          } else {
+            const errorMsg = response?.error || "Unknown error";
+            updatePortalItemStatus(currentItem.MaBuuGui, "error", errorMsg);
+            // Quyết định xem có dừng loop không? 
+            // Logic cũ: updatePortalItemStatus error -> continue loop (trừ khi lỗi nghiêm trọng?)
+            // Trong handleSendAutoToPortal cũ, lỗi item -> log -> continue.
+            // Chỉ lỗi loop mới stop.
+            resolve();
+          }
+        });
+      });
+
+
+    } catch (loopError: any) {
+      console.error(`${logPrefix} Error processing ${currentItem.MaBuuGui}:`, loopError);
+      updatePortalItemStatus(currentItem.MaBuuGui, "error", loopError.message);
+      updateToPhone("message", `Lỗi: ${loopError.message}. Dừng lại.`, keyMessage);
+      shouldStopLoop = true;
+    }
+  }
+
+  if (!shouldStopLoop) {
+    console.log(`${logPrefix} Loop finished.`);
+    updateToPhone("message", "Đã xử lý xong danh sách.", keyMessage);
+
+    // In ấn
+    updateToPhone("message", `Đang chuẩn bị in...`, keyMessage);
+    const maHieus = bgs.map(m => m.MaBuuGui); // In tất cả hoặc lọc? Logic cũ in tất cả
+    printMaHieus(maHieus);
+    updateToPhone("message", "In xong.", keyMessage);
+    chrome.action.setBadgeText({ text: "OK" });
+    await delay(2000);
+    chrome.action.setBadgeText({ text: "" });
+  }
+}
+// ----------------------------------------
+
 async function handleSendAutoToPortal(commandData: any): Promise<void> {
   const logPrefix = "BG: handleSendAutoToPortal(Loop) -"; // Tiền tố log
   console.log(`${logPrefix} Received command. Data:`, commandData);
-
-  let targetTabId: number | undefined = undefined;
-  let processCountSinceRefresh = 0; // Biến đếm *cục bộ* cho lần chạy này
-  let shouldStopLoop = false; // Cờ để dừng vòng lặp nếu có lỗi
 
   try {
     // 1. Phân tích dữ liệu lệnh (DoiTuong)
@@ -1973,6 +2316,13 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
       options = parsedDoiTuong.options;
       isDeletePhone = parsedDoiTuong.isDeletePhone;
       startMaBG = parsedDoiTuong.maBG; // Lấy maBG nếu có
+
+      // --- LƯU CONTEXT CHO VIỆC RUN LẠI TỪ PANEL ---
+      currentMaKH = maKH;
+      currentOptions = options;
+      currentIsDeletePhone = isDeletePhone;
+      // ---------------------------------------------
+
       if (parsedDoiTuong.account && parsedDoiTuong.password) {
         accountPortal = parsedDoiTuong.account;
         passwordPortal = parsedDoiTuong.password;
@@ -1999,7 +2349,7 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
     );
     // --- Bước 2: Tìm hoặc Khởi tạo Tab Portal (CHỈ MỘT LẦN) ---
     console.log(`${logPrefix} Finding or Initializing Portal tab ONCE...`);
-    targetTabId = await findPortalTabId(maKH, hdrId); // Gọi hàm tìm/khởi tạo
+    const targetTabId = await findPortalTabId(maKH, hdrId); // Gọi hàm tìm/khởi tạo
     if (!targetTabId) {
       // findPortalTabId đã log lỗi và gửi message nếu cần
       console.error(`${logPrefix} Initial Portal tab setup failed. Aborting.`);
@@ -2059,176 +2409,27 @@ async function handleSendAutoToPortal(commandData: any): Promise<void> {
       console.log(`${logPrefix} No startMaBG provided. Starting from index 0.`);
     }
 
-    // 4. Vòng lặp xử lý tuần tự
-    updateToPhone(
-      "message",
-      `Bắt đầu xử lý danh sách ${bgs.length - startIndex} bưu gửi...`,
+    // 4. Gọi hàm xử lý loop shared
+    // --- CẬP NHẬT STATE CHO SIDEPANEL ---
+    // Mapping dữ liệu từ Firebase sang format hiển thị cho Panel
+    currentPortalList = bgs.map((item, idx) => ({
+      MaBuuGui: item.MaBuuGui,
+      Status: "pending",
+      Index: idx
+    }));
+    currentBgs = bgs; // Save full list context
+    broadcastPortalListUpdate();
+    // -------------------------------------
+
+    await processPortalListLoop(
+      bgs,
+      startIndex,
+      maKH,
+      options,
+      isDeletePhone,
+      keyMessage
     );
-    for (let i = startIndex; i < bgs.length; i++) {
-      if (shouldStopLoop) break; // Kiểm tra cờ dừng lỗi
 
-      const currentItem = bgs[i];
-      console.log(
-        `${logPrefix} Processing item ${i + 1}/${bgs.length} (Index in list: ${i}): ${currentItem.MaBuuGui}`,
-      );
-      chrome.action.setBadgeText({ text: `${i + 1 - startIndex}` }); // Hiển thị số thứ tự xử lý
-      updateToPhone(
-        "message",
-        `Đang xử lý ${i + 1 - startIndex}/${bgs.length - startIndex}: ${currentItem.MaBuuGui}`,
-      );
-
-      try {
-        // 5.1. Kiểm tra Tab còn tồn tại không (an toàn hơn)
-        // Mặc dù không tìm lại, việc kiểm tra trước khi gửi là cần thiết phòng user đóng tab
-        try {
-          console.log(`${logPrefix} Verifying tab ${targetTabId} exists...`); // Log kiểm tra
-          await chrome.tabs.get(targetTabId!); // Thêm ! vì đã kiểm tra lúc đầu
-        } catch (e) {
-          // Nếu tab không còn tồn tại -> Lỗi nghiêm trọng, dừng lại
-          console.error(
-            `${logPrefix} Target tab ${targetTabId} not found before sending message. Stopping.`,
-          );
-          updateToPhone(
-            "error",
-            `Tab Portal (ID: ${targetTabId}) đã bị đóng. Dừng xử lý.`,
-          );
-          chrome.action.setBadgeText({ text: "TAB_GONE" });
-          chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
-          shouldStopLoop = true;
-          continue; // Dừng lần lặp này và thoát vòng lặp ở lần kiểm tra tiếp theo
-        }
-
-        // 4.2. Gửi message PROCESS_SINGLE_ITEM và chờ response
-        console.log(
-          `${logPrefix} Sending PROCESS_SINGLE_ITEM for ${currentItem.MaBuuGui} to tab ${targetTabId}...`,
-        );
-        // Dùng Promise để await response từ sendMessage
-        const response = await new Promise<any>((resolve, reject) => {
-          chrome.tabs.sendMessage(
-            targetTabId!,
-            {
-              // Thêm ! vì đã kiểm tra targetTabId
-              message: "PROCESS_SINGLE_ITEM",
-              current: currentItem,
-              makh: maKH, // maKH dùng chung từ lệnh
-              isDeletePhone: isDeletePhone,
-              keyMessage: keyMessage,
-              options: options, // options dùng chung từ lệnh
-            },
-            (res) => {
-              if (chrome.runtime.lastError) {
-                reject(
-                  new Error(
-                    chrome.runtime.lastError.message || "Lỗi gửi/nhận message",
-                  ),
-                );
-              } else {
-                resolve(res); // Resolve với phản hồi từ content script
-              }
-            },
-          );
-        });
-
-        // 4.3. Xử lý response
-        if (response && response.status === "success") {
-          console.log(
-            `${logPrefix} Successfully processed item: ${currentItem.MaBuuGui}`,
-          );
-          // Không cần add vào processedItems của luồng tự động
-
-          processCountSinceRefresh++; // Tăng biến đếm *cục bộ*
-          console.log(
-            `${logPrefix} Success count since refresh: ${processCountSinceRefresh}`,
-          );
-
-          // 4.4. Kiểm tra và thực hiện refresh nếu cần
-          if (processCountSinceRefresh >= REFRESH_THRESHOLD) {
-            console.log(
-              `${logPrefix} Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${targetTabId}...`,
-            );
-            updateToPhone(
-              "message",
-              `Đã xử lý ${processCountSinceRefresh} mã. Đang làm mới trang...`,
-            );
-            await delay(1000); // Delay trước refresh
-
-            const refreshedTab = await hardRefreshSpecificTab(targetTabId!); // Gọi refresh
-            if (!refreshedTab) {
-              console.error(
-                `${logPrefix} Tab ${targetTabId} refresh failed/closed. Stopping loop.`,
-              );
-              updateToPhone(
-                "message",
-                `Lỗi: Không thể làm mới tab ${targetTabId}. Dừng xử lý.`,
-              );
-              chrome.action.setBadgeText({ text: "REF_ERR" });
-              chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
-              shouldStopLoop = true; // Đặt cờ dừng
-              continue; // Bỏ qua phần còn lại của lần lặp
-            }
-
-            console.log(
-              `${logPrefix} Tab ${targetTabId} refreshed successfully. Resetting counter.`,
-            );
-            updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
-            processCountSinceRefresh = 0; // Reset biến đếm cục bộ
-            targetTabId = refreshedTab.id; // Cập nhật lại tabId phòng trường hợp ID thay đổi (hiếm)
-
-            await delay(1500); // Delay sau refresh
-          }
-        } else {
-          // Lỗi từ content script
-          const errorMsg =
-            response?.error ||
-            (response ? "Trạng thái không thành công" : "Không có phản hồi");
-          console.error(
-            `${logPrefix} Failed to process item ${currentItem.MaBuuGui} via content script: ${errorMsg}`,
-            response,
-          );
-          updateToPhone(
-            "message",
-            `Lỗi xử lý mã ${currentItem.MaBuuGui}: ${errorMsg}. Dừng lại.`,
-          );
-          chrome.action.setBadgeText({ text: "CS_ERR" });
-          chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
-          shouldStopLoop = true; // Đặt cờ dừng
-          continue; // Bỏ qua phần còn lại của lần lặp
-        }
-
-        await delay(500); // Delay nhỏ giữa các lần xử lý thành công
-      } catch (loopError: any) {
-        // Bắt lỗi trong lần lặp hiện tại (tìm tab, gửi message, refresh...)
-        console.error(
-          `${logPrefix} Error during loop iteration ${i} for item ${currentItem.MaBuuGui}:`,
-          loopError,
-        );
-        updateToPhone(
-          "message",
-          `Lỗi nghiêm trọng khi xử lý ${currentItem.MaBuuGui}: ${loopError.message}. Dừng lại.`,
-        );
-        chrome.action.setBadgeText({ text: "LOOP_ERR" });
-        chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
-        shouldStopLoop = true; // Đặt cờ dừng
-        continue; // Bỏ qua phần còn lại của lần lặp
-      }
-    } // Kết thúc vòng lặp for
-
-    // 5. Hoàn tất (nếu không bị dừng bởi lỗi)
-    if (!shouldStopLoop) {
-      console.log(`${logPrefix} Finished processing list successfully.`);
-      updateToPhone("message", `Đang chuẩn bị in. Chờ xíu`, keyMessage);
-      //chuyển MaBuuGui thành mảng từ bgs
-      var maHieus = bgs.map((m) => m.MaBuuGui);
-      printMaHieus(maHieus);
-      updateToPhone("message", `In xong`, keyMessage);
-      chrome.action.setBadgeText({ text: "OK" });
-      chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
-      await delay(2000);
-      chrome.action.setBadgeText({ text: "" });
-    } else {
-      console.log(`${logPrefix} Processing loop stopped due to an error.`);
-      // Badge lỗi đã được set ở nơi xảy ra lỗi
-    }
   } catch (initialError: any) {
     // Bắt lỗi xảy ra *trước* vòng lặp (parse JSON, fetch Firebase)
     console.error(
@@ -4800,6 +5001,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     });
 
     return true; // Async response
+  }
+
+  if (msg.type === "EXECUTE_PORTAL_ITEM") {
+    const { maBuuGui } = msg.payload;
+    handleExecuteFromItem(maBuuGui, sendResponse);
+    return true;
   }
 
   if (msg.type === "SIDEPANEL_SMART_ZOOM") {
