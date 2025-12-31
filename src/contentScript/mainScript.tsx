@@ -77,7 +77,6 @@ window.addEventListener("message", (event) => {
         if (formLoginR) {
           console.log("Có formLoginR")
           var eventInput = new Event('input', { bubbles: true });
-          debugger;
           const user: HTMLInputElement | null = document.querySelector("#username")
           user!.value = event.data.account
           user!.dispatchEvent(eventInput);
@@ -102,7 +101,7 @@ window.addEventListener("message", (event) => {
             "#formLogin > div.MuiGrid-root.MuiGrid-container > button"
           ) as HTMLButtonElement;
           loginBtn?.click();
-        }else {
+        } else {
           console.log("Không có formLoginR")
         }
         break;
@@ -154,7 +153,7 @@ window.addEventListener("message", (event) => {
         });
 
         break;
-        case "GETMAKH":
+      case "GETMAKH":
         var c = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form")
         var c1 = FindReact(c)
         var id = c1.props.itemHdr.customerCode

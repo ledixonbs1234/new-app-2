@@ -296,6 +296,7 @@ async function handleExecuteFromItem(maBuuGui: string, sendResponse: (res: any) 
               // Continue or stop? Usually stop on error or continue?
               // processPortalListLoop continues on item error but stops on loop error.
               // Let's continue for item error.
+              shouldStop = true; 
               resolve();
             }
           });
@@ -2263,10 +2264,8 @@ async function processPortalListLoop(
           } else {
             const errorMsg = response?.error || "Unknown error";
             updatePortalItemStatus(currentItem.MaBuuGui, "error", errorMsg);
-            // Quyết định xem có dừng loop không? 
-            // Logic cũ: updatePortalItemStatus error -> continue loop (trừ khi lỗi nghiêm trọng?)
-            // Trong handleSendAutoToPortal cũ, lỗi item -> log -> continue.
-            // Chỉ lỗi loop mới stop.
+            shouldStopLoop = true;
+            updateToPhone("message", `Lỗi khi xử lý ${currentItem.MaBuuGui}: ${errorMsg}. Dừng lại.`, keyMessage);
             resolve();
           }
         });
@@ -3531,7 +3530,7 @@ async function ensurePortalLogin(
       console.log(
         `ensurePortalLogin: Đang chờ tab ${tabId} điều hướng/tải lại sau khi thử đăng nhập...`,
       );
-      loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 6000); // Chờ tối đa 6s
+      loadedTab = await waitForTabLoadAfterAction(tabId, originalUrl, 60000); // Chờ tối đa 60s
       console.log(
         `ensurePortalLogin: Tab ${tabId} sau khi chờ đăng nhập. URL cuối: ${loadedTab?.url}`,
       );
@@ -3585,9 +3584,33 @@ const getCurrentHdrId = (): string | null => {
   return currentHdrId;
 };
 
-// Hàm helper để reset hdrId
+// Hàm reset hdrId
 const resetCurrentHdrId = (): void => {
   currentHdrId = null;
+};
+
+const waitForContentScriptReady = async (
+  tabId: number,
+  timeout: number = 10000,
+): Promise<boolean> => {
+  const startTime = Date.now();
+  console.log(`Waiting for content script ready on tab ${tabId}...`);
+  while (Date.now() - startTime < timeout) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, {
+        message: "PING",
+      });
+      if (response && response.status === "pong") {
+        console.log(`Content script ready on tab ${tabId}`);
+        return true;
+      }
+    } catch (e) {
+      // Ignore errors, script might not be ready
+    }
+    await delay(1000);
+  }
+  console.warn(`Content script NOT ready on tab ${tabId} after ${timeout}ms`);
+  return false;
 };
 
 const khoiTaoPortal = async (
@@ -3595,15 +3618,28 @@ const khoiTaoPortal = async (
 ): Promise<{ hdrId: string; tabId: number } | null> => {
   try {
     console.log("Bắt đầu khởi tạo Portal...", data);
-    // Reset hdrId khi bắt đầu khởi tạo mới
     currentHdrId = null;
 
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
+
+    // --- SỬA ĐỔI 1: Kiểm tra tab hiện tại để quyết định có reload không ---
+    // Tìm tab Portal hiện có
+    const tabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
+    const existingTab = tabs.find(t => t.url && t.url.includes("/accept-api"));
+    
+    let shouldReload = true;
+    if (existingTab) {
+        console.log("Đã ở trang accept-api, không cần reload lại.");
+        shouldReload = false;
+    }
+
+    // Gọi createOrActiveTab với tham số isReload được tính toán
     var initialTab = await createOrActiveTab(
       "https://portalkhl.vnpost.vn/accept-api",
       "portalkhl.vnpost.vn",
-      true,
+      true,         // isActive
+      shouldReload  // isReload: false nếu đã đúng trang (FIX LỖI REFRESH)
     );
 
     if (!initialTab || !initialTab.id) {
@@ -3613,90 +3649,104 @@ const khoiTaoPortal = async (
     }
     const tabId = initialTab.id;
 
-    console.log(`Tab ban đầu ${tabId}. URL: ${initialTab.url}`);
-
     // --- Sử dụng hàm ensurePortalLogin ---
     const loginResult = await ensurePortalLogin(tabId);
     loginSuccess = loginResult.success;
-    loadedTab = loginResult.loadedTab; // Cập nhật loadedTab từ kết quả
-    // --- Kết thúc sử dụng hàm ensurePortalLogin ---
+    loadedTab = loginResult.loadedTab; 
 
-    // --- Chỉ tiếp tục nếu đăng nhập thành công hoặc không cần đăng nhập ---
     if (loginSuccess && loadedTab?.id) {
-      console.log(
-        `khoiTaoPortal: Đăng nhập OK. Tiếp tục gửi lệnh KHOITAOPORTAL cho tab ${loadedTab.id}...`,
-      );
+      console.log(`khoiTaoPortal: Đăng nhập OK. Chuẩn bị gửi lệnh...`);
       updateToPhone("message", "Đang khởi tạo hợp đồng...");
-      await delay(1000);
+      
+      // --- SỬA ĐỔI 2: Tăng thời gian chờ để trang React ổn định ---
+      // Portal VNPost sau khi load xong thường mất 1-2s để render form và fetch dữ liệu ngầm
+      // Nếu điền quá sớm, React sẽ render lại và xóa trắng form
+      console.log("Waiting for Portal to stabilize...");
+      await delay(2500); 
 
-      const response = await chrome.tabs.sendMessage(loadedTab.id, {
-        message: "KHOITAOPORTAL",
-        ...data, // Đảm bảo 'data' chứa MaKH, Address, IsChooseHopDong, STTHopDong...
-        keyMessage: keyMessage,
-      });
-      console.log("Phản hồi từ content script KHOITAOPORTAL:", response);
-      // Xử lý phản hồi từ content script
-      if (response && response.data === "ok") {
-        // Lấy URL hiện tại của tab để trích xuất hdrId
-        try {
-          const currentTab = await chrome.tabs.get(loadedTab.id);
-          const currentUrl = currentTab.url;
-          console.log("URL hiện tại sau khi khởi tạo:", currentUrl);
+      // Đảm bảo content script đã sẵn sàng
+      const isReady = await waitForContentScriptReady(loadedTab.id);
+      if (!isReady) console.warn("Content script có thể chưa sẵn sàng...");
 
-          // Trích xuất hdrId từ URL (ví dụ: https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1054055351)
-          const urlParams = new URLSearchParams(currentUrl?.split("?")[1]);
-          const hdrId = urlParams.get("hdrId");
-
-          if (hdrId) {
-            console.log("Đã lấy được hdrId:", hdrId);
-            currentHdrId = hdrId; // Lưu vào biến global
-            updateToPhone(
-              "message",
-              `Khởi tạo thành công. Mã hợp đồng: ${hdrId}`,
-            );
-            return { hdrId, tabId: loadedTab.id };
-          } else {
-            console.warn("Không tìm thấy hdrId trong URL");
-            currentHdrId = null;
-            updateToPhone("message", "Khởi tạo thành công.");
-            // Vẫn trả về null vì không có hdrId
-            return null;
-          }
-        } catch (urlError: any) {
-          console.error("Lỗi khi lấy URL:", urlError);
-          currentHdrId = null;
-          updateToPhone("message", "Khởi tạo thành công.");
-          return null;
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(loadedTab.id, {
+          message: "KHOITAOPORTAL",
+          ...data,
+          keyMessage: keyMessage,
+        });
+      } catch (sendError: any) {
+        // ... (Giữ nguyên logic xử lý lỗi connection closed như câu trả lời trước) ...
+        console.warn("Lỗi khi gửi KHOITAOPORTAL:", sendError);
+        if (sendError.message && (sendError.message.includes("connection") || sendError.message.includes("closed"))) {
+             response = { data: "ok_reloading" };
         }
-      } else {
-        const errorMsg =
-          response && response.data
-            ? response.data
-            : "Phản hồi không hợp lệ từ content script.";
-        console.error("Lỗi từ content script KHOITAOPORTAL:", errorMsg);
-        updateToPhone("message", `Lỗi khởi tạo: ${errorMsg}`);
-        currentHdrId = null; // Reset hdrId khi thất bại
-        return null; // *** ĐÁNH DẤU: Điểm thất bại 3 (Phản hồi không đúng) ***
       }
-    } else if (!loginSuccess) {
-      console.log(
-        "Không tiếp tục vì đăng nhập thất bại hoặc không xác nhận được.",
-      );
-      return null;
-      // Tin nhắn lỗi đã được gửi ở trên nếu đăng nhập thất bại
-    }
 
-    // await createTab("https://google.com.vn");
+      // ... (Giữ nguyên phần xử lý response và tìm hdrId như câu trả lời trước) ...
+      // Copy đoạn xử lý response từ câu trả lời trước vào đây
+      
+      console.log("Phản hồi từ content:", response);
+
+        if (response && (response.data === "ok" || response.data === "ok_reloading")) {
+            console.log("Content script đã bấm nút. Đang chờ trang Portal reload...");
+            updateToPhone("message", "Đang lưu dữ liệu, vui lòng đợi...");
+
+            try {
+                await waitForTabLoadAfterAction(loadedTab.id, undefined, 15000);
+                await delay(2000); 
+            } catch (e) {
+                console.warn("Timeout chờ reload...");
+            }
+
+            // Logic tìm hdrId (Copy từ câu trả lời trước)
+            let foundHdrId: string | null = null;
+            const currentTab = await chrome.tabs.get(loadedTab.id);
+            const currentUrl = currentTab.url || "";
+            const urlParams = new URLSearchParams(currentUrl.split("?")[1]);
+            foundHdrId = urlParams.get("hdrId");
+
+            if (!foundHdrId) {
+                // ... Inject script tìm trong DOM ...
+                 try {
+                    const domResults = await chrome.scripting.executeScript({
+                        target: { tabId: loadedTab.id },
+                        func: () => {
+                            const hiddenInput = document.querySelector('input[name="hdrId"]') as HTMLInputElement;
+                            if (hiddenInput && hiddenInput.value) return hiddenInput.value;
+                            const firstRowLink = document.querySelector('.rt-tbody .rt-tr-group:first-child a') as HTMLAnchorElement;
+                            if (firstRowLink && firstRowLink.href) {
+                                const match = firstRowLink.href.match(/hdrId=(\d+)/);
+                                if (match) return match[1];
+                            }
+                            return null;
+                        }
+                    });
+                    if (domResults && domResults[0] && domResults[0].result) foundHdrId = domResults[0].result;
+                } catch (e) {}
+            }
+
+            if (foundHdrId) {
+                currentHdrId = foundHdrId;
+                updateToPhone("message", `Khởi tạo thành công. ID: ${foundHdrId}`);
+                return { hdrId: foundHdrId, tabId: loadedTab.id };
+            } else {
+                updateToPhone("message", "Đã lưu nhưng không lấy được mã ID.");
+                return null;
+            }
+        } else {
+             updateToPhone("message", `Lỗi khởi tạo: ${response?.data || "Unknown"}`);
+             return null;
+        }
+
+    } else if (!loginSuccess) {
+      return null;
+    }
   } catch (error: any) {
-    console.error("Lỗi trong hàm khoiTaoPortal:", error);
-    updateToPhone(
-      "message",
-      `Lỗi nghiêm trọng: ${error.message || "Lỗi không xác định khi khởi tạo."}`,
-    );
+    console.error("Lỗi nghiêm trọng khoiTaoPortal:", error);
+    updateToPhone("message", `Lỗi hệ thống: ${error.message}`);
     return null;
-    // Gửi trạng thái lỗi nghiêm trọng về điện thoại
   }
-  console.warn("khoiTaoPortal chạy đến cuối mà không return tường minh.");
   return null;
 };
 const handleKhoiTao = async (data: any): Promise<boolean> => {

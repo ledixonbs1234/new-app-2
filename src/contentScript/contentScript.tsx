@@ -69,7 +69,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
         // END: Thêm listener mới cho MyPost
 
-        if (msg.message === "PROCESS_SINGLE_ITEM") {
+        if (msg.message === "PING") {
+          callback({ status: "pong" });
+        } else if (msg.message === "PROCESS_SINGLE_ITEM") {
           console.log("Processing single item:", msg.current.MaBuuGui);
           try {
             // Gọi hàm xử lý một item (có thể là hàm startSendCurrentCode đã sửa đổi)
@@ -338,17 +340,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
               "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
             );
             if (btnLuuVaTim) {
-              btnLuuVaTim?.click();
-              await delay(1500);
-              var searchBox = document.querySelector(
-                "#ttNumberSearch"
-              ) as HTMLInputElement;
-              if (searchBox) {
-                searchBox.focus();
-                callback({ data: "ok" });
-              } else {
-                callback({ data: "Lỗi không tìm thấy ô tìm kiếm Mã bưu gửi" });
-              }
+              console.log("Clicking Save & Search...");
+
+              // 1. Gửi phản hồi NGAY LẬP TỨC để giữ kết nối không bị báo lỗi
+              // Báo hiệu cho Background biết là nút đã được bấm và trang sắp reload
+              callback({ data: "ok_reloading" });
+
+              // 2. Thực hiện click sau một khoảng delay cực ngắn để đảm bảo message đã đi
+              setTimeout(() => {
+                btnLuuVaTim?.click();
+              }, 100);
+
+              return true; // Kết thúc xử lý tại đây
             } else {
               callback({ data: "Lỗi không tìm thấy nút lưu và tìm" });
             }
