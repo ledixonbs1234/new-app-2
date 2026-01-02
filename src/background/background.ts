@@ -296,7 +296,7 @@ async function handleExecuteFromItem(maBuuGui: string, sendResponse: (res: any) 
               // Continue or stop? Usually stop on error or continue?
               // processPortalListLoop continues on item error but stops on loop error.
               // Let's continue for item error.
-              shouldStop = true; 
+              shouldStop = true;
               resolve();
             }
           });
@@ -1605,6 +1605,62 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
     } // Thêm các event khác nếu cần
+    if (request.type === "CORRECT_ADDRESS") {
+      (async () => {
+        try {
+          const address = request.payload.address;
+          console.log("Đang xử lý địa chỉ với AI:", address);
+
+          // // 1. Load data.json
+          // const base64Data = await loadDataJsonBase64();
+          // if (!base64Data) {
+          //   throw new Error("Không thể tải file data.json");
+          // }
+
+          // // 2. Chuẩn bị prompt
+          // const prompt = `Dựa vào file dữ liệu địa chỉ đính kèm (data.json) và địa chỉ tôi viết sai như sau: "${address}", hãy viết lại địa chỉ đúng đầy đủ (Xã, Huyện, Tỉnh). Chỉ trả về kết quả địa chỉ đúng, không giải thích thêm.`;
+
+          // // 3. Chuẩn bị FileData cho Gemini
+          // const fileData: FileData = {
+          //   mimeType: "application/json", // Hoặc "text/plain" tùy vào nội dung file
+          //   base64Data: base64Data
+          // };
+
+          // // 4. Gọi AI
+          // const result = await processWithGemini(prompt, fileData);
+
+          // 5. Trả về kết quả (Clean chuỗi JSON nếu hàm processWithGemini trả về JSON, ở đây ta cần text thuần)
+          // Lưu ý: Hàm processWithGemini hiện tại của bạn đang cố parse JSON ở cuối. 
+          // Nếu bạn muốn text thuần cho tính năng này, cần điều chỉnh hoặc parse kết quả.
+
+          // Vì hàm processWithGemini hiện tại được thiết kế để trả về JSON string cho tính năng "Scan ảnh",
+          // ta có thể cần sửa nhẹ nó hoặc dùng logic parse ở đây.
+          // Tuy nhiên, prompt trên yêu cầu "Chỉ trả về kết quả".
+          // Gemini có thể trả về text thuần. Hàm processWithGemini của bạn đang cố tìm '[' và ']'.
+          // Để an toàn, ta sẽ dùng một hàm gọi AI riêng hoặc sửa prompt để trả về JSON { "address": "..." }
+
+          // Sửa Prompt để phù hợp với hàm processWithGemini hiện tại (trả về JSON):
+          const jsonPrompt = `Dựa vào file dữ liệu địa chỉ đính kèm và địa chỉ sai: "${address}", hãy tìm địa chỉ đúng nhất. Trả về định dạng JSON mảng duy nhất: [{"address": "địa chỉ đúng đầy đủ"}]`;
+
+          const jsonResultString = await processWithGemini(jsonPrompt);
+          const jsonResult = JSON.parse(jsonResultString);
+
+          let finalAddress = "";
+          if (Array.isArray(jsonResult) && jsonResult.length > 0 && jsonResult[0].address) {
+            finalAddress = jsonResult[0].address;
+          } else {
+            finalAddress = jsonResultString; // Fallback
+          }
+
+          sendResponse({ status: "success", result: finalAddress });
+
+        } catch (error: any) {
+          console.error("AI Error:", error);
+          sendResponse({ status: "error", error: error.message });
+        }
+      })();
+      return true; // Async
+    }
     if (request.type === "TRIGGER_SYNC_IMAGES") {
       console.log("[BG] Nhận lệnh sync thủ công từ Sidepanel");
 
@@ -3627,11 +3683,11 @@ const khoiTaoPortal = async (
     // Tìm tab Portal hiện có
     const tabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
     const existingTab = tabs.find(t => t.url && t.url.includes("/accept-api"));
-    
+
     let shouldReload = true;
     if (existingTab) {
-        console.log("Đã ở trang accept-api, không cần reload lại.");
-        shouldReload = false;
+      console.log("Đã ở trang accept-api, không cần reload lại.");
+      shouldReload = false;
     }
 
     // Gọi createOrActiveTab với tham số isReload được tính toán
@@ -3652,17 +3708,17 @@ const khoiTaoPortal = async (
     // --- Sử dụng hàm ensurePortalLogin ---
     const loginResult = await ensurePortalLogin(tabId);
     loginSuccess = loginResult.success;
-    loadedTab = loginResult.loadedTab; 
+    loadedTab = loginResult.loadedTab;
 
     if (loginSuccess && loadedTab?.id) {
       console.log(`khoiTaoPortal: Đăng nhập OK. Chuẩn bị gửi lệnh...`);
       updateToPhone("message", "Đang khởi tạo hợp đồng...");
-      
+
       // --- SỬA ĐỔI 2: Tăng thời gian chờ để trang React ổn định ---
       // Portal VNPost sau khi load xong thường mất 1-2s để render form và fetch dữ liệu ngầm
       // Nếu điền quá sớm, React sẽ render lại và xóa trắng form
       console.log("Waiting for Portal to stabilize...");
-      await delay(2500); 
+      await delay(2500);
 
       // Đảm bảo content script đã sẵn sàng
       const isReady = await waitForContentScriptReady(loadedTab.id);
@@ -3679,65 +3735,65 @@ const khoiTaoPortal = async (
         // ... (Giữ nguyên logic xử lý lỗi connection closed như câu trả lời trước) ...
         console.warn("Lỗi khi gửi KHOITAOPORTAL:", sendError);
         if (sendError.message && (sendError.message.includes("connection") || sendError.message.includes("closed"))) {
-             response = { data: "ok_reloading" };
+          response = { data: "ok_reloading" };
         }
       }
 
       // ... (Giữ nguyên phần xử lý response và tìm hdrId như câu trả lời trước) ...
       // Copy đoạn xử lý response từ câu trả lời trước vào đây
-      
+
       console.log("Phản hồi từ content:", response);
 
-        if (response && (response.data === "ok" || response.data === "ok_reloading")) {
-            console.log("Content script đã bấm nút. Đang chờ trang Portal reload...");
-            updateToPhone("message", "Đang lưu dữ liệu, vui lòng đợi...");
+      if (response && (response.data === "ok" || response.data === "ok_reloading")) {
+        console.log("Content script đã bấm nút. Đang chờ trang Portal reload...");
+        updateToPhone("message", "Đang lưu dữ liệu, vui lòng đợi...");
 
-            try {
-                await waitForTabLoadAfterAction(loadedTab.id, undefined, 15000);
-                await delay(2000); 
-            } catch (e) {
-                console.warn("Timeout chờ reload...");
-            }
-
-            // Logic tìm hdrId (Copy từ câu trả lời trước)
-            let foundHdrId: string | null = null;
-            const currentTab = await chrome.tabs.get(loadedTab.id);
-            const currentUrl = currentTab.url || "";
-            const urlParams = new URLSearchParams(currentUrl.split("?")[1]);
-            foundHdrId = urlParams.get("hdrId");
-
-            if (!foundHdrId) {
-                // ... Inject script tìm trong DOM ...
-                 try {
-                    const domResults = await chrome.scripting.executeScript({
-                        target: { tabId: loadedTab.id },
-                        func: () => {
-                            const hiddenInput = document.querySelector('input[name="hdrId"]') as HTMLInputElement;
-                            if (hiddenInput && hiddenInput.value) return hiddenInput.value;
-                            const firstRowLink = document.querySelector('.rt-tbody .rt-tr-group:first-child a') as HTMLAnchorElement;
-                            if (firstRowLink && firstRowLink.href) {
-                                const match = firstRowLink.href.match(/hdrId=(\d+)/);
-                                if (match) return match[1];
-                            }
-                            return null;
-                        }
-                    });
-                    if (domResults && domResults[0] && domResults[0].result) foundHdrId = domResults[0].result;
-                } catch (e) {}
-            }
-
-            if (foundHdrId) {
-                currentHdrId = foundHdrId;
-                updateToPhone("message", `Khởi tạo thành công. ID: ${foundHdrId}`);
-                return { hdrId: foundHdrId, tabId: loadedTab.id };
-            } else {
-                updateToPhone("message", "Đã lưu nhưng không lấy được mã ID.");
-                return null;
-            }
-        } else {
-             updateToPhone("message", `Lỗi khởi tạo: ${response?.data || "Unknown"}`);
-             return null;
+        try {
+          await waitForTabLoadAfterAction(loadedTab.id, undefined, 15000);
+          await delay(2000);
+        } catch (e) {
+          console.warn("Timeout chờ reload...");
         }
+
+        // Logic tìm hdrId (Copy từ câu trả lời trước)
+        let foundHdrId: string | null = null;
+        const currentTab = await chrome.tabs.get(loadedTab.id);
+        const currentUrl = currentTab.url || "";
+        const urlParams = new URLSearchParams(currentUrl.split("?")[1]);
+        foundHdrId = urlParams.get("hdrId");
+
+        if (!foundHdrId) {
+          // ... Inject script tìm trong DOM ...
+          try {
+            const domResults = await chrome.scripting.executeScript({
+              target: { tabId: loadedTab.id },
+              func: () => {
+                const hiddenInput = document.querySelector('input[name="hdrId"]') as HTMLInputElement;
+                if (hiddenInput && hiddenInput.value) return hiddenInput.value;
+                const firstRowLink = document.querySelector('.rt-tbody .rt-tr-group:first-child a') as HTMLAnchorElement;
+                if (firstRowLink && firstRowLink.href) {
+                  const match = firstRowLink.href.match(/hdrId=(\d+)/);
+                  if (match) return match[1];
+                }
+                return null;
+              }
+            });
+            if (domResults && domResults[0] && domResults[0].result) foundHdrId = domResults[0].result;
+          } catch (e) { }
+        }
+
+        if (foundHdrId) {
+          currentHdrId = foundHdrId;
+          updateToPhone("message", `Khởi tạo thành công. ID: ${foundHdrId}`);
+          return { hdrId: foundHdrId, tabId: loadedTab.id };
+        } else {
+          updateToPhone("message", "Đã lưu nhưng không lấy được mã ID.");
+          return null;
+        }
+      } else {
+        updateToPhone("message", `Lỗi khởi tạo: ${response?.data || "Unknown"}`);
+        return null;
+      }
 
     } else if (!loginSuccess) {
       return null;
@@ -4905,6 +4961,7 @@ const save_order = (msg: any, sendResponse: (response: any) => void) => {
     orders: msg.payload.orders,
     currentIndex: 0,
   };
+  console.log("Saving orders to session storage:", dataToSave);
   chrome.storage.session.set(dataToSave, () => {
     broadcastUpdate(dataToSave);
     sendResponse({ status: "ok" });
@@ -4935,7 +4992,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     (async () => {
       try {
         // 2. Gọi hàm xử lý AI và chờ kết quả
-        const jsonStringResult = await processWithGemini(msg.payload, null);
+        const jsonStringResult = await processWithGemini(msg.payload, msg.systemInstructionText);
 
         // 3. Phân tích kết quả ngay tại background
         const orders = JSON.parse(jsonStringResult);
@@ -5719,160 +5776,102 @@ async function handleCreateComplaint(
     console.error("[BG] Lỗi trong quá trình tạo khiếu nại:", error);
   }
 }
-// Định nghĩa kiểu cho dữ liệu file
-interface FileData {
-  mimeType: string;
-  base64Data: string;
-}
+
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
 const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite-preview-06-17:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
-const GEMINI_API_KEY = "AIzaSyDi6U8u1FK-wLKejyzJ1dntVUHpiaHipIE"; // Thay thế bằng API key thực tế của bạn
+const GEMINI_API_KEY = "AIzaSyDRDPaTCetuCfzjuqvJjcG1sMhmB2aIVzE"; // Thay thế bằng API key thực tế
+const GEMINI_API_KEY_ALT = "AIzaSyAreyNgXS6sF-fvFNMB8jGITmii2P5b-rA"
 // Hàm gọi API đã được cập nhật
 async function processWithGemini(
-  userPrompt: string,
-  fileData: FileData | null,
+  userPrompt: string,systemInstructionText?: string,
 ): Promise<string> {
-  const systemInstruction = `ta có file địa chỉ mẫu, dựa vào thông tin sau, chuyển sang json (chỉ trả về json) có tag sau (GOC,MAUSAC,NGUOINHAN,DIACHI,SDT,COD) .trong đó nội dung gốc ví dụ (1.6 nguyễn duy khuyến 350k 35n 2đỏ Nguyễn Duy Khuyến, đường số 6, ấp Phú Tân, xã Phú Bình, huyện Tân Phú, tỉnh Đồng Nai. Đt 0916302413), màu sắc ví dụ đỏ là DO ,trắng TRẮNG , xanh XANH, 1 đỏ 1 xanh DOXANH , 2đỏ DODO 2 xanh XANHXANH, tên người nhận theo mẫu sau 1.6 nguyễn duy khuyến 350k hoặc 14.2 uyên trần 538k) , số điện thoại, và địa chỉ (trong địa chỉ có  tự chỉnh lại cho đúng nếu sai ví dụ xa thong nhat huyen bu dang binh phuoc thành xã thống nhất huyện bù đăng tỉnh bình phước ),số tiền cod ( 510k là 510000, 538k là 538000)
-    sai phần người nhận rồi, ý tôi muốn là 20a1 ót duong van 320k 35n 2đỏ 0918820593\n313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre thì người nhận là 20a1 ót duong van 320k , hay 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt thì NGUOINHAN là 32a4 phương dinh 450k
+  
+  // System Instruction giúp định hình phản hồi của AI
+  const systemInstruction = {
+    parts: [
+      { 
+        text: systemInstructionText || "Bạn là chuyên gia về địa chính Việt Nam. Nhiệm vụ của bạn là trích xuất hoặc tìm kiếm địa chỉ chính xác. LUÔN LUÔNG trả về kết quả dưới dạng một mảng JSON các đối tượng, không bao gồm văn bản giải thích hoặc ký tự markdown (như ```json)." 
+      }
+    ]
+  };
 
-[19/06/2025 11:55:52] Bích Ngọc: 14.1 do nguyễn 570k 45n 2trắng 0916333309 Đ/C 3/161 ấp ngãi lợi b,xã lợi bình nhơn,TP Tân An,Long An
-[19/06/2025 15:41:40] Kim Vân: 14.2 uyên trần 538k 45n trang 40n xanh  địa chỉ số nhà 052 tổ dân phố 13 phường Tân Giang thành phố cao bằng tỉnh cao bằng 0904611961
-[19/06/2025 16:25:53] Kim Vân: 26a3 trần thanh trúc 350k 35n 2đỏ Địa chỉ: 107 Thủ Khoa Huân, phường 1, Thành phố Tân An, Long An (0983288725)
-[20/06/2025 07:49:49] Nguyễn Diệu: 32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt
-[21/06/2025 08:46:10] Bích Ngọc: 20a1 ót duong van 320k 35n 2đỏ 0918820593
-313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre
-và đây là kết quả của tôi
-[
-    {
-        "GOC": "14.1 do nguyễn 570k 45n 2trắng 0916333309 Đ/C 3/161 ấp ngãi lợi b,xã lợi bình nhơn,TP Tân An,Long An",
-        "MAUSAC": "TRANGTRANG",
-        "NGUOINHAN": "14.1 do nguyễn 570k",
-        "DIACHI": "3/161 Ấp Ngãi Lợi B, Xã Lợi Bình Nhơn, Thành phố Tân An, Tỉnh Long An",
-        "SDT": "0916333309",
-        "COD": 570000
-    },
-    {
-        "GOC": "14.2 uyên trần 538k 45n trang 40n xanh  địa chỉ số nhà 052 tổ dân phố 13 phường Tân Giang thành phố cao bằng tỉnh cao bằng 0904611961",
-        "MAUSAC": "TRANGXANH",
-        "NGUOINHAN": "14.2 uyên trần 538k",
-        "DIACHI": "Số nhà 052, Tổ dân phố 13, Phường Tân Giang, Thành phố Cao Bằng, Tỉnh Cao Bằng",
-        "SDT": "0904611961",
-        "COD": 538000
-    },
-    {
-        "GOC": "26a3 trần thanh trúc 350k 35n 2đỏ Địa chỉ: 107 Thủ Khoa Huân, phường 1, Thành phố Tân An, Long An (0983288725)",
-        "MAUSAC": "DODO",
-        "NGUOINHAN": "26a3 trần thanh trúc 350k",
-        "DIACHI": "107 Thủ Khoa Huân, Phường 1, Thành phố Tân An, Tỉnh Long An",
-        "SDT": "0983288725",
-        "COD": 350000
-    },
-    {
-        "GOC": "32a4 phương dinh 450k 2 xanh 40n đt  0333395115 đc 96 thánh  tâm, du sinh ,p5. Đà lạt",
-        "MAUSAC": "XANHXANH",
-        "NGUOINHAN": "32a4 phương dinh 450k",
-        "DIACHI": "96 Thánh Tâm, Du Sinh, Phường 5, Thành phố Đà Lạt, Tỉnh Lâm Đồng",
-        "SDT": "0333395115",
-        "COD": 450000
-    },
-    {
-        "GOC": "20a1 ót duong van 320k 35n 2đỏ 0918820593\n313, Ấp Phú lợi, xã Bình phú, TP Bến Tre, Bến Tre",
-        "MAUSAC": "DODO",
-        "NGUOINHAN": "20a1 ót duong van 320k",
-        "DIACHI": "313, Ấp Phú Lợi, Xã Bình Phú, Thành phố Bến Tre, Tỉnh Bến Tre",
-        "SDT": "0918820593",
-        "COD": 320000
-    }
-]
-    \n `;
-
-  // Xây dựng các "parts" cho request
-  const requestParts = [
-    { text: systemInstruction },
-    { text: `\n\nYêu cầu của người dùng:\n"${userPrompt}"` },
+  // Xây dựng phần nội dung người dùng
+  const userParts: any[] = [
+    { text: `Yêu cầu: ${userPrompt}` }
   ];
 
-  // Nếu có file, thêm nó vào như một part riêng
-  if (fileData) {
-    requestParts.push({
-      // @ts-ignore
-      inlineData: {
-        mimeType: fileData.mimeType,
-        data: fileData.base64Data,
-      },
-    });
-  }
 
-  // Body của request bây giờ chứa một mảng các parts
   const requestBody = {
+    system_instruction: systemInstruction,
     contents: [
       {
-        parts: requestParts,
+        role: "user",
+        parts: userParts,
       },
     ],
     generationConfig: {
-      temperature: 0.3,
-      topK: 1,
-      topP: 1,
-      maxOutputTokens: 65536,
+      // Cấu hình Thinking (Suy nghĩ chuyên sâu)
       thinkingConfig: {
-        thinkingBudget: -1,
+        thinkingLevel: "HIGH", // Hoặc mức độ phù hợp với Model
       },
+      temperature: 0.7,
+      topK: 40,
+      topP: 0.95,
     },
   };
 
   try {
-    const response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
       },
       body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
       const errorBody = await response.json();
-      console.error("API Error:", errorBody);
-      throw new Error(
-        `Lỗi API: ${errorBody.error.message || response.statusText}`,
-      );
+      throw new Error(`API Error: ${errorBody.error?.message || response.statusText}`);
     }
 
     const data = await response.json();
+    console.log("Gemini API response data:", data);
 
-    // Kiểm tra xem có response trả về không
-    if (
-      !data.candidates ||
-      data.candidates.length === 0 ||
-      !data.candidates[0].content.parts
-    ) {
-      throw new Error("Không nhận được phản hồi hợp lệ từ Gemini.");
+    // Kiểm tra phản hồi
+    if (!data.candidates?.[0]?.content?.parts) {
+      throw new Error("Không nhận được phản hồi từ AI.");
     }
 
-    const textResult = data.candidates[0].content.parts[0].text;
-    // Bước 1: Trích xuất phần nội dung JSON.
-    // Chúng ta tìm vị trí của dấu `[` đầu tiên và dấu `]` cuối cùng.
-    const startIndex = textResult.indexOf("[");
-    const endIndex = textResult.lastIndexOf("]");
-    const jsonContentString = textResult.substring(startIndex, endIndex + 1);
+    // Lấy phần text cuối cùng (AI thường bỏ phần 'thought' ra và chỉ trả về 'text' kết quả)
+    let textResult = data.candidates[0].content.parts.find((p: any) => p.text)?.text || "";
 
-    // Bước 2: Phân tích chuỗi JSON thành đối tượng JavaScript
-    // Thao tác này sẽ loại bỏ tất cả các khoảng trắng và xuống dòng thừa.
-    const jsObject = JSON.parse(jsonContentString);
+    // Làm sạch chuỗi nếu AI cố tình trả về Markdown block ```json ... ```
+    textResult = textResult.replace(/```json/g, "").replace(/```/g, "").trim();
 
-    // Bước 3: Chuyển đối tượng JavaScript trở lại thành một JSON string chuẩn
-    const finalJsonString = JSON.stringify(jsObject);
-    debugger;
-    return finalJsonString; // Trả về chuỗi JSON đã chuẩn hóa
+    try {
+      // Tìm vị trí mảng JSON trong trường hợp AI vẫn nói thêm vài câu bên ngoài
+      const startIndex = textResult.indexOf("[");
+      const endIndex = textResult.lastIndexOf("]");
+      
+      if (startIndex !== -1 && endIndex !== -1) {
+        const jsonString = textResult.substring(startIndex, endIndex + 1);
+        const jsObject = JSON.parse(jsonString);
+        return JSON.stringify(jsObject); // Trả về chuỗi JSON chuẩn
+      }
+      
+      return textResult; // Trả về nguyên bản nếu không tìm thấy dấu []
+    } catch (parseError) {
+      console.warn("Không thể parse JSON, trả về text thô.");
+      return textResult;
+    }
+
   } catch (error) {
     console.error("Lỗi khi gọi Gemini API:", error);
     throw error;
   }
 }
-
 /**
  * Lấy cache mã hiệu portal theo ngày từ chrome.storage.local
  * Cấu trúc lưu: { PORTAL_CODES_CACHE: { dateKey: string, data: { [portalId]: any } } }
@@ -6367,3 +6366,24 @@ async function startImageListener() {
 
   isImageListenerRunning = true;
 }
+// async function loadDataJsonBase64(): Promise<string> {
+//   try {
+//     const url = chrome.runtime.getURL("optimized_data.json");
+//     const response = await fetch(url);
+//     const blob = await response.blob();
+//     return new Promise((resolve, reject) => {
+//       const reader = new FileReader();
+//       reader.onloadend = () => {
+//         const result = reader.result as string;
+//         // Lấy phần base64 sau dấu phẩy (data:application/json;base64,...)
+//         const base64 = result.split(',')[1];
+//         resolve(base64);
+//       };
+//       reader.onerror = reject;
+//       reader.readAsDataURL(blob);
+//     });
+//   } catch (error) {
+//     console.error("Error loading data.json:", error);
+//     return "";
+//   }
+// }

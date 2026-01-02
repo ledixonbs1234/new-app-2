@@ -211,6 +211,293 @@ function requestNextImage(): void {
   });
 }
 
+// Thêm ID cho nút AI để tránh trùng lặp
+const AI_BUTTON_ID = "btn-ai-address-check";
+const AI_OVERLAY_ID = "ai-result-overlay";
+/**
+ * Hiển thị Overlay AI với giao diện Card hiện đại
+ */
+function showAIResultOverlay(text: string, isError: boolean = false) {
+    // Xóa overlay cũ nếu có
+    const oldOverlay = document.getElementById(AI_OVERLAY_ID);
+    if (oldOverlay) oldOverlay.remove();
+
+    // Container chính (Overlay layer)
+    const container = document.createElement("div");
+    container.id = AI_OVERLAY_ID;
+    Object.assign(container.style, {
+        position: "fixed",
+        top: "20px",
+        left: "50%",
+        transform: "translateX(-50%) translateY(-20px)",
+        zIndex: "2147483647",
+        opacity: "0",
+        transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
+    });
+
+    // Card nội dung
+    const card = document.createElement("div");
+    Object.assign(card.style, {
+        backgroundColor: "#ffffff",
+        borderRadius: "12px",
+        boxShadow: "0 10px 25px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)",
+        padding: "16px 20px",
+        minWidth: "350px",
+        maxWidth: "500px",
+        borderLeft: isError ? "5px solid #ff4d4f" : "5px solid #8a2be2",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px"
+    });
+
+    // Header của Card
+    const header = document.createElement("div");
+    header.style.display = "flex";
+    header.style.justifyContent = "space-between";
+    header.style.alignItems = "center";
+    header.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 20px;">${isError ? '⚠️' : '🤖'}</span>
+            <span style="font-weight: 700; color: #333; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">
+                ${isError ? 'Lỗi Phân Tích' : 'AI Gợi Ý Địa Chỉ'}
+            </span>
+        </div>
+    `;
+
+    // Nút đóng (X)
+    const closeBtn = document.createElement("button");
+    closeBtn.innerHTML = "✕";
+    Object.assign(closeBtn.style, {
+        border: "none",
+        background: "none",
+        cursor: "pointer",
+        color: "#999",
+        fontSize: "16px",
+        padding: "4px"
+    });
+    closeBtn.onclick = () => {
+        container.style.opacity = "0";
+        container.style.transform = "translateX(-50%) translateY(-20px)";
+        setTimeout(() => container.remove(), 400);
+    };
+    header.appendChild(closeBtn);
+
+    // Nội dung kết quả
+    const content = document.createElement("div");
+    Object.assign(content.style, {
+        color: "#444",
+        fontSize: "15px",
+        lineHeight: "1.5",
+        fontWeight: "500",
+        backgroundColor: isError ? "#fff1f0" : "#f9f5ff",
+        padding: "12px",
+        borderRadius: "8px",
+        border: isError ? "1px solid #ffccc7" : "1px solid #e9d8fd",
+        whiteSpace: "pre-wrap"
+    });
+    content.textContent = text;
+
+    card.appendChild(header);
+    card.appendChild(content);
+
+    // Nút chức năng (Chỉ hiện khi không phải lỗi)
+    if (!isError && text.length > 5 && !text.includes("Đang phân tích")) {
+        const actionArea = document.createElement("div");
+        actionArea.style.display = "flex";
+        actionArea.style.justifyContent = "flex-end";
+        
+        const applyBtn = document.createElement("button");
+        Object.assign(applyBtn.style, {
+            backgroundColor: "#8a2be2",
+            color: "white",
+            border: "none",
+            borderRadius: "6px",
+            padding: "8px 16px",
+            fontSize: "13px",
+            fontWeight: "600",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            transition: "background-color 0.2s"
+        });
+        applyBtn.innerHTML = `
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            SỬ DỤNG ĐỊA CHỈ NÀY
+        `;
+        
+        applyBtn.onmouseover = () => applyBtn.style.backgroundColor = "#7b27cc";
+        applyBtn.onmouseout = () => applyBtn.style.backgroundColor = "#8a2be2";
+        
+        applyBtn.onclick = () => {
+            fillCorrectedAddress(text);
+            closeBtn.click(); // Đóng overlay sau khi điền
+        };
+        
+        actionArea.appendChild(applyBtn);
+        card.appendChild(actionArea);
+    }
+
+    container.appendChild(card);
+    document.body.appendChild(container);
+
+    // Trigger animation hiện lên
+    setTimeout(() => {
+        container.style.opacity = "1";
+        container.style.transform = "translateX(-50%) translateY(0)";
+    }, 10);
+
+    // Tự động tắt sau 15s (tăng thêm thời gian để kịp đọc)
+    if (!text.includes("Đang phân tích")) {
+        setTimeout(() => {
+            if (document.body.contains(container)) {
+                closeBtn.click();
+            }
+        }, 15000);
+    }
+}
+
+/**
+ * Nâng cấp hàm injectAIButton để xử lý mượt mà hơn
+ */
+function injectAIButton() {
+    if (document.getElementById(AI_BUTTON_ID)) return;
+
+    const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+    if (!addressInput) return;
+
+    const parentContainer = addressInput.parentNode as HTMLElement;
+    const siblingButton = addressInput.nextElementSibling;
+
+    const aiBtn = document.createElement("button");
+    aiBtn.id = AI_BUTTON_ID;
+    aiBtn.type = "button";
+    aiBtn.className = "btn btn-primary btn-sm";
+    Object.assign(aiBtn.style, {
+    marginLeft: "4px",
+    backgroundColor: "#8a2be2",
+    borderColor: "#8a2be2",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "2px 6px", // Chỉnh lại padding cho vừa icon
+    borderRadius: "4px", // Bo góc giống các nút khác của hệ thống
+    boxShadow: "0 2px 4px rgba(138, 43, 226, 0.3)",
+    cursor: "pointer"
+});
+    aiBtn.title = "Sửa lỗi địa chỉ bằng AI (Gemini)";
+    
+    aiBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Ngôi sao chính -->
+        <path d="M12 3L14.5 9L21 11.5L14.5 14L12 21L9.5 14L3 11.5L9.5 9L12 3Z" fill="white"/>
+        <!-- Ngôi sao nhỏ phụ 1 -->
+        <path d="M19 16L19.7 18.3L22 19L19.7 19.7L19 22L18.3 19.7L16 19L18.3 18.3L19 16Z" fill="white"/>
+        <!-- Ngôi sao nhỏ phụ 2 -->
+        <path d="M5 3L5.7 5.3L8 6L5.7 6.7L5 9L4.3 6.7L2 6L4.3 5.3L5 3Z" fill="white"/>
+    </svg>
+        </svg>
+    `;
+
+    aiBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        const address = addressInput.value.trim();
+        
+        if (!address) {
+            showAIResultOverlay("Vui lòng nhập địa chỉ cần sửa lỗi!", true);
+            return;
+        }
+
+        showAIResultOverlay("Đang phân tích địa chỉ bằng AI...");
+
+        chrome.runtime.sendMessage({
+            type: "CORRECT_ADDRESS",
+            payload: { address }
+        }, (response) => {
+            if (chrome.runtime.lastError) {
+                showAIResultOverlay("Lỗi kết nối Extension: " + chrome.runtime.lastError.message, true);
+                return;
+            }
+            if (response && response.status === "success") {
+                showAIResultOverlay(response.result);
+            } else {
+                showAIResultOverlay("Lỗi: " + (response?.error || "Không có phản hồi từ AI"), true);
+            }
+        });
+    });
+
+    if (siblingButton) {
+        parentContainer.insertBefore(aiBtn, siblingButton.nextSibling);
+    } else {
+        parentContainer.appendChild(aiBtn);
+    }
+}
+
+// Thêm vào hàm monitorProcessingStatus hoặc tạo mới trong initialize
+function listenForFillForm() {
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    // ... (các logic cũ)
+
+    // LOGIC MỚI: Điền form từ AI Order
+    if (msg.type === "FILL_FORM_DATA_AI") {
+      const order = msg.payload; // Kiểu Order
+      console.log("[GiaoTich] Filling form from AI:", order);
+
+      try {
+        // 1. Điền Tên Người Nhận
+        const nameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
+        if (nameInput) {
+          nameInput.value = order.NGUOINHAN || "";
+          nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+          nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        
+
+        // 3. Điền Địa Chỉ (Quan trọng: cần trigger sự kiện để React nhận diện)
+        const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+        if (addressInput) {
+          addressInput.value = order.DIACHI || "";
+          addressInput.dispatchEvent(new Event('input', { bubbles: true }));
+          addressInput.dispatchEvent(new Event('change', { bubbles: true }));
+          // Focus để kích hoạt các script gợi ý nếu cần
+          addressInput.focus(); 
+          addressInput.dispatchEvent(new Event('blur'));
+          var find = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)")
+          if (find) {
+            (find as HTMLButtonElement).click();
+          }
+        }
+        // 2. Điền Số Điện Thoại
+        const phoneInput = document.getElementById(ELEMENT_IDS.RECEIVER_PHONE) as HTMLInputElement;
+        if (phoneInput) {
+          phoneInput.value = order.SDT || "";
+          phoneInput.dispatchEvent(new Event('input', { bubbles: true }));
+          phoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+          // Trigger logic lưu cache nếu có
+          phoneInput.dispatchEvent(new Event('blur'));
+        }
+
+        // 4. Điền COD (nếu có trường nhập tiền thu hộ - tùy vào giao diện portal)
+        // Lưu ý: ID này có thể thay đổi tùy portal, ở đây dùng ID giả định hoặc logic tìm element
+        // Dựa vào code cũ, COD thường nằm ở input trọng lượng hoặc dịch vụ cộng thêm
+        // Nếu muốn điền vào ô Ghi chú hoặc ô khác, thêm vào đây.
+        
+        // Ví dụ: Điền GOC vào ô ghi chú nếu có
+        // const noteInput = document.querySelector('textarea[name="note"]') as HTMLTextAreaElement;
+        // if(noteInput) { ... }
+
+        sendResponse({ status: "success" });
+      } catch (e: any) {
+        console.error("[GiaoTich] Error filling form:", e);
+        sendResponse({ status: "error", message: e.message });
+      }
+      return true;
+    }
+  });
+}
+
 /**
  * Monitor parcelIndex input để tự động chuyển ảnh khi hoàn thành đơn
  */
@@ -956,23 +1243,7 @@ function handleEnterKey(e: KeyboardEvent, _ele: HTMLInputElement, eleId: string)
   }
 }
 
-function selectItem(event: Event): void {
-  const target = event.target as HTMLElement;
-  if (target && target.tagName === "LI") {
-    const inputField = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
-    if (inputField) {
-      const selectedText = target.textContent;
-      inputField.value = selectedText || "";
-      const ghost = document.getElementById(ELEMENT_IDS.GHOST_INPUT) as HTMLInputElement;
-      if (ghost) ghost.value = "";
 
-      const phoneInput = document.getElementById(ELEMENT_IDS.RECEIVER_PHONE) as HTMLInputElement;
-      if (phoneInput) {
-        phoneInput.focus();
-      }
-    }
-  }
-}
 
 function findSuggestions(inputText: string): void {
   if (checkIfProcessingActive()) {
@@ -1353,6 +1624,7 @@ function monitorURLChanges(): void {
 
 async function initialize(): Promise<void> {
   console.log("[GiaoTich] Bắt đầu khởi tạo...");
+  listenForFillForm();
 
   // Load localStorage settings nếu cần (hiện tại không dùng)
   // const storedUpperCase = localStorage.getItem(STORAGE_KEYS.IS_UPERCASE);
@@ -1542,6 +1814,40 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
   (receiverAddressInput as any)._inputHandlerRef = inputHandler;
   (receiverAddressInput as any)._keydownHandlerRef = keydownHandler;
 }
+/**
+ * Hàm điền địa chỉ và mô phỏng nhấn phím Enter để kích hoạt logic của trang web
+ */
+function fillCorrectedAddress(newAddress: string) {
+    const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+
+    if (addressInput) {
+        // 1. Gán giá trị AI đã sửa vào ô input
+        addressInput.value = newAddress;
+        
+        // 2. Kích hoạt sự kiện để React/Ant Design cập nhật State dữ liệu
+        const inputEvents = ['input', 'change'];
+        inputEvents.forEach(evtName => {
+            addressInput.dispatchEvent(new Event(evtName, { bubbles: true, cancelable: true }));
+        });
+
+        
+        addressInput.focus();
+        var find = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)")
+          if (find) {
+            (find as HTMLButtonElement).click();
+          }
+
+
+        // 5. Hiệu ứng nháy xanh để thông báo
+        addressInput.style.transition = "background-color 0.3s";
+        addressInput.style.backgroundColor = "#e6f7ff";
+        setTimeout(() => {
+            addressInput.style.backgroundColor = "transparent";
+        }, 1000);
+
+        console.log("[GiaoTich] AI filled address and triggered Enter logic.");
+    }
+}
 
 function observeDOMForAddressInput(): void {
   const targetNode = document.body;
@@ -1560,11 +1866,13 @@ function observeDOMForAddressInput(): void {
             if (el.matches && el.matches("#" + ELEMENT_IDS.RECEIVER_ADDRESS)) {
               console.log("[GiaoTich] Phát hiện #receiverAddress được thêm vào:", el);
               attachListenersToInput(el as HTMLInputElement);
+              injectAIButton(); 
             } else if (el.querySelector) {
               const receiverInput = el.querySelector("#" + ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
               if (receiverInput) {
                 console.log("[GiaoTich] Phát hiện #receiverAddress bên trong node được thêm:", receiverInput);
                 attachListenersToInput(receiverInput);
+                 injectAIButton();
               }
             }
           }
@@ -1592,6 +1900,7 @@ function observeDOMForAddressInput(): void {
     }
   };
 
+
   // Lưu observer vào biến global để có thể disconnect sau này
   domObserver = new MutationObserver(callback);
   domObserver.observe(targetNode, config);
@@ -1601,6 +1910,7 @@ function observeDOMForAddressInput(): void {
   if (existingInput) {
     console.log("[GiaoTich] #receiverAddress đã tồn tại khi bắt đầu observer.");
     attachListenersToInput(existingInput);
+     injectAIButton(); 
   }
 }
 

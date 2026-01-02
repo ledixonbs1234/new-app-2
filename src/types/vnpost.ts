@@ -92,7 +92,14 @@ export interface OrderHistoryResponse {
     };
     orderStatusHistoryDtoList: OrderHistoryItem[];
 }
-
+export interface Order {
+    GOC: string;
+    MAUSAC: string;
+    NGUOINHAN: string;
+    DIACHI: string;
+    SDT: string;
+    COD: number;
+}
 export interface ExtraInfo {
     maVanDon: string;
     content: string;

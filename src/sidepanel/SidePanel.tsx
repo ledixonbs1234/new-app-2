@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag } from "antd";
 import type { ColumnsType } from 'antd/es/table';
-import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined } from "@ant-design/icons";
-import { StoredImage } from "../types/vnpost";
+import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined, DollarOutlined, PhoneOutlined, EnvironmentOutlined, RobotOutlined } from "@ant-design/icons";
+import { Order, StoredImage } from "../types/vnpost";
 import { syncAllImages, SyncProgress, listenToFirebaseImages } from "./utils/firebaseSync";
 import { getAllImages, initDB } from "./utils/imageDB";
 import ImageViewer from "./components/ImageViewer";
@@ -38,6 +38,8 @@ const SidePanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>("images");
   const [portalList, setPortalList] = useState<any[]>([]);
   const [portalLoading, setPortalLoading] = useState<boolean>(false);
+  const [aiOrders, setAiOrders] = useState<Order[]>([]);
+  const [aiSelectedIndex, setAiSelectedIndex] = useState<number>(0);
 
   // Refs
   const imageViewerRef = useRef<{
@@ -136,13 +138,80 @@ const SidePanel: React.FC = () => {
     return () => {
       stopListening();
     };
-    return () => {
-      stopListening();
-    };
   }, []);
+  // =================================================================
+  // LISTEN MESSAGES (LOGIC AUTO NEXT ĐƯỢC SỬA ĐỔI)
+  // =================================================================
+  useEffect(() => {
+    const handleRuntimeMessage = (msg: any, _sender: any, sendResponse: any) => {
+      if (msg.type === "SIDEPANEL_PING") { sendResponse({ status: "alive" }); return false; }
 
+      // --- LOGIC TỰ ĐỘNG CHUYỂN DỰA TRÊN TAB ĐANG FOCUS ---
+      if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
+
+        console.log("[SidePanel] Received NEXT signal. Active Tab:", activeTab);
+
+        if (activeTab === "images") {
+          // Logic cũ cho tab Hình ảnh
+          if (selectedIndex < images.length - 1) {
+            handleSelectImage(selectedIndex + 1);
+            sendResponse({ status: "success", type: "image" });
+          } else {
+            sendResponse({ status: "end" });
+          }
+        }
+        else if (activeTab === "ai_orders") {
+          // Logic mới cho tab AI Orders
+          if (aiSelectedIndex < aiOrders.length - 1) {
+            const nextIndex = aiSelectedIndex + 1;
+            handleSelectAIOrder(nextIndex);
+            // Cuộn đến item đó trong danh sách (nếu cần)
+            const el = document.getElementById(`ai-order-${nextIndex}`);
+            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            sendResponse({ status: "success", type: "ai_order" });
+          } else {
+            message.success("Đã hoàn thành danh sách đơn AI!");
+            sendResponse({ status: "end" });
+          }
+        }
+
+        return false;
+      }
+      return false;
+    };
+
+    // ... (window message listener giữ nguyên)
+
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    // ...
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+      // ...
+    };
+  }, [
+    activeTab, // Quan trọng: Re-bind khi đổi tab
+    images, selectedIndex,
+    aiOrders, aiSelectedIndex,
+    // ... dependencies khác
+  ]);
   // Effect riêng cho Portal List Sync
   useEffect(() => {
+    chrome.storage.session.get(["orders", "currentIndex"], (result) => {
+      if (result.orders) {
+        setAiOrders(result.orders);
+      }
+      if (result.currentIndex !== undefined) {
+        setAiSelectedIndex(result.currentIndex);
+      }
+    });
+    const handleStorageUpdate = (msg: any) => {
+      if (msg.type === "STORAGE_UPDATED") {
+        if (msg.payload.orders) setAiOrders(msg.payload.orders);
+        if (msg.payload.currentIndex !== undefined) setAiSelectedIndex(msg.payload.currentIndex);
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleStorageUpdate);
     // 1. Lấy dữ liệu ban đầu
     chrome.runtime.sendMessage({ type: "GET_PORTAL_LIST" }, (res) => {
       if (res && res.status === 'success') {
@@ -160,7 +229,192 @@ const SidePanel: React.FC = () => {
     chrome.runtime.onMessage.addListener(handlePortalUpdate);
     return () => chrome.runtime.onMessage.removeListener(handlePortalUpdate);
   }, []);
+  // =================================================================
+  // RENDER AI TAB CONTENT (Cập nhật hàm này)
+  // =================================================================
+  const renderAIOrdersTab = () => {
+    if (aiOrders.length === 0) {
+      return <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>Chưa có dữ liệu. Hãy dùng "Dùng AI" ở Popup.</div>;
+    }
 
+    return (
+      <div 
+        id="ai-orders-list"
+        style={{ 
+          height: 'calc(100vh - 110px)', 
+          overflowY: 'auto', 
+          padding: '8px', 
+          background: '#f0f2f5',
+          paddingBottom: '20px'
+        }}
+      >
+        {/* --- PHẦN THỐNG KÊ TỔNG HỢP --- */}
+        <div style={{ 
+          background: '#fff', 
+          padding: '8px 12px', 
+          borderRadius: '8px', 
+          marginBottom: '10px', 
+          boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+          border: '1px solid #e8e8e8'
+        }}>
+          <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px', fontWeight: 600 }}>
+            TỔNG HỢP ({aiOrders.length} Đơn):
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            {Object.entries(colorSummary).map(([key, data]) => {
+              if (data.count === 0) return null; // Chỉ hiện màu có số lượng > 0
+              return (
+                <Tag 
+                  key={key} 
+                  color={data.color} 
+                  style={{ 
+                    margin: 0, 
+                    fontWeight: 'bold', 
+                    color: key === 'TRANG' ? '#333' : '#fff', // Màu trắng thì chữ đen cho dễ nhìn
+                    border: key === 'TRANG' ? '1px solid #d9d9d9' : 'none'
+                  }}
+                >
+                  {data.count} {data.label}
+                </Tag>
+              );
+            })}
+            {/* Nếu không có màu nào được tìm thấy */}
+            {Object.values(colorSummary).every(x => x.count === 0) && (
+              <span style={{ fontSize: '12px', color: '#ccc', fontStyle: 'italic' }}>Chưa xác định màu</span>
+            )}
+          </div>
+        </div>
+
+        {/* --- DANH SÁCH ĐƠN HÀNG (GIỮ NGUYÊN) --- */}
+        <div style={{ marginBottom: 8, padding: '0 8px', display: 'flex', justifyContent: 'space-between', color: '#666' }}>
+          <span>Danh sách chi tiết:</span>
+          <span>Đang chọn: <b>{aiSelectedIndex + 1}</b></span>
+        </div>
+        
+        {aiOrders.map((order, idx) => {
+          const isSelected = idx === aiSelectedIndex;
+          
+          // Logic màu sắc từng item (giữ nguyên code cũ của bạn)
+          const ms = order.MAUSAC ? order.MAUSAC.toUpperCase() : "";
+          const detectedColors: string[] = [];
+          if (ms.includes("DO")) detectedColors.push("#ff4d4f");
+          if (ms.includes("XANH")) detectedColors.push("#1890ff");
+          if (ms.includes("VANG")) detectedColors.push("#faad14");
+          if (ms.includes("TIM")) detectedColors.push("#722ed1");
+          if (ms.includes("DEN")) detectedColors.push("#333333");
+          if (ms.includes("HONG")) detectedColors.push("#eb2f96");
+          if (ms.includes("TRANG")) detectedColors.push("#bfbfbf");
+
+          let tagStyle: React.CSSProperties = { margin: 0, fontSize: '11px', fontWeight: 700, border: 'none' };
+          if (detectedColors.length > 1) {
+            tagStyle.background = `linear-gradient(135deg, ${detectedColors.join(', ')})`;
+            tagStyle.color = 'white';
+            tagStyle.textShadow = '0 1px 1px rgba(0,0,0,0.5)';
+          } else if (detectedColors.length === 1) {
+            tagStyle.backgroundColor = detectedColors[0];
+            tagStyle.color = (detectedColors[0] === "#bfbfbf") ? '#333' : 'white';
+          } else {
+            tagStyle.backgroundColor = '#f0f0f0';
+            tagStyle.color = '#595959';
+            tagStyle.border = '1px solid #d9d9d9';
+          }
+
+          return (
+            <div
+              key={idx}
+              id={`ai-order-${idx}`}
+              onClick={() => handleSelectAIOrder(idx)}
+              style={{
+                background: isSelected ? '#e6f7ff' : '#fff',
+                border: isSelected ? '1px solid #1890ff' : '1px solid #d9d9d9',
+                borderRadius: '8px',
+                padding: '10px',
+                marginBottom: '8px',
+                cursor: 'pointer',
+                boxShadow: isSelected ? '0 2px 8px rgba(24, 144, 255, 0.2)' : '0 1px 2px rgba(0,0,0,0.05)',
+                transition: 'all 0.2s',
+                scrollMarginTop: '10px'
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <strong style={{ color: isSelected ? '#1890ff' : '#333', fontSize: '13px', marginRight: '8px', wordBreak: 'break-word' }}>
+                  #{idx + 1} {order.NGUOINHAN}
+                </strong>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
+                  {order.MAUSAC && (
+                    <Tag style={tagStyle}>
+                      {order.MAUSAC}
+                    </Tag>
+                  )}
+                  {order.COD > 0 && (
+                    <Tag color="green" style={{ margin: 0, fontSize: '11px' }}>
+                      <DollarOutlined /> {order.COD.toLocaleString()}
+                    </Tag>
+                  )}
+                </div>
+              </div>
+              
+              <div style={{ fontSize: '12px', color: '#666', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <PhoneOutlined /> {order.SDT}
+              </div>
+              
+              <div style={{ fontSize: '12px', color: '#666', marginTop: 4, display: 'flex', gap: 6 }}>
+                <EnvironmentOutlined style={{ marginTop: 3, flexShrink: 0 }} /> 
+                <span style={{ lineHeight: '1.4' }}>{order.DIACHI}</span>
+              </div>
+
+              <div style={{ 
+                marginTop: 6, 
+                padding: 6, 
+                background: '#fafafa', 
+                borderRadius: 4, 
+                fontSize: '11px', 
+                color: '#999',
+                fontStyle: 'italic',
+                borderLeft: '2px solid #ddd'
+              }}>
+                "{order.GOC}"
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+  // =================================================================
+  // LOGIC TÍNH TỔNG MÀU SẮC (Thêm đoạn này vào trong component SidePanel)
+  // =================================================================
+  const colorSummary = useMemo(() => {
+    // Định nghĩa bảng màu và biến đếm
+    const stats: Record<string, { count: number; color: string; label: string }> = {
+      DO:    { count: 0, color: "#ff4d4f", label: "Đỏ" },
+      XANH:  { count: 0, color: "#1890ff", label: "Xanh" },
+      TRANG: { count: 0, color: "#bfbfbf", label: "Trắng" },
+      VANG:  { count: 0, color: "#faad14", label: "Vàng" },
+      TIM:   { count: 0, color: "#722ed1", label: "Tím" },
+      DEN:   { count: 0, color: "#333333", label: "Đen" },
+      HONG:  { count: 0, color: "#eb2f96", label: "Hồng" },
+    };
+
+    aiOrders.forEach(order => {
+      if (!order.MAUSAC) return;
+      const ms = order.MAUSAC.toUpperCase();
+
+      // Quét từng key màu để đếm số lần xuất hiện
+      // Ví dụ: "DODO" sẽ khớp regex /DO/g 2 lần -> cộng 2
+      Object.keys(stats).forEach(key => {
+        const regex = new RegExp(key, "g");
+        const matches = ms.match(regex);
+        if (matches) {
+          stats[key].count += matches.length;
+        }
+      });
+    });
+
+    return stats;
+  }, [aiOrders]); // Chỉ tính lại khi danh sách đơn thay đổi
+;
   const loadImages = async () => {
     try {
       setLoading(true);
@@ -259,6 +513,29 @@ const SidePanel: React.FC = () => {
       chrome.tabs.sendMessage(tab.id, { type: "FILL_TT_NUMBER", payload: { maHieu } });
     }
   };
+
+  const handleSelectAIOrder = async (index: number) => {
+    if (index < 0 || index >= aiOrders.length) return;
+
+    setAiSelectedIndex(index);
+    // Lưu lại index vào session để đồng bộ popup (nếu cần)
+    chrome.storage.session.set({ currentIndex: index });
+
+    const order = aiOrders[index];
+
+    // Gửi lệnh điền form xuống Content Script
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      chrome.tabs.sendMessage(tab.id, {
+        type: "FILL_FORM_DATA_AI",
+        payload: order
+      });
+
+      // Focus vào tab để user có thể nhập tiếp hoặc lưu
+      chrome.tabs.update(tab.id, { active: true });
+    }
+  };
+
 
   const handleClearAllImages = () => {
     Modal.confirm({
@@ -517,6 +794,11 @@ const SidePanel: React.FC = () => {
                   </div>
                 </div>
               )
+            },
+            {
+              key: 'ai_orders',
+              label: <span><RobotOutlined /> AI Orders</span>,
+              children: renderAIOrdersTab()
             },
             {
               key: 'portal',
