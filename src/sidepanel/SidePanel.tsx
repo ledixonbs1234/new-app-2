@@ -52,8 +52,9 @@ const SidePanel: React.FC = () => {
     getCurrentZoom: () => ZoomPreset;
     resetToDefault: () => void;
   }>(null);
-
+const isImagesLoadedRef = useRef(false);
   const focusRequestIdRef = useRef(0);
+  const hasSyncedRef = useRef(false); 
 
   // Ref quan trọng để theo dõi Field nào đang được Active
   const currentFocusedFieldRef = useRef<FieldGroup>("NONE");
@@ -132,25 +133,43 @@ const SidePanel: React.FC = () => {
   // INIT & LOAD DATA
   // =================================================================
   useEffect(() => {
-    // 1. Load data từ IDB ngay lập tức (hiển thị cái đang có)
-    loadImages();
+    
 
-    // 2. Lắng nghe tín hiệu từ Background
-    // Khi Background báo "IMAGES_UPDATED", ta chỉ cần load lại từ IDB
-    const stopListening = listenToFirebaseImages(async () => {
-      // Data đã nằm trong IDB rồi, chỉ cần query ra
-      const updated = await getAllImages();
-      setImages(updated);
-      setLoading(false);
+   const stopListening = listenToFirebaseImages(async () => {
+      if (isImagesLoadedRef.current) {
+        console.log("[SidePanel] Background báo update -> Reloading images...");
+        const updated = await getAllImages();
+        setImages(updated);
+        setLoading(false);
+      }
     });
 
     // 3. Trigger một lần sync thủ công khi mở panel để đảm bảo data mới nhất
-    syncAllImages();
+    // syncAllImages();
 
     return () => {
       stopListening();
     };
   }, []);
+
+  // 2. LAZY LOAD IMAGES: Chỉ tải khi tab "images" được active
+  useEffect(() => {
+    if (activeTab === 'images' && !isImagesLoadedRef.current) {
+      console.log("[SidePanel] Tab Hình Ảnh active -> Bắt đầu tải dữ liệu...");
+      
+      // Đánh dấu đã tải để không tải lại khi chuyển tab qua lại
+      isImagesLoadedRef.current = true;
+
+      // 1. Load từ DB
+      loadImages();
+
+      // 2. Trigger Sync nếu chưa sync
+      if (!hasSyncedRef.current) {
+        syncAllImages();
+        hasSyncedRef.current = true;
+      }
+    }
+  }, [activeTab]); 
   // =================================================================
   // LISTEN MESSAGES (LOGIC AUTO NEXT ĐƯỢC SỬA ĐỔI)
   // =================================================================
@@ -217,7 +236,7 @@ const SidePanel: React.FC = () => {
     // ... dependencies khác
   ]);
 
-// =================================================================
+  // =================================================================
   // SINGLE MESSAGE LISTENER (GỘP TẤT CẢ VÀO ĐÂY ĐỂ TRÁNH XUNG ĐỘT)
   // =================================================================
   useEffect(() => {
@@ -231,13 +250,13 @@ const SidePanel: React.FC = () => {
 
       // --- NEXT ITEM (XỬ LÝ DỰA TRÊN TAB ĐANG MỞ) ---
       if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
-        
+
         // Cơ chế chặn spam (Throttle) - 1 giây
         const now = Date.now();
         if (now - lastAutoNextTimeRef.current < 1000) {
-            console.warn("[SidePanel] ⚠️ Ignored rapid request (Throttle).");
-            sendResponse({ status: "ignored_too_fast" });
-            return false;
+          console.warn("[SidePanel] ⚠️ Ignored rapid request (Throttle).");
+          sendResponse({ status: "ignored_too_fast" });
+          return false;
         }
         lastAutoNextTimeRef.current = now;
 
@@ -251,17 +270,17 @@ const SidePanel: React.FC = () => {
           } else {
             sendResponse({ status: "end" });
           }
-        } 
+        }
         else if (activeTab === "ai_orders") {
           // CHỈ chuyển đơn AI nếu đang ở tab AI Orders
           if (aiSelectedIndex < aiOrders.length - 1) {
             const nextIndex = aiSelectedIndex + 1;
             handleSelectAIOrder(nextIndex);
-            
+
             // Cuộn tới item
             setTimeout(() => {
-                const el = document.getElementById(`ai-order-${nextIndex}`);
-                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              const el = document.getElementById(`ai-order-${nextIndex}`);
+              el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 100);
 
             sendResponse({ status: "success", type: "ai_order" });
@@ -270,19 +289,19 @@ const SidePanel: React.FC = () => {
             sendResponse({ status: "end" });
           }
         } else {
-            console.log("[SidePanel] Ignored NEXT signal (Tab not supported).");
+          console.log("[SidePanel] Ignored NEXT signal (Tab not supported).");
         }
 
         return false; // Sync response
       }
-      
+
       // --- CÁC MESSAGE KHÁC ---
       if (msg.type === "PORTAL_LIST_UPDATED") {
         setPortalList(msg.data || []);
       }
-      
+
       if (msg.type === "IMAGES_UPDATED") {
-         loadImages(); // Gọi hàm load lại ảnh
+        loadImages(); // Gọi hàm load lại ảnh
       }
 
       return false;
@@ -298,8 +317,8 @@ const SidePanel: React.FC = () => {
           const fieldGroup: FieldGroup = msg.payload.fieldGroup;
           // Chỉ apply zoom nếu đang ở tab images
           if (activeTab === "images") {
-             console.log(`[SidePanel] 🔍 Smart Zoom: ${fieldGroup}`);
-             applySmartZoom(fieldGroup);
+            console.log(`[SidePanel] 🔍 Smart Zoom: ${fieldGroup}`);
+            applySmartZoom(fieldGroup);
           }
         }
       }
@@ -317,7 +336,7 @@ const SidePanel: React.FC = () => {
 
   }, [
     activeTab,          // QUAN TRỌNG: Re-bind khi đổi tab để logic if(activeTab) đúng
-    images, selectedIndex, 
+    images, selectedIndex,
     aiOrders, aiSelectedIndex,
     autoZoomEnabled, savedPresets
   ]);
@@ -572,7 +591,7 @@ const SidePanel: React.FC = () => {
 
       // 3. Gửi tín hiệu cho Background bắt đầu đồng bộ ảnh MỚI
       // Lưu ý: Hàm này giờ chỉ gửi tin nhắn rồi return ngay, KHÔNG chờ tải xong
-      await syncAllImages();
+      // await syncAllImages();
 
       // Nếu chưa có ảnh nào (lần đầu cài), ta vẫn để loading quay
       // Việc cập nhật ảnh mới sẽ do useEffect (listener) đảm nhận khi Background báo về
@@ -807,14 +826,6 @@ const SidePanel: React.FC = () => {
   // RENDER
   // =================================================================
 
-  if (loading && images.length === 0) return <div style={{ padding: 20, textAlign: 'center' }}><Spin size="large" /><div>Đang tải...</div></div>;
-  if (images.length === 0) return (
-    <div style={{ padding: 20, textAlign: 'center' }}>
-      <h3>Chưa có hình ảnh</h3>
-      <Button icon={<ReloadOutlined />} onClick={handleRefresh}>Làm mới</Button>
-    </div>
-  );
-
   const selectedImage = images[selectedIndex];
 
   return (
@@ -855,37 +866,6 @@ const SidePanel: React.FC = () => {
           tabBarStyle={{ margin: 0, padding: '0 8px', background: '#f5f5f5' }}
           items={[
             {
-              key: 'images',
-              label: 'Hình Ảnh',
-              children: (
-                <div className="sidepanel-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                  {/* Image Viewer (Upper part) */}
-                  <div className="image-viewer-section" style={{ flex: '1 1 60%', position: 'relative', borderBottom: '1px solid #ddd' }}>
-                    <ImageViewer
-                      ref={imageViewerRef}
-                      image={selectedImage}
-                      onTransformChange={handleTransformChange}
-                    />
-                  </div>
-
-                  {/* Thumbnails (Lower part) */}
-                  <div className="thumbnail-gallery-section" style={{ flex: '0 0 160px', overflowY: 'auto', background: '#fafafa' }}>
-                    <ThumbnailGallery
-                      images={images}
-                      selectedIndex={selectedIndex}
-                      onSelectImage={handleSelectImage}
-                      shouldScrollToSelected={shouldScrollToSelected}
-                    />
-                  </div>
-                </div>
-              )
-            },
-            {
-              key: 'ai_orders',
-              label: <span><RobotOutlined /> AI Orders</span>,
-              children: renderAIOrdersTab()
-            },
-            {
               key: 'portal',
               label: 'Portal Auto',
               children: (
@@ -908,7 +888,53 @@ const SidePanel: React.FC = () => {
                   {portalList.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>Chưa có dữ liệu auto. Hãy chạy lệnh từ App.</div>}
                 </div>
               )
-            }
+            },
+            {
+              key: 'images',
+              label: 'Hình Ảnh',
+              children: (
+                <div className="sidepanel-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  {/* LOGIC LOADING RIÊNG CHO TAB HÌNH ẢNH */}
+                  {(loading && images.length === 0) ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                      <Spin size="large" />
+                      <div style={{ marginTop: 10, color: '#888' }}>Đang tải hình ảnh...</div>
+                    </div>
+                  ) : images.length === 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                      <h3 style={{ color: '#999' }}>Chưa có hình ảnh</h3>
+                      <Button icon={<ReloadOutlined />} onClick={handleRefresh} style={{ marginTop: 10 }}>Làm mới</Button>
+                    </div>
+                  ) : (
+                    /* GIAO DIỆN HÌNH ẢNH CHÍNH */
+                    <>
+                      <div className="image-viewer-section" style={{ flex: '1 1 60%', position: 'relative', borderBottom: '1px solid #ddd' }}>
+                        <ImageViewer
+                          ref={imageViewerRef}
+                          image={images[selectedIndex]} // Lưu ý: dùng images[selectedIndex] thay vì biến selectedImage để an toàn
+                          onTransformChange={handleTransformChange}
+                        />
+                      </div>
+
+                      <div className="thumbnail-gallery-section" style={{ flex: '0 0 160px', overflowY: 'auto', background: '#fafafa' }}>
+                        <ThumbnailGallery
+                          images={images}
+                          selectedIndex={selectedIndex}
+                          onSelectImage={handleSelectImage}
+                          shouldScrollToSelected={shouldScrollToSelected}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )
+            },
+            {
+              key: 'ai_orders',
+              label: <span><RobotOutlined /> AI Orders</span>,
+              children: renderAIOrdersTab()
+            },
+            
           ]}
         />
       </div>
