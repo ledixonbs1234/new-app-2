@@ -11,7 +11,7 @@ import { delay } from "./utils";
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
 // ==========================================================================
-
+let requestNextImageTimer: NodeJS.Timeout | null = null;
 let addressData: any[] = []; // Lưu trữ dữ liệu địa chỉ chính
 let isSaveKhoiLuong = "";
 let IsChooseSusget = false;
@@ -56,7 +56,8 @@ const FIELD_GROUPS: Record<string, FieldGroup> = {
   [ELEMENT_IDS.WEIGHT]: "WEIGHT",
   [ELEMENT_IDS.MONEY]: "MONEY",
 };
-
+const DIA_BAN_PARENT_SELECTOR = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(4)";
+const CUSTOM_GOC_ID = "custom-goc-display-text";
 // Key codes
 const KEY_CODES = {
   TAB: 9,
@@ -125,7 +126,59 @@ function waitForElmGiaoTich(selector: string, timeout: number = 5000): Promise<H
     observer.observe(document.body, { childList: true, subtree: true });
   });
 }
+/**
+ * Hàm hiển thị text GOC vào cuối element Địa bàn
+ */
+function displayGocData(gocContent: string) {
+  // Tìm element cha
+  const parentElement = document.querySelector(DIA_BAN_PARENT_SELECTOR) as HTMLElement;
 
+  if (!parentElement) {
+    console.warn("[GiaoTich] Không tìm thấy element cha Địa bàn để chèn GOC.");
+    return;
+  }
+
+  // Kiểm tra xem đã có element hiển thị GOC chưa
+  let gocElement = document.getElementById(CUSTOM_GOC_ID);
+
+  if (!gocElement) {
+    // Nếu chưa có, tạo mới
+    gocElement = document.createElement("div");
+    gocElement.id = CUSTOM_GOC_ID;
+
+    // Style cho đẹp
+    Object.assign(gocElement.style, {
+      width: "100%", // Xuống dòng
+      marginTop: "5px",
+      marginLeft: "10px", // Căn lề giống các input radio
+      padding: "5px 10px",
+      backgroundColor: "#f9f0ff", // Màu nền tím nhạt
+      border: "1px dashed #722ed1", // Viền tím
+      borderRadius: "4px",
+      color: "#531dab", // Màu chữ tím đậm
+      fontSize: "13px",
+      fontWeight: "500",
+      fontFamily: "monospace", // Font code để dễ nhìn
+      whiteSpace: "pre-wrap", // Giữ định dạng xuống dòng nếu có
+      display: "block"
+    });
+
+    // Chèn vào cuối parent
+    parentElement.appendChild(gocElement);
+
+    // Vì parent là MuiGrid (flex), để element này xuống dòng đẹp, ta có thể set parent flex-wrap
+    parentElement.style.flexWrap = "wrap";
+  }
+
+  // Cập nhật nội dung
+  gocElement.textContent = `📋 GỐC: ${gocContent}`;
+
+  // Hiệu ứng nháy để báo hiệu cập nhật
+  gocElement.style.backgroundColor = "#d3adf7";
+  setTimeout(() => {
+    gocElement!.style.backgroundColor = "#f9f0ff";
+  }, 500);
+}
 function debounce(func: Function, delay: number): (...args: any[]) => void {
   let timer: NodeJS.Timeout;
   return function (this: any, ...args: any[]) {
@@ -196,19 +249,26 @@ function notifySidePanelZoom(fieldGroup: FieldGroup): void {
  * Gửi message đến side panel để chuyển sang ảnh tiếp theo
  */
 function requestNextImage(): void {
-  if (!isSidePanelOpen()) {
-    console.log("[GiaoTich] Side panel not open, skip next image request");
-    return;
-  }
+  // Clear timer cũ nếu có
+  if (requestNextImageTimer) clearTimeout(requestNextImageTimer);
 
-  console.log("[GiaoTich] 🖼️ Requesting side panel to show next image");
-  chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
-    if (chrome.runtime.lastError) {
-      console.log("[GiaoTich] Error requesting next image:", chrome.runtime.lastError.message);
-    } else {
-      console.log("[GiaoTich] Next image request sent successfully");
+  // Debounce: Chỉ gửi lệnh sau khi yên tĩnh 300ms
+  requestNextImageTimer = setTimeout(() => {
+    if (!isSidePanelOpen()) {
+      console.log("[GiaoTich] Side panel not open, skip next image request");
+      return;
     }
-  });
+
+    console.log("[GiaoTich] 🖼️ Requesting side panel to show next image");
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
+      if (chrome.runtime.lastError) {
+        // Bỏ qua lỗi nếu sidepanel đóng đột ngột
+        // console.log("[GiaoTich] Error requesting next image:", chrome.runtime.lastError.message);
+      } else {
+        console.log("[GiaoTich] Next image request sent successfully");
+      }
+    });
+  }, 300); // Tăng delay lên 300ms để gộp các event
 }
 
 // Thêm ID cho nút AI để tránh trùng lặp
@@ -218,44 +278,44 @@ const AI_OVERLAY_ID = "ai-result-overlay";
  * Hiển thị Overlay AI với giao diện Card hiện đại
  */
 function showAIResultOverlay(text: string, isError: boolean = false) {
-    // Xóa overlay cũ nếu có
-    const oldOverlay = document.getElementById(AI_OVERLAY_ID);
-    if (oldOverlay) oldOverlay.remove();
+  // Xóa overlay cũ nếu có
+  const oldOverlay = document.getElementById(AI_OVERLAY_ID);
+  if (oldOverlay) oldOverlay.remove();
 
-    // Container chính (Overlay layer)
-    const container = document.createElement("div");
-    container.id = AI_OVERLAY_ID;
-    Object.assign(container.style, {
-        position: "fixed",
-        top: "20px",
-        left: "50%",
-        transform: "translateX(-50%) translateY(-20px)",
-        zIndex: "2147483647",
-        opacity: "0",
-        transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
-    });
+  // Container chính (Overlay layer)
+  const container = document.createElement("div");
+  container.id = AI_OVERLAY_ID;
+  Object.assign(container.style, {
+    position: "fixed",
+    top: "20px",
+    left: "50%",
+    transform: "translateX(-50%) translateY(-20px)",
+    zIndex: "2147483647",
+    opacity: "0",
+    transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
+  });
 
-    // Card nội dung
-    const card = document.createElement("div");
-    Object.assign(card.style, {
-        backgroundColor: "#ffffff",
-        borderRadius: "12px",
-        boxShadow: "0 10px 25px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)",
-        padding: "16px 20px",
-        minWidth: "350px",
-        maxWidth: "500px",
-        borderLeft: isError ? "5px solid #ff4d4f" : "5px solid #8a2be2",
-        display: "flex",
-        flexDirection: "column",
-        gap: "12px"
-    });
+  // Card nội dung
+  const card = document.createElement("div");
+  Object.assign(card.style, {
+    backgroundColor: "#ffffff",
+    borderRadius: "12px",
+    boxShadow: "0 10px 25px rgba(0,0,0,0.2), 0 0 1px rgba(0,0,0,0.1)",
+    padding: "16px 20px",
+    minWidth: "350px",
+    maxWidth: "500px",
+    borderLeft: isError ? "5px solid #ff4d4f" : "5px solid #8a2be2",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
+  });
 
-    // Header của Card
-    const header = document.createElement("div");
-    header.style.display = "flex";
-    header.style.justifyContent = "space-between";
-    header.style.alignItems = "center";
-    header.innerHTML = `
+  // Header của Card
+  const header = document.createElement("div");
+  header.style.display = "flex";
+  header.style.justifyContent = "space-between";
+  header.style.alignItems = "center";
+  header.innerHTML = `
         <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 20px;">${isError ? '⚠️' : '🤖'}</span>
             <span style="font-weight: 700; color: #333; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">
@@ -264,116 +324,116 @@ function showAIResultOverlay(text: string, isError: boolean = false) {
         </div>
     `;
 
-    // Nút đóng (X)
-    const closeBtn = document.createElement("button");
-    closeBtn.innerHTML = "✕";
-    Object.assign(closeBtn.style, {
-        border: "none",
-        background: "none",
-        cursor: "pointer",
-        color: "#999",
-        fontSize: "16px",
-        padding: "4px"
+  // Nút đóng (X)
+  const closeBtn = document.createElement("button");
+  closeBtn.innerHTML = "✕";
+  Object.assign(closeBtn.style, {
+    border: "none",
+    background: "none",
+    cursor: "pointer",
+    color: "#999",
+    fontSize: "16px",
+    padding: "4px"
+  });
+  closeBtn.onclick = () => {
+    container.style.opacity = "0";
+    container.style.transform = "translateX(-50%) translateY(-20px)";
+    setTimeout(() => container.remove(), 400);
+  };
+  header.appendChild(closeBtn);
+
+  // Nội dung kết quả
+  const content = document.createElement("div");
+  Object.assign(content.style, {
+    color: "#444",
+    fontSize: "15px",
+    lineHeight: "1.5",
+    fontWeight: "500",
+    backgroundColor: isError ? "#fff1f0" : "#f9f5ff",
+    padding: "12px",
+    borderRadius: "8px",
+    border: isError ? "1px solid #ffccc7" : "1px solid #e9d8fd",
+    whiteSpace: "pre-wrap"
+  });
+  content.textContent = text;
+
+  card.appendChild(header);
+  card.appendChild(content);
+
+  // Nút chức năng (Chỉ hiện khi không phải lỗi)
+  if (!isError && text.length > 5 && !text.includes("Đang phân tích")) {
+    const actionArea = document.createElement("div");
+    actionArea.style.display = "flex";
+    actionArea.style.justifyContent = "flex-end";
+
+    const applyBtn = document.createElement("button");
+    Object.assign(applyBtn.style, {
+      backgroundColor: "#8a2be2",
+      color: "white",
+      border: "none",
+      borderRadius: "6px",
+      padding: "8px 16px",
+      fontSize: "13px",
+      fontWeight: "600",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      gap: "6px",
+      transition: "background-color 0.2s"
     });
-    closeBtn.onclick = () => {
-        container.style.opacity = "0";
-        container.style.transform = "translateX(-50%) translateY(-20px)";
-        setTimeout(() => container.remove(), 400);
-    };
-    header.appendChild(closeBtn);
-
-    // Nội dung kết quả
-    const content = document.createElement("div");
-    Object.assign(content.style, {
-        color: "#444",
-        fontSize: "15px",
-        lineHeight: "1.5",
-        fontWeight: "500",
-        backgroundColor: isError ? "#fff1f0" : "#f9f5ff",
-        padding: "12px",
-        borderRadius: "8px",
-        border: isError ? "1px solid #ffccc7" : "1px solid #e9d8fd",
-        whiteSpace: "pre-wrap"
-    });
-    content.textContent = text;
-
-    card.appendChild(header);
-    card.appendChild(content);
-
-    // Nút chức năng (Chỉ hiện khi không phải lỗi)
-    if (!isError && text.length > 5 && !text.includes("Đang phân tích")) {
-        const actionArea = document.createElement("div");
-        actionArea.style.display = "flex";
-        actionArea.style.justifyContent = "flex-end";
-        
-        const applyBtn = document.createElement("button");
-        Object.assign(applyBtn.style, {
-            backgroundColor: "#8a2be2",
-            color: "white",
-            border: "none",
-            borderRadius: "6px",
-            padding: "8px 16px",
-            fontSize: "13px",
-            fontWeight: "600",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-            transition: "background-color 0.2s"
-        });
-        applyBtn.innerHTML = `
+    applyBtn.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
             SỬ DỤNG ĐỊA CHỈ NÀY
         `;
-        
-        applyBtn.onmouseover = () => applyBtn.style.backgroundColor = "#7b27cc";
-        applyBtn.onmouseout = () => applyBtn.style.backgroundColor = "#8a2be2";
-        
-        applyBtn.onclick = () => {
-            fillCorrectedAddress(text);
-            closeBtn.click(); // Đóng overlay sau khi điền
-        };
-        
-        actionArea.appendChild(applyBtn);
-        card.appendChild(actionArea);
-    }
 
-    container.appendChild(card);
-    document.body.appendChild(container);
+    applyBtn.onmouseover = () => applyBtn.style.backgroundColor = "#7b27cc";
+    applyBtn.onmouseout = () => applyBtn.style.backgroundColor = "#8a2be2";
 
-    // Trigger animation hiện lên
+    applyBtn.onclick = () => {
+      fillCorrectedAddress(text);
+      closeBtn.click(); // Đóng overlay sau khi điền
+    };
+
+    actionArea.appendChild(applyBtn);
+    card.appendChild(actionArea);
+  }
+
+  container.appendChild(card);
+  document.body.appendChild(container);
+
+  // Trigger animation hiện lên
+  setTimeout(() => {
+    container.style.opacity = "1";
+    container.style.transform = "translateX(-50%) translateY(0)";
+  }, 10);
+
+  // Tự động tắt sau 15s (tăng thêm thời gian để kịp đọc)
+  if (!text.includes("Đang phân tích")) {
     setTimeout(() => {
-        container.style.opacity = "1";
-        container.style.transform = "translateX(-50%) translateY(0)";
-    }, 10);
-
-    // Tự động tắt sau 15s (tăng thêm thời gian để kịp đọc)
-    if (!text.includes("Đang phân tích")) {
-        setTimeout(() => {
-            if (document.body.contains(container)) {
-                closeBtn.click();
-            }
-        }, 15000);
-    }
+      if (document.body.contains(container)) {
+        closeBtn.click();
+      }
+    }, 15000);
+  }
 }
 
 /**
  * Nâng cấp hàm injectAIButton để xử lý mượt mà hơn
  */
 function injectAIButton() {
-    if (document.getElementById(AI_BUTTON_ID)) return;
+  if (document.getElementById(AI_BUTTON_ID)) return;
 
-    const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
-    if (!addressInput) return;
+  const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+  if (!addressInput) return;
 
-    const parentContainer = addressInput.parentNode as HTMLElement;
-    const siblingButton = addressInput.nextElementSibling;
+  const parentContainer = addressInput.parentNode as HTMLElement;
+  const siblingButton = addressInput.nextElementSibling;
 
-    const aiBtn = document.createElement("button");
-    aiBtn.id = AI_BUTTON_ID;
-    aiBtn.type = "button";
-    aiBtn.className = "btn btn-primary btn-sm";
-    Object.assign(aiBtn.style, {
+  const aiBtn = document.createElement("button");
+  aiBtn.id = AI_BUTTON_ID;
+  aiBtn.type = "button";
+  aiBtn.className = "btn btn-primary btn-sm";
+  Object.assign(aiBtn.style, {
     marginLeft: "4px",
     backgroundColor: "#8a2be2",
     borderColor: "#8a2be2",
@@ -384,10 +444,10 @@ function injectAIButton() {
     borderRadius: "4px", // Bo góc giống các nút khác của hệ thống
     boxShadow: "0 2px 4px rgba(138, 43, 226, 0.3)",
     cursor: "pointer"
-});
-    aiBtn.title = "Sửa lỗi địa chỉ bằng AI (Gemini)";
-    
-    aiBtn.innerHTML = `
+  });
+  aiBtn.title = "Sửa lỗi địa chỉ bằng AI (Gemini)";
+
+  aiBtn.innerHTML = `
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         <!-- Ngôi sao chính -->
@@ -400,38 +460,38 @@ function injectAIButton() {
         </svg>
     `;
 
-    aiBtn.addEventListener("click", (e) => {
-        e.preventDefault();
-        const address = addressInput.value.trim();
-        
-        if (!address) {
-            showAIResultOverlay("Vui lòng nhập địa chỉ cần sửa lỗi!", true);
-            return;
-        }
+  aiBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    const address = addressInput.value.trim();
 
-        showAIResultOverlay("Đang phân tích địa chỉ bằng AI...");
-
-        chrome.runtime.sendMessage({
-            type: "CORRECT_ADDRESS",
-            payload: { address }
-        }, (response) => {
-            if (chrome.runtime.lastError) {
-                showAIResultOverlay("Lỗi kết nối Extension: " + chrome.runtime.lastError.message, true);
-                return;
-            }
-            if (response && response.status === "success") {
-                showAIResultOverlay(response.result);
-            } else {
-                showAIResultOverlay("Lỗi: " + (response?.error || "Không có phản hồi từ AI"), true);
-            }
-        });
-    });
-
-    if (siblingButton) {
-        parentContainer.insertBefore(aiBtn, siblingButton.nextSibling);
-    } else {
-        parentContainer.appendChild(aiBtn);
+    if (!address) {
+      showAIResultOverlay("Vui lòng nhập địa chỉ cần sửa lỗi!", true);
+      return;
     }
+
+    showAIResultOverlay("Đang phân tích địa chỉ bằng AI...");
+
+    chrome.runtime.sendMessage({
+      type: "CORRECT_ADDRESS",
+      payload: { address }
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        showAIResultOverlay("Lỗi kết nối Extension: " + chrome.runtime.lastError.message, true);
+        return;
+      }
+      if (response && response.status === "success") {
+        showAIResultOverlay(response.result);
+      } else {
+        showAIResultOverlay("Lỗi: " + (response?.error || "Không có phản hồi từ AI"), true);
+      }
+    });
+  });
+
+  if (siblingButton) {
+    parentContainer.insertBefore(aiBtn, siblingButton.nextSibling);
+  } else {
+    parentContainer.appendChild(aiBtn);
+  }
 }
 
 // Thêm vào hàm monitorProcessingStatus hoặc tạo mới trong initialize
@@ -453,7 +513,7 @@ function listenForFillForm() {
           nameInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        
+
 
         // 3. Điền Địa Chỉ (Quan trọng: cần trigger sự kiện để React nhận diện)
         const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
@@ -462,7 +522,7 @@ function listenForFillForm() {
           addressInput.dispatchEvent(new Event('input', { bubbles: true }));
           addressInput.dispatchEvent(new Event('change', { bubbles: true }));
           // Focus để kích hoạt các script gợi ý nếu cần
-          addressInput.focus(); 
+          addressInput.focus();
           addressInput.dispatchEvent(new Event('blur'));
           var find = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)")
           if (find) {
@@ -478,12 +538,16 @@ function listenForFillForm() {
           // Trigger logic lưu cache nếu có
           phoneInput.dispatchEvent(new Event('blur'));
         }
+        if (order.GOC) {
+          displayGocData(order.GOC);
+        }
+        setChiDanPhat("- Liên hệ người nhận trước khi phát.\n- CHO KHÁCH XEM HÀNG, Khách xem hàng không nhận không thu phí hủy ĐH \n- Phát một phần đơn hàng (DOP2) khi có yêu cầu.\n - Hoàn trả một phần đơn hàng theo BKC: 59CVOTHITHUAN319.\n- Phát không thành công vui lòng liên hệ với người gửi: 0366 576 671 \n- Liên hệ người gửi trước khi Chuyển hoàn và Chuyển hoàn về BCG");
 
         // 4. Điền COD (nếu có trường nhập tiền thu hộ - tùy vào giao diện portal)
         // Lưu ý: ID này có thể thay đổi tùy portal, ở đây dùng ID giả định hoặc logic tìm element
         // Dựa vào code cũ, COD thường nằm ở input trọng lượng hoặc dịch vụ cộng thêm
         // Nếu muốn điền vào ô Ghi chú hoặc ô khác, thêm vào đây.
-        
+
         // Ví dụ: Điền GOC vào ô ghi chú nếu có
         // const noteInput = document.querySelector('textarea[name="note"]') as HTMLTextAreaElement;
         // if(noteInput) { ... }
@@ -502,6 +566,13 @@ function listenForFillForm() {
  * Monitor parcelIndex input để tự động chuyển ảnh khi hoàn thành đơn
  */
 function monitorParcelIndex(): void {
+  // 1. QUAN TRỌNG: Dọn dẹp Observer cũ nếu tồn tại trước khi tạo mới
+  if ((window as any)._parcelIndexObserver) {
+    console.log("[GiaoTich] Disconnecting existing observer before creating new one.");
+    (window as any)._parcelIndexObserver.disconnect();
+    (window as any)._parcelIndexObserver = null;
+  }
+
   const parcelIndexInput = document.querySelector('input[name="parcelIndex"]') as HTMLInputElement;
 
   if (!parcelIndexInput) {
@@ -516,24 +587,24 @@ function monitorParcelIndex(): void {
   lastParcelIndexValue = initialValue;
   console.log(`[GiaoTich] Initial parcelIndex value: ${lastParcelIndexValue}`);
 
-  // Observer để theo dõi thay đổi value
-  const observer = new MutationObserver(() => {
+  // Hàm xử lý logic kiểm tra thay đổi
+  const handleChange = (source: string) => {
     const currentValue = parseInt(parcelIndexInput.value) || 0;
 
+    // Chỉ xử lý khi giá trị TĂNG lên (đơn hàng mới)
     if (currentValue > lastParcelIndexValue) {
-      console.log(`[GiaoTich] 📈 parcelIndex increased: ${lastParcelIndexValue} → ${currentValue}`);
-      lastParcelIndexValue = currentValue;
-
-      // Đợi một chút để đảm bảo form đã lưu xong
-      setTimeout(() => {
-        requestNextImage();
-      }, 300);
+      console.log(`[GiaoTich] 📈 parcelIndex increased (${source}): ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue; // Cập nhật ngay lập tức để chặn các event trùng lặp tiếp theo
+      requestNextImage();
     } else if (currentValue !== lastParcelIndexValue) {
-      // Giá trị thay đổi nhưng không tăng (có thể reset hoặc giảm)
-      console.log(`[GiaoTich] parcelIndex changed: ${lastParcelIndexValue} → ${currentValue}`);
+      // Cập nhật giá trị mới nếu nó khác (vd: reset về 0) nhưng không trigger next
+      // console.log(`[GiaoTich] parcelIndex changed but not increased: ${lastParcelIndexValue} → ${currentValue}`);
       lastParcelIndexValue = currentValue;
     }
-  });
+  };
+
+  // Observer để theo dõi thay đổi value attribute
+  const observer = new MutationObserver(() => handleChange('MutationObserver'));
 
   // Observe attributes thay đổi
   observer.observe(parcelIndexInput, {
@@ -542,23 +613,16 @@ function monitorParcelIndex(): void {
   });
 
   // Cũng listen cho input event (React controlled inputs)
-  parcelIndexInput.addEventListener('input', () => {
-    const currentValue = parseInt(parcelIndexInput.value) || 0;
+  // Lưu ý: Đặt tên hàm listener để có thể remove sau này nếu cần
+  const inputListener = () => handleChange('InputEvent');
+  parcelIndexInput.addEventListener('input', inputListener);
 
-    if (currentValue > lastParcelIndexValue) {
-      console.log(`[GiaoTich] 📈 parcelIndex increased (input event): ${lastParcelIndexValue} → ${currentValue}`);
-      lastParcelIndexValue = currentValue;
-
-      setTimeout(() => {
-        requestNextImage();
-      }, 300);
-    } else if (currentValue !== lastParcelIndexValue) {
-      lastParcelIndexValue = currentValue;
-    }
-  });
-
-  // Store observer để cleanup sau
+  // Store observer và cleanup function vào global để dọn dẹp sau
   (window as any)._parcelIndexObserver = observer;
+  
+  // Lưu reference tới element và listener để removeEvent khi deactivate
+  (window as any)._parcelInputRef = parcelIndexInput;
+  (window as any)._parcelInputListener = inputListener;
 }
 
 /**
@@ -973,15 +1037,18 @@ function checkPress(e: KeyboardEvent): void {
     }
   }
 }
-function setChiDanPhat() {
+function setChiDanPhat(infoText?: string): void {
   var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
   if (phoneSender) {
-    if (phoneSender.textContent.includes("2412279") || phoneSender.textContent.includes("2412278")) {
+    if (phoneSender.textContent.includes("2412279") || phoneSender.textContent.includes("2412278") || phoneSender.textContent.includes("6576671")) {
       var info1 = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea") as HTMLTextAreaElement;
       if (info1) {
         // nếu info trống
         if (info1.value.trim() === "") {
-          info1.value = `Cho xem hàng.
+          if (infoText && infoText.trim() !== "") {
+            info1.value = infoText;
+          } else
+            info1.value = `Cho xem hàng.
 KH TỪ CHỐI lhe ngay shop  tại nhà KH để xử lý không mang về BCP mới xử lý  Shop sẽ không đồng ý yc bồi thường 100% giá trị`;
           info1.dispatchEvent(new Event('input', { bubbles: true }));
           info1.dispatchEvent(new Event('change', { bubbles: true }))
@@ -1544,9 +1611,18 @@ function deactivateScript(): void {
     (window as any)._parcelIndexObserver.disconnect();
     (window as any)._parcelIndexObserver = null;
   }
+  
+  // Remove event listener thủ công
+  if ((window as any)._parcelInputRef && (window as any)._parcelInputListener) {
+      (window as any)._parcelInputRef.removeEventListener('input', (window as any)._parcelInputListener);
+      (window as any)._parcelInputRef = null;
+      (window as any)._parcelInputListener = null;
+  }
 
   // Reset lastParcelIndexValue
   lastParcelIndexValue = -1;
+  // Clear timer
+  if (requestNextImageTimer) clearTimeout(requestNextImageTimer);
 }
 
 /**
@@ -1818,35 +1894,35 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
  * Hàm điền địa chỉ và mô phỏng nhấn phím Enter để kích hoạt logic của trang web
  */
 function fillCorrectedAddress(newAddress: string) {
-    const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+  const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
 
-    if (addressInput) {
-        // 1. Gán giá trị AI đã sửa vào ô input
-        addressInput.value = newAddress;
-        
-        // 2. Kích hoạt sự kiện để React/Ant Design cập nhật State dữ liệu
-        const inputEvents = ['input', 'change'];
-        inputEvents.forEach(evtName => {
-            addressInput.dispatchEvent(new Event(evtName, { bubbles: true, cancelable: true }));
-        });
+  if (addressInput) {
+    // 1. Gán giá trị AI đã sửa vào ô input
+    addressInput.value = newAddress;
 
-        
-        addressInput.focus();
-        var find = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)")
-          if (find) {
-            (find as HTMLButtonElement).click();
-          }
+    // 2. Kích hoạt sự kiện để React/Ant Design cập nhật State dữ liệu
+    const inputEvents = ['input', 'change'];
+    inputEvents.forEach(evtName => {
+      addressInput.dispatchEvent(new Event(evtName, { bubbles: true, cancelable: true }));
+    });
 
 
-        // 5. Hiệu ứng nháy xanh để thông báo
-        addressInput.style.transition = "background-color 0.3s";
-        addressInput.style.backgroundColor = "#e6f7ff";
-        setTimeout(() => {
-            addressInput.style.backgroundColor = "transparent";
-        }, 1000);
-
-        console.log("[GiaoTich] AI filled address and triggered Enter logic.");
+    addressInput.focus();
+    var find = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)")
+    if (find) {
+      (find as HTMLButtonElement).click();
     }
+
+
+    // 5. Hiệu ứng nháy xanh để thông báo
+    addressInput.style.transition = "background-color 0.3s";
+    addressInput.style.backgroundColor = "#e6f7ff";
+    setTimeout(() => {
+      addressInput.style.backgroundColor = "transparent";
+    }, 1000);
+
+    console.log("[GiaoTich] AI filled address and triggered Enter logic.");
+  }
 }
 
 function observeDOMForAddressInput(): void {
@@ -1866,13 +1942,13 @@ function observeDOMForAddressInput(): void {
             if (el.matches && el.matches("#" + ELEMENT_IDS.RECEIVER_ADDRESS)) {
               console.log("[GiaoTich] Phát hiện #receiverAddress được thêm vào:", el);
               attachListenersToInput(el as HTMLInputElement);
-              injectAIButton(); 
+              injectAIButton();
             } else if (el.querySelector) {
               const receiverInput = el.querySelector("#" + ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
               if (receiverInput) {
                 console.log("[GiaoTich] Phát hiện #receiverAddress bên trong node được thêm:", receiverInput);
                 attachListenersToInput(receiverInput);
-                 injectAIButton();
+                injectAIButton();
               }
             }
           }
@@ -1910,7 +1986,7 @@ function observeDOMForAddressInput(): void {
   if (existingInput) {
     console.log("[GiaoTich] #receiverAddress đã tồn tại khi bắt đầu observer.");
     attachListenersToInput(existingInput);
-     injectAIButton(); 
+    injectAIButton();
   }
 }
 

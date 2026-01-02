@@ -1,48 +1,27 @@
 
 
-import { Button, Card, Input, List, message, Space, Tabs, TabsProps } from "antd";
+import { Button, Card, Input, message, Space, Tabs, TabsProps } from "antd";
 import { useEffect, useState } from "react";
-import './popup.css'
+import './popup.css';
 import { setOrders, clearOrders, Order, setCurrentIndex } from "./popup.slice";
-import { useDispatch, useSelector } from "react-redux";
-import { RootState } from "./store";
+import { useDispatch } from "react-redux";
 import TextArea from "antd/es/input/TextArea";
 import BatchAddTab from "./components/BatchAddTab";
 import GoogleFormTab from "./components/GoogleFormTab";
-import { Typography } from "antd"; // Thêm Typography nếu chưa có
-const { Text } = Typography;
+import InfoTab from "./components/InfoTab"; // Import mới
 export default function Popup() {
-  // Lấy dữ liệu từ Redux store
-  // const { orderData, currentIndex } = useSelector((state: RootState) => state.popup);
   const dispatch = useDispatch();
-  const [keyMessageInput, setKeyMessageInput] = useState<string>("");
-  const [accountPortal, setAccountPortal] = useState<string>("");
-  const [passwordPortal, setPasswordPortal] = useState<string>("");
-  const [tokenPortal, setTokenPortal] = useState<string>("");
-  const [buuCuc, setBuuCuc] = useState<string>("593200");
+
+  // State cho tab "Thêm dữ liệu" (JSON & AI)
   const [jsonInput, setJsonInput] = useState<string>("");
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [testAddress, setTestAddress] = useState<string>("");
-  const [aiTestResult, setAiTestResult] = useState<string>("");
-  const [isTestLoading, setIsTestLoading] = useState<boolean>(false);
-  // Các màu gốc chúng ta cần tìm và đếm
   const baseColors: string[] = ["TRANG", "DO", "XANH"];
+  // Load dữ liệu ban đầu
   useEffect(() => {
     console.log("Popup is running...");
+    // Không cần load account/pass ở đây nữa vì InfoTab tự lo
 
-    //get keymessage accountPortal and passwordPortal from storage
-    chrome.storage.local.get(["keyMessage", "accountPortal", "passwordPortal", "token", "buuCuc"], (result) => {
-      setKeyMessageInput(result.keyMessage);
-      setAccountPortal(result.accountPortal);
-      setPasswordPortal(result.passwordPortal);
-      setTokenPortal(result.token || "");
-      setBuuCuc(result.buuCuc);
-    });
-
-  }, []);
-
-  // Load dữ liệu ban đầu từ session storage khi popup mở
-  useEffect(() => {
+    // Load orders data
     chrome.runtime.sendMessage({ type: "GET_INITIAL_DATA" }, (response) => {
       if (response && response.orders) {
         dispatch(setOrders({ orders: response.orders, from: 'background' }));
@@ -52,7 +31,6 @@ export default function Popup() {
       }
     });
 
-    // Lắng nghe các thay đổi từ background (ví dụ: content-script cập nhật index)
     const listener = (msg: any) => {
       if (msg.type === "STORAGE_UPDATED") {
         if (msg.payload.orders !== undefined) {
@@ -65,10 +43,9 @@ export default function Popup() {
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-
   }, [dispatch]);
 
- 
+
 
   const handleOpenSidePanel = async () => {
     try {
@@ -185,64 +162,21 @@ và đây là kết quả của tôi
     }
   }
 
-  const handleClearData = () => {
-    dispatch(clearOrders({ from: 'popup' }));
-    message.info("Đã xóa dữ liệu đơn hàng.");
-  };
 
-  function handleSaveKey(): void {
-    if (keyMessageInput === "") {
-      alert("Key không được để trống");
-      return;
-    }
-    chrome.storage.local.set({ keyMessage: keyMessageInput }, () => {
-      console.log("Saved key message");
-    });
-    chrome.runtime.reload();
-  }
-  // === HÀM XỬ LÝ TEST AI ===
-  const handleTestAIAddress = () => {
-    if (!testAddress.trim()) {
-      message.error("Vui lòng nhập địa chỉ cần test.");
-      return;
-    }
-
-    setIsTestLoading(true);
-    setAiTestResult(""); // Xóa kết quả cũ
-    message.loading({ content: "AI đang phân tích...", key: 'ai_test', duration: 0 });
-
-    chrome.runtime.sendMessage({
-      type: "CORRECT_ADDRESS",
-      payload: { address: testAddress }
-    }, (response) => {
-      setIsTestLoading(false);
-
-      if (chrome.runtime.lastError) {
-        message.error({ content: "Lỗi kết nối: " + chrome.runtime.lastError.message, key: 'ai_test' });
-        return;
-      }
-
-      if (response && response.status === "success") {
-        setAiTestResult(response.result);
-        message.success({ content: "Đã xử lý xong!", key: 'ai_test', duration: 2 });
-      } else {
-        message.error({ content: "Lỗi AI: " + (response?.error || "Không xác định"), key: 'ai_test' });
-      }
-    });
-  };
-
-  function handleSaveAccount(accountPortal: string, passwordPortal: string, tokenPortal: string, buuCuc: string): void {
+  // Hàm xử lý lưu account được truyền vào InfoTab
+  function handleSaveAccount(accountPortal: string, passwordPortal: string, tokenPortal: string, buuCuc: string, keyMessage: string): void {
     if (!accountPortal || !passwordPortal || !buuCuc) {
       alert("Tài khoản, mật khẩu và bưu cục không được để trống");
       return;
     }
     chrome.storage.local.set({
-      accountPortal: accountPortal,
-      passwordPortal: passwordPortal,
+      accountPortal,
+      passwordPortal,
       token: tokenPortal,
-      buuCuc: buuCuc
+      buuCuc,
+      keyMessage
     }, () => {
-      console.log("Saved account, password, token and buuCuc");
+      console.log("Saved account settings");
     });
     chrome.runtime.reload();
   }
@@ -286,6 +220,11 @@ và đây là kết quả của tôi
 
   const items: TabsProps['items'] = [
     {
+      key: '0', // Vị trí đầu tiên
+      label: 'Thông Tin',
+      children: <InfoTab onSaveAccount={handleSaveAccount} />,
+    },
+    {
       key: '1',
       label: 'Google Form',
       children: <GoogleFormTab />,
@@ -294,15 +233,14 @@ và đây là kết quả của tôi
       key: '2',
       label: 'Thêm dữ liệu',
       children: (
-        <Card title="Dán dữ liệu JSON của bạn tại đây">
+        <Card title="Dán dữ liệu JSON">
           <Space direction="vertical" style={{ width: '100%' }}>
             <TextArea
-              rows={15}
-              placeholder='[ { "GOC": "...", "MAUSAC": "...", ... } ]'
+              rows={10}
+              placeholder='[ { "GOC": "...", ... } ]'
               value={jsonInput}
               onChange={(e) => setJsonInput(e.target.value)}
             />
-          
             <Button
               type="primary"
               onClick={handleUsingAI}
@@ -311,6 +249,9 @@ và đây là kết quả của tôi
               disabled={isAiLoading}
             >
               Dùng AI
+            </Button>
+            <Button type="default" onClick={handleOpenSidePanel} block>
+              📦 Mở Panel Hình Ảnh
             </Button>
           </Space>
         </Card>
@@ -324,86 +265,14 @@ và đây là kết quả của tôi
   ];
 
   return (
-    //center page
-    <div style={{ width: "auto", margin: "auto", marginTop: "20px" }}>
-      <Card style={{ width: "500px" }}>
-
-        <Card style={{}}>
-          <Space direction="vertical">
-            <Space.Compact style={{ width: "300px" }} direction="horizontal">
-              <Input
-                placeholder="Key"
-                value={keyMessageInput}
-                onChange={(e) => {
-                  setKeyMessageInput(e.target.value);
-                }} />
-              <Button type="primary" onClick={handleSaveKey}>
-                Submit
-              </Button>
-            </Space.Compact>
-            <Space direction="horizontal">
-              <Button type="default" onClick={handleOpenSidePanel}>
-                📦 Mở Panel Hình Ảnh
-              </Button>
-            </Space>
-          </Space>
-
-
-        </Card>
-        <Card style={{ marginTop: "20px" }}>
-          {/* Tạo username input và password input and save */}
-          <Space direction="vertical" style={{ width: '100%' }}>
-            <Space direction="horizontal">
-              <Input
-                placeholder="Tài khoản"
-                value={accountPortal}
-                onChange={(e) => {
-                  setAccountPortal(e.target.value);
-                }} />
-              <Input.Password
-                placeholder="Mật khẩu"
-                value={passwordPortal}
-                onChange={(e) => {
-                  setPasswordPortal(e.target.value);
-                }} />
-            </Space>
-            <Space direction="horizontal" style={{ width: '100%' }}>
-              <Input
-                placeholder="Token (tùy chọn)"
-                value={tokenPortal}
-                style={{ flex: 1 }}
-                onChange={(e) => {
-                  setTokenPortal(e.target.value);
-                }} />
-            </Space>
-            <Space direction="horizontal">
-              <Input
-                placeholder="Bưu cục"
-                style={{ color: "blue", fontWeight: "bold" }}
-                value={buuCuc}
-                onChange={(e) => {
-                  setBuuCuc(e.target.value);
-                }} />
-              <Button type="primary" onClick={() => handleSaveAccount(accountPortal, passwordPortal, tokenPortal, buuCuc)}>
-                Lưu Tài Khoản
-              </Button>
-            </Space>
-          </Space>
-
-        </Card>
-        <Card style={{ marginTop: "20px" }}>
-          <Tabs defaultActiveKey="1" items={items} />
-
-        </Card>
+    <div style={{ width: "auto", margin: "auto", marginTop: "10px", padding: "0 10px" }}>
+      <Card style={{ width: "500px" }} bodyStyle={{ padding: '10px' }}>
+        <Tabs defaultActiveKey="0" items={items} />
       </Card>
-
-
-
     </div>
-
-
   );
 }
+
 
 
 

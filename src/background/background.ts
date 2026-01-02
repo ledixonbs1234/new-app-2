@@ -51,7 +51,13 @@ const firebaseConfig: FirebaseConfig = {
   messagingSenderId: "892472148061",
   appId: "1:892472148061:web:f22a5c4ffd25858726cdb4",
 };
-
+// --- THÊM: Biến global lưu Key AI ---
+let currentGeminiKey: string = "";
+// Key mặc định (Backup)
+const DEFAULT_GEMINI_KEY = "AIzaSyDRDPaTCetuCfzjuqvJjcG1sMhmB2aIVzE";
+const GEMINI_API_KEY_ALT = "AIzaSyAreyNgXS6sF-fvFNMB8jGITmii2P5b-rA";
+const GEMINI_API_URL =
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 let ref: firebase.database.Reference | null = null;
 let refPing: firebase.database.Reference | null = null;
 let refScannedItems: firebase.database.Reference | null = null; // Listener mới
@@ -165,7 +171,12 @@ function removePortalItem(maBuuGui: string) {
     broadcastPortalListUpdate();
   }
 }
-
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local' && changes.selectedAiKey) {
+    currentGeminiKey = changes.selectedAiKey.newValue;
+    console.log("[BG] Updated Gemini Key:", currentGeminiKey ? "Custom Key Loaded" : "Default");
+  }
+});
 // Hàm gửi tin nhắn cho tất cả các SidePanel đang mở
 function broadcastPortalListUpdate() {
   // Gửi runtime message, SidePanel sẽ lắng nghe
@@ -504,6 +515,14 @@ async function initFirebase(): Promise<void> {
   db = firebase.database();
   if (db === null) {
     return;
+  }
+  // Load AI Key
+  const savedKey = await chromeStorageGet("selectedAiKey");
+  if (savedKey) {
+    currentGeminiKey = savedKey;
+    console.log("[BG] Loaded Custom AI Key");
+  } else {
+    console.log("[BG] Using Default AI Key");
   }
 
   ref = db.ref(`PORTAL/CHILD/${keyMessage}/message/topc`);
@@ -1610,34 +1629,6 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         try {
           const address = request.payload.address;
           console.log("Đang xử lý địa chỉ với AI:", address);
-
-          // // 1. Load data.json
-          // const base64Data = await loadDataJsonBase64();
-          // if (!base64Data) {
-          //   throw new Error("Không thể tải file data.json");
-          // }
-
-          // // 2. Chuẩn bị prompt
-          // const prompt = `Dựa vào file dữ liệu địa chỉ đính kèm (data.json) và địa chỉ tôi viết sai như sau: "${address}", hãy viết lại địa chỉ đúng đầy đủ (Xã, Huyện, Tỉnh). Chỉ trả về kết quả địa chỉ đúng, không giải thích thêm.`;
-
-          // // 3. Chuẩn bị FileData cho Gemini
-          // const fileData: FileData = {
-          //   mimeType: "application/json", // Hoặc "text/plain" tùy vào nội dung file
-          //   base64Data: base64Data
-          // };
-
-          // // 4. Gọi AI
-          // const result = await processWithGemini(prompt, fileData);
-
-          // 5. Trả về kết quả (Clean chuỗi JSON nếu hàm processWithGemini trả về JSON, ở đây ta cần text thuần)
-          // Lưu ý: Hàm processWithGemini hiện tại của bạn đang cố parse JSON ở cuối. 
-          // Nếu bạn muốn text thuần cho tính năng này, cần điều chỉnh hoặc parse kết quả.
-
-          // Vì hàm processWithGemini hiện tại được thiết kế để trả về JSON string cho tính năng "Scan ảnh",
-          // ta có thể cần sửa nhẹ nó hoặc dùng logic parse ở đây.
-          // Tuy nhiên, prompt trên yêu cầu "Chỉ trả về kết quả".
-          // Gemini có thể trả về text thuần. Hàm processWithGemini của bạn đang cố tìm '[' và ']'.
-          // Để an toàn, ta sẽ dùng một hàm gọi AI riêng hoặc sửa prompt để trả về JSON { "address": "..." }
 
           // Sửa Prompt để phù hợp với hàm processWithGemini hiện tại (trả về JSON):
           const jsonPrompt = `Dựa vào file dữ liệu địa chỉ đính kèm và địa chỉ sai: "${address}", hãy tìm địa chỉ đúng nhất. Trả về định dạng JSON mảng duy nhất: [{"address": "địa chỉ đúng đầy đủ"}]`;
@@ -5778,21 +5769,20 @@ async function handleCreateComplaint(
 }
 
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent";
-const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
+
 // const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
-const GEMINI_API_KEY = "AIzaSyDRDPaTCetuCfzjuqvJjcG1sMhmB2aIVzE"; // Thay thế bằng API key thực tế
-const GEMINI_API_KEY_ALT = "AIzaSyAreyNgXS6sF-fvFNMB8jGITmii2P5b-rA"
+// const GEMINI_API_KEY = "AIzaSyDRDPaTCetuCfzjuqvJjcG1sMhmB2aIVzE"; // Thay thế bằng API key thực tế
+// const GEMINI_API_KEY_ALT = "AIzaSyAreyNgXS6sF-fvFNMB8jGITmii2P5b-rA"
 // Hàm gọi API đã được cập nhật
 async function processWithGemini(
-  userPrompt: string,systemInstructionText?: string,
+  userPrompt: string, systemInstructionText?: string,
 ): Promise<string> {
-  
+
   // System Instruction giúp định hình phản hồi của AI
   const systemInstruction = {
     parts: [
-      { 
-        text: systemInstructionText || "Bạn là chuyên gia về địa chính Việt Nam. Nhiệm vụ của bạn là trích xuất hoặc tìm kiếm địa chỉ chính xác. LUÔN LUÔNG trả về kết quả dưới dạng một mảng JSON các đối tượng, không bao gồm văn bản giải thích hoặc ký tự markdown (như ```json)." 
+      {
+        text: systemInstructionText || "Bạn là chuyên gia về địa chính Việt Nam. Nhiệm vụ của bạn là trích xuất hoặc tìm kiếm địa chỉ chính xác. LUÔN LUÔNG trả về kết quả dưới dạng một mảng JSON các đối tượng, không bao gồm văn bản giải thích hoặc ký tự markdown (như ```json)."
       }
     ]
   };
@@ -5821,9 +5811,12 @@ async function processWithGemini(
       topP: 0.95,
     },
   };
-
+  // --- LOGIC CHỌN KEY ---
+  // Ưu tiên: Key người dùng chọn -> Key Alt -> Key Mặc định
+  const apiKeyToUse = currentGeminiKey || GEMINI_API_KEY_ALT || DEFAULT_GEMINI_KEY;
   try {
-    const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
+
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiKeyToUse}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5854,13 +5847,13 @@ async function processWithGemini(
       // Tìm vị trí mảng JSON trong trường hợp AI vẫn nói thêm vài câu bên ngoài
       const startIndex = textResult.indexOf("[");
       const endIndex = textResult.lastIndexOf("]");
-      
+
       if (startIndex !== -1 && endIndex !== -1) {
         const jsonString = textResult.substring(startIndex, endIndex + 1);
         const jsObject = JSON.parse(jsonString);
         return JSON.stringify(jsObject); // Trả về chuỗi JSON chuẩn
       }
-      
+
       return textResult; // Trả về nguyên bản nếu không tìm thấy dấu []
     } catch (parseError) {
       console.warn("Không thể parse JSON, trả về text thô.");

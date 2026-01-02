@@ -35,12 +35,17 @@ const SidePanel: React.FC = () => {
   const [shouldScrollToSelected, setShouldScrollToSelected] = useState<boolean>(false);
 
   // State cho Portal Tab
-  const [activeTab, setActiveTab] = useState<string>("images");
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    return localStorage.getItem("sidepanel_active_tab") || "images";
+  });
   const [portalList, setPortalList] = useState<any[]>([]);
   const [portalLoading, setPortalLoading] = useState<boolean>(false);
   const [aiOrders, setAiOrders] = useState<Order[]>([]);
   const [aiSelectedIndex, setAiSelectedIndex] = useState<number>(0);
-
+  // Hàm xử lý lưu vị trí scroll (có debounce để tránh ghi storage quá nhiều)
+  const saveScrollPosition = useCallback(debounceLocal((key: string, value: number) => {
+    localStorage.setItem(`sidepanel_scroll_${key}`, value.toString());
+  }, 300), []);
   // Refs
   const imageViewerRef = useRef<{
     applyZoomPreset: (preset: ZoomPreset) => void;
@@ -115,7 +120,14 @@ const SidePanel: React.FC = () => {
     }, 1000);
   }, [autoZoomEnabled]);
 
-
+  function debounceLocal(func: Function, wait: number) {
+    let timeout: NodeJS.Timeout;
+    return function (...args: any[]) {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  }
+  const lastAutoNextTimeRef = useRef<number>(0);
   // =================================================================
   // INIT & LOAD DATA
   // =================================================================
@@ -150,7 +162,16 @@ const SidePanel: React.FC = () => {
       if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
 
         console.log("[SidePanel] Received NEXT signal. Active Tab:", activeTab);
-
+        // --- CƠ CHẾ CHẶN SPAM (THROTTLE) ---
+        const now = Date.now();
+        // Nếu lệnh trước đó cách đây dưới 1 giây, bỏ qua lệnh này
+        if (now - lastAutoNextTimeRef.current < 1000) {
+          console.warn("[SidePanel] Ignored rapid Auto Next request.");
+          sendResponse({ status: "ignored_too_fast" });
+          return false;
+        }
+        lastAutoNextTimeRef.current = now; // Cập nhật thời gian
+        // ------------------------------------
         if (activeTab === "images") {
           // Logic cũ cho tab Hình ảnh
           if (selectedIndex < images.length - 1) {
@@ -195,6 +216,116 @@ const SidePanel: React.FC = () => {
     aiOrders, aiSelectedIndex,
     // ... dependencies khác
   ]);
+
+// =================================================================
+  // SINGLE MESSAGE LISTENER (GỘP TẤT CẢ VÀO ĐÂY ĐỂ TRÁNH XUNG ĐỘT)
+  // =================================================================
+  useEffect(() => {
+    // 1. Handler cho Runtime Message (Background/Content Script -> SidePanel)
+    const handleRuntimeMessage = (msg: any, _sender: any, sendResponse: any) => {
+      // --- PING ---
+      if (msg.type === "SIDEPANEL_PING") {
+        sendResponse({ status: "alive" });
+        return false;
+      }
+
+      // --- NEXT ITEM (XỬ LÝ DỰA TRÊN TAB ĐANG MỞ) ---
+      if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
+        
+        // Cơ chế chặn spam (Throttle) - 1 giây
+        const now = Date.now();
+        if (now - lastAutoNextTimeRef.current < 1000) {
+            console.warn("[SidePanel] ⚠️ Ignored rapid request (Throttle).");
+            sendResponse({ status: "ignored_too_fast" });
+            return false;
+        }
+        lastAutoNextTimeRef.current = now;
+
+        console.log(`[SidePanel] ⏭️ NEXT Signal. Current Tab: ${activeTab}`);
+
+        if (activeTab === "images") {
+          // CHỈ chuyển ảnh nếu đang ở tab Images
+          if (selectedIndex < images.length - 1) {
+            handleSelectImage(selectedIndex + 1);
+            sendResponse({ status: "success", type: "image" });
+          } else {
+            sendResponse({ status: "end" });
+          }
+        } 
+        else if (activeTab === "ai_orders") {
+          // CHỈ chuyển đơn AI nếu đang ở tab AI Orders
+          if (aiSelectedIndex < aiOrders.length - 1) {
+            const nextIndex = aiSelectedIndex + 1;
+            handleSelectAIOrder(nextIndex);
+            
+            // Cuộn tới item
+            setTimeout(() => {
+                const el = document.getElementById(`ai-order-${nextIndex}`);
+                el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+
+            sendResponse({ status: "success", type: "ai_order" });
+          } else {
+            message.success("Đã hoàn thành danh sách đơn AI!");
+            sendResponse({ status: "end" });
+          }
+        } else {
+            console.log("[SidePanel] Ignored NEXT signal (Tab not supported).");
+        }
+
+        return false; // Sync response
+      }
+      
+      // --- CÁC MESSAGE KHÁC ---
+      if (msg.type === "PORTAL_LIST_UPDATED") {
+        setPortalList(msg.data || []);
+      }
+      
+      if (msg.type === "IMAGES_UPDATED") {
+         loadImages(); // Gọi hàm load lại ảnh
+      }
+
+      return false;
+    };
+
+    // 2. Handler cho Window Message (PostMessage từ iframe/web) - Xử lý Zoom
+    const handleWindowMessage = (event: MessageEvent) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === "APPLY_SMART_ZOOM") {
+        if (msg.payload?.fieldGroup && autoZoomEnabled) {
+          const fieldGroup: FieldGroup = msg.payload.fieldGroup;
+          // Chỉ apply zoom nếu đang ở tab images
+          if (activeTab === "images") {
+             console.log(`[SidePanel] 🔍 Smart Zoom: ${fieldGroup}`);
+             applySmartZoom(fieldGroup);
+          }
+        }
+      }
+    };
+
+    // Đăng ký Listener
+    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
+    window.addEventListener("message", handleWindowMessage);
+
+    // Cleanup (Quan trọng: Xóa listener cũ khi dependencies thay đổi)
+    return () => {
+      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
+      window.removeEventListener("message", handleWindowMessage);
+    };
+
+  }, [
+    activeTab,          // QUAN TRỌNG: Re-bind khi đổi tab để logic if(activeTab) đúng
+    images, selectedIndex, 
+    aiOrders, aiSelectedIndex,
+    autoZoomEnabled, savedPresets
+  ]);
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    localStorage.setItem("sidepanel_active_tab", key);
+  };
+
   // Effect riêng cho Portal List Sync
   useEffect(() => {
     chrome.storage.session.get(["orders", "currentIndex"], (result) => {
@@ -229,6 +360,7 @@ const SidePanel: React.FC = () => {
     chrome.runtime.onMessage.addListener(handlePortalUpdate);
     return () => chrome.runtime.onMessage.removeListener(handlePortalUpdate);
   }, []);
+
   // =================================================================
   // RENDER AI TAB CONTENT (Cập nhật hàm này)
   // =================================================================
@@ -238,22 +370,22 @@ const SidePanel: React.FC = () => {
     }
 
     return (
-      <div 
+      <div
         id="ai-orders-list"
-        style={{ 
-          height: 'calc(100vh - 110px)', 
-          overflowY: 'auto', 
-          padding: '8px', 
+        style={{
+          height: 'calc(100vh - 110px)',
+          overflowY: 'auto',
+          padding: '8px',
           background: '#f0f2f5',
           paddingBottom: '20px'
         }}
       >
         {/* --- PHẦN THỐNG KÊ TỔNG HỢP --- */}
-        <div style={{ 
-          background: '#fff', 
-          padding: '8px 12px', 
-          borderRadius: '8px', 
-          marginBottom: '10px', 
+        <div style={{
+          background: '#fff',
+          padding: '8px 12px',
+          borderRadius: '8px',
+          marginBottom: '10px',
           boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           border: '1px solid #e8e8e8'
         }}>
@@ -264,12 +396,12 @@ const SidePanel: React.FC = () => {
             {Object.entries(colorSummary).map(([key, data]) => {
               if (data.count === 0) return null; // Chỉ hiện màu có số lượng > 0
               return (
-                <Tag 
-                  key={key} 
-                  color={data.color} 
-                  style={{ 
-                    margin: 0, 
-                    fontWeight: 'bold', 
+                <Tag
+                  key={key}
+                  color={data.color}
+                  style={{
+                    margin: 0,
+                    fontWeight: 'bold',
                     color: key === 'TRANG' ? '#333' : '#fff', // Màu trắng thì chữ đen cho dễ nhìn
                     border: key === 'TRANG' ? '1px solid #d9d9d9' : 'none'
                   }}
@@ -290,10 +422,10 @@ const SidePanel: React.FC = () => {
           <span>Danh sách chi tiết:</span>
           <span>Đang chọn: <b>{aiSelectedIndex + 1}</b></span>
         </div>
-        
+
         {aiOrders.map((order, idx) => {
           const isSelected = idx === aiSelectedIndex;
-          
+
           // Logic màu sắc từng item (giữ nguyên code cũ của bạn)
           const ms = order.MAUSAC ? order.MAUSAC.toUpperCase() : "";
           const detectedColors: string[] = [];
@@ -340,7 +472,7 @@ const SidePanel: React.FC = () => {
                 <strong style={{ color: isSelected ? '#1890ff' : '#333', fontSize: '13px', marginRight: '8px', wordBreak: 'break-word' }}>
                   #{idx + 1} {order.NGUOINHAN}
                 </strong>
-                
+
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
                   {order.MAUSAC && (
                     <Tag style={tagStyle}>
@@ -354,22 +486,22 @@ const SidePanel: React.FC = () => {
                   )}
                 </div>
               </div>
-              
+
               <div style={{ fontSize: '12px', color: '#666', display: 'flex', gap: 6, alignItems: 'center' }}>
                 <PhoneOutlined /> {order.SDT}
               </div>
-              
+
               <div style={{ fontSize: '12px', color: '#666', marginTop: 4, display: 'flex', gap: 6 }}>
-                <EnvironmentOutlined style={{ marginTop: 3, flexShrink: 0 }} /> 
+                <EnvironmentOutlined style={{ marginTop: 3, flexShrink: 0 }} />
                 <span style={{ lineHeight: '1.4' }}>{order.DIACHI}</span>
               </div>
 
-              <div style={{ 
-                marginTop: 6, 
-                padding: 6, 
-                background: '#fafafa', 
-                borderRadius: 4, 
-                fontSize: '11px', 
+              <div style={{
+                marginTop: 6,
+                padding: 6,
+                background: '#fafafa',
+                borderRadius: 4,
+                fontSize: '11px',
                 color: '#999',
                 fontStyle: 'italic',
                 borderLeft: '2px solid #ddd'
@@ -388,13 +520,13 @@ const SidePanel: React.FC = () => {
   const colorSummary = useMemo(() => {
     // Định nghĩa bảng màu và biến đếm
     const stats: Record<string, { count: number; color: string; label: string }> = {
-      DO:    { count: 0, color: "#ff4d4f", label: "Đỏ" },
-      XANH:  { count: 0, color: "#1890ff", label: "Xanh" },
+      DO: { count: 0, color: "#ff4d4f", label: "Đỏ" },
+      XANH: { count: 0, color: "#1890ff", label: "Xanh" },
       TRANG: { count: 0, color: "#bfbfbf", label: "Trắng" },
-      VANG:  { count: 0, color: "#faad14", label: "Vàng" },
-      TIM:   { count: 0, color: "#722ed1", label: "Tím" },
-      DEN:   { count: 0, color: "#333333", label: "Đen" },
-      HONG:  { count: 0, color: "#eb2f96", label: "Hồng" },
+      VANG: { count: 0, color: "#faad14", label: "Vàng" },
+      TIM: { count: 0, color: "#722ed1", label: "Tím" },
+      DEN: { count: 0, color: "#333333", label: "Đen" },
+      HONG: { count: 0, color: "#eb2f96", label: "Hồng" },
     };
 
     aiOrders.forEach(order => {
@@ -414,7 +546,7 @@ const SidePanel: React.FC = () => {
 
     return stats;
   }, [aiOrders]); // Chỉ tính lại khi danh sách đơn thay đổi
-;
+  ;
   const loadImages = async () => {
     try {
       setLoading(true);
@@ -657,53 +789,6 @@ const SidePanel: React.FC = () => {
   // LISTEN MESSAGES (APPLY ZOOM)
   // =================================================================
 
-  // useEffect để lắng nghe message
-  useEffect(() => {
-    // 1. Handler cho Chrome Runtime Message (Giữ nguyên logic cũ cho các tính năng khác)
-    const handleRuntimeMessage = (msg: any, _sender: any, sendResponse: any) => {
-      if (msg.type === "SIDEPANEL_PING") { sendResponse({ status: "alive" }); return false; }
-
-      if (msg.type === "SIDEPANEL_NEXT_IMAGE") {
-        if (selectedIndex < images.length - 1) {
-          handleSelectImage(selectedIndex + 1);
-          sendResponse({ status: "success" });
-        } else {
-          sendResponse({ status: "end" });
-        }
-        return false;
-      }
-      return false;
-    };
-
-    // 2. Handler mới cho Window Message (Nhận từ Content Script qua postMessage)
-    const handleWindowMessage = (event: MessageEvent) => {
-      // Kiểm tra nguồn gốc tin nhắn để bảo mật (chỉ nhận từ chính extension hoặc trang web chứa nó)
-      // Trong trường hợp này, trang web gửi vào iframe extension, nên origin là domain trang web
-      // Tuy nhiên để đơn giản ta check cấu trúc data
-
-      const msg = event.data;
-      if (!msg || typeof msg !== 'object') return;
-
-      // XỬ LÝ ZOOM THÔNG MINH (Trigger từ focus input bên ngoài)
-      if (msg.type === "APPLY_SMART_ZOOM") {
-        if (msg.payload?.fieldGroup && autoZoomEnabled) {
-          const fieldGroup: FieldGroup = msg.payload.fieldGroup;
-          console.log(`[SidePanel] 📩 Received postMessage signal: ${fieldGroup}`);
-          applySmartZoom(fieldGroup);
-        }
-      }
-    };
-
-    // Đăng ký listeners
-    chrome.runtime.onMessage.addListener(handleRuntimeMessage);
-    window.addEventListener("message", handleWindowMessage);
-
-    // Cleanup
-    return () => {
-      chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
-      window.removeEventListener("message", handleWindowMessage);
-    };
-  }, [savedPresets, autoZoomEnabled, selectedIndex, images.length]); // Dependencies
   const applySmartZoom = (fieldGroup: FieldGroup) => {
     // 1. Cập nhật field hiện tại
     currentFocusedFieldRef.current = fieldGroup;
@@ -763,7 +848,7 @@ const SidePanel: React.FC = () => {
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           type="card"
           size="small"
           style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
