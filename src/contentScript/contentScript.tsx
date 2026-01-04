@@ -261,7 +261,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             }
             var address: HTMLInputElement | null =
               document.querySelector("#customerAddress");
-            address?.focus();
 
             // gán giá trị cho ô tìm kiếm
             // customerCode?.focus();

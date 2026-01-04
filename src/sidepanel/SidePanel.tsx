@@ -1,13 +1,12 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag } from "antd";
 import type { ColumnsType } from 'antd/es/table';
-import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined, DollarOutlined, PhoneOutlined, EnvironmentOutlined, RobotOutlined } from "@ant-design/icons";
+import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined, DollarOutlined, PhoneOutlined, EnvironmentOutlined, RobotOutlined, SaveOutlined, LinkOutlined } from "@ant-design/icons";
 import { Order, StoredImage } from "../types/vnpost";
 import { syncAllImages, SyncProgress, listenToFirebaseImages } from "./utils/firebaseSync";
 import { getAllImages, initDB } from "./utils/imageDB";
 import ImageViewer from "./components/ImageViewer";
 import ThumbnailGallery from "./components/ThumbnailGallery";
-
 type FieldGroup = "TT_NUMBER" | "RECEIVER_INFO" | "WEIGHT" | "MONEY" | "NONE";
 
 interface ZoomPreset {
@@ -28,6 +27,10 @@ const SidePanel: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState<SyncProgress>({
     total: 0, downloaded: 0, failed: 0, status: "idle",
   });
+  const [savedHdrId, setSavedHdrId] = useState<string>(() => {
+    return localStorage.getItem("sidepanel_saved_hdr_id") || "";
+  });
+
   const [autoZoomEnabled, setAutoZoomEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("sidepanel_auto_zoom_enabled");
     return saved !== null ? JSON.parse(saved) : true;
@@ -52,9 +55,9 @@ const SidePanel: React.FC = () => {
     getCurrentZoom: () => ZoomPreset;
     resetToDefault: () => void;
   }>(null);
-const isImagesLoadedRef = useRef(false);
+  const isImagesLoadedRef = useRef(false);
   const focusRequestIdRef = useRef(0);
-  const hasSyncedRef = useRef(false); 
+  const hasSyncedRef = useRef(false);
 
   // Ref quan trọng để theo dõi Field nào đang được Active
   const currentFocusedFieldRef = useRef<FieldGroup>("NONE");
@@ -120,7 +123,40 @@ const isImagesLoadedRef = useRef(false);
 
     }, 1000);
   }, [autoZoomEnabled]);
+  // 1. Lấy hdrId từ tab hiện tại và lưu lại
+  const handleSaveCurrentHdrId = async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.url) {
+        const urlObj = new URL(tab.url);
+        // Tìm tham số hdrId trong URL
+        const id = urlObj.searchParams.get("hdrId");
 
+        if (id) {
+          setSavedHdrId(id);
+          localStorage.setItem("sidepanel_saved_hdr_id", id);
+          message.success(`Đã lưu HdrId: ${id}`);
+        } else {
+          message.warning("Không tìm thấy hdrId trong URL hiện tại");
+        }
+      } else {
+        message.warning("Không lấy được URL của tab hiện tại");
+      }
+    } catch (error) {
+      console.error(error);
+      message.error("Lỗi khi đọc URL");
+    }
+  };
+
+  // 2. Mở lại trang với hdrId đã lưu
+  const handleOpenSavedHdrId = () => {
+    if (!savedHdrId) {
+      message.warning("Chưa có HdrId nào được lưu");
+      return;
+    }
+    const targetUrl = `https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=${savedHdrId}`;
+    chrome.tabs.update({ url: targetUrl });
+  };
   function debounceLocal(func: Function, wait: number) {
     let timeout: NodeJS.Timeout;
     return function (...args: any[]) {
@@ -133,9 +169,9 @@ const isImagesLoadedRef = useRef(false);
   // INIT & LOAD DATA
   // =================================================================
   useEffect(() => {
-    
 
-   const stopListening = listenToFirebaseImages(async () => {
+
+    const stopListening = listenToFirebaseImages(async () => {
       if (isImagesLoadedRef.current) {
         console.log("[SidePanel] Background báo update -> Reloading images...");
         const updated = await getAllImages();
@@ -156,7 +192,7 @@ const isImagesLoadedRef = useRef(false);
   useEffect(() => {
     if (activeTab === 'images' && !isImagesLoadedRef.current) {
       console.log("[SidePanel] Tab Hình Ảnh active -> Bắt đầu tải dữ liệu...");
-      
+
       // Đánh dấu đã tải để không tải lại khi chuyển tab qua lại
       isImagesLoadedRef.current = true;
 
@@ -169,7 +205,7 @@ const isImagesLoadedRef = useRef(false);
         hasSyncedRef.current = true;
       }
     }
-  }, [activeTab]); 
+  }, [activeTab]);
   // =================================================================
   // LISTEN MESSAGES (LOGIC AUTO NEXT ĐƯỢC SỬA ĐỔI)
   // =================================================================
@@ -830,37 +866,13 @@ const isImagesLoadedRef = useRef(false);
 
   return (
     <div className="sidepanel-container" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      {/* Header */}
-      <div className="sidepanel-header" style={{ padding: '12px', borderBottom: '1px solid #ddd', background: '#fff' }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
-          <Space>
-            <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined />} onClick={handleClearAllImages} /></Tooltip>
-            <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
-          </Space>
-        </div>
-
-        {/* Navigation & Tools */}
-        <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <Space>
-            <Button size="small" icon={<LeftOutlined />} onClick={handlePreviousImage} disabled={selectedIndex === 0} />
-            <span style={{ fontSize: 12 }}>{selectedIndex + 1}/{images.length}</span>
-            <Button size="small" icon={<RightOutlined />} onClick={handleNextImage} disabled={selectedIndex === images.length - 1} />
-          </Space>
-          <Space>
-            <span style={{ fontSize: 12 }}>Auto Zoom:</span>
-            <Switch size="small" checked={autoZoomEnabled} onChange={handleToggleAutoZoom} />
-            <Tooltip title="Reset Zoom"><Button size="small" icon={<UndoOutlined />} onClick={handleResetPresets} /></Tooltip>
-          </Space>
-        </div>
-      </div>
-
-      {/* TABS CONTENT */}
+     
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <Tabs
           activeKey={activeTab}
           onChange={handleTabChange}
           type="card"
+          // className="full-height-tabs" 
           size="small"
           style={{ flex: 1, display: 'flex', flexDirection: 'column' }}
           tabBarStyle={{ margin: 0, padding: '0 8px', background: '#f5f5f5' }}
@@ -870,6 +882,35 @@ const isImagesLoadedRef = useRef(false);
               label: 'Portal Auto',
               children: (
                 <div style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                  <div style={{ padding: '8px 12px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: '#666' }}>HdrId:</span>
+                      <strong style={{ color: '#1890ff', fontSize: '13px', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {savedHdrId || "Chưa lưu"}
+                      </strong>
+                    </div>
+                    <Space style={{ width: '100%' }}>
+                      <Button
+                        size="small"
+                        icon={<SaveOutlined />}
+                        onClick={handleSaveCurrentHdrId}
+                        type="default"
+                        style={{ flex: 1 }}
+                      >
+                        Lấy từ Tab
+                      </Button>
+                      <Button
+                        size="small"
+                        icon={<LinkOutlined />}
+                        onClick={handleOpenSavedHdrId}
+                        type="primary"
+                        disabled={!savedHdrId}
+                        style={{ flex: 1 }}
+                      >
+                        Mở lại
+                      </Button>
+                    </Space>
+                  </div>
                   <div style={{ padding: 8, borderBottom: '1px solid #eee', background: '#fff', display: 'flex', justifyContent: 'space-between' }}>
                     <span>Tổng: <b>{portalList.length}</b></span>
                     <Button size="small" icon={<RightOutlined />} onClick={handlePrintPortalList}>In Danh Sách</Button>
@@ -893,7 +934,27 @@ const isImagesLoadedRef = useRef(false);
               key: 'images',
               label: 'Hình Ảnh',
               children: (
+
                 <div className="sidepanel-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
+          <Space>
+            <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined />} onClick={handleClearAllImages} /></Tooltip>
+            <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
+          </Space>
+        </div>
+                  <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <Space>
+                      <Button size="small" icon={<LeftOutlined />} onClick={handlePreviousImage} disabled={selectedIndex === 0} />
+                      <span style={{ fontSize: 12 }}>{selectedIndex + 1}/{images.length}</span>
+                      <Button size="small" icon={<RightOutlined />} onClick={handleNextImage} disabled={selectedIndex === images.length - 1} />
+                    </Space>
+                    <Space>
+                      <span style={{ fontSize: 12 }}>Auto Zoom:</span>
+                      <Switch size="small" checked={autoZoomEnabled} onChange={handleToggleAutoZoom} />
+                      <Tooltip title="Reset Zoom"><Button size="small" icon={<UndoOutlined />} onClick={handleResetPresets} /></Tooltip>
+                    </Space>
+                  </div>
                   {/* LOGIC LOADING RIÊNG CHO TAB HÌNH ẢNH */}
                   {(loading && images.length === 0) ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
@@ -934,7 +995,7 @@ const isImagesLoadedRef = useRef(false);
               label: <span><RobotOutlined /> AI Orders</span>,
               children: renderAIOrdersTab()
             },
-            
+
           ]}
         />
       </div>

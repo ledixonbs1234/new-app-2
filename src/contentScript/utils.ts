@@ -15,7 +15,8 @@ export function waitForElm(selector: string, timeout: number = 5): Promise<HTMLI
         return reject(new Error(`Timeout exceeded (${timeout} seconds)`));
       }
 
-      requestAnimationFrame(checkElement);
+      // THAY ĐỔI Ở ĐÂY: Dùng setTimeout thay vì requestAnimationFrame
+      setTimeout(checkElement, 100); 
     };
 
     checkElement();
