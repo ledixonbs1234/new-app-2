@@ -13,6 +13,10 @@ This is a Chrome Manifest V3 extension that automates order processing workflows
   - `contentGiaoDich.tsx`, `contentCms.tsx`, `contentGoogleForm.tsx`: Specialized handlers
   - `mainScript.tsx`: MAIN world script accessing React internals via `FindReact()` function
 - **Popup** (`src/popup/`): React + Redux Toolkit UI with tabs for JSON data input, batch operations, and Google Forms integration
+- **Side Panel** (`src/sidepanel/`): React + Ant Design UI for:
+  - Image viewing with Pan/Zoom and preset management
+  - AI Order processing and form filling
+  - Realtime synchronization with Background and Content Scripts
 - **Options Page** (`src/options/`): Configuration interface
 
 ### Build System
@@ -37,10 +41,17 @@ All `chrome.runtime.sendMessage` and `chrome.tabs.sendMessage` calls use structu
 
 // Popup ↔ Background
 { type: "GET_INITIAL_DATA" | "SAVE_ORDERS" | "SET_CURRENT_INDEX" | "CLEAR_ORDERS", payload?: any }
-```
+
+// Side Panel Messages
+{ type: "SIDEPANEL_PING" } // Health check
+{ type: "SIDEPANEL_NEXT_IMAGE" } // Auto-advance to next item
+{ type: "IMAGES_UPDATED" } // Trigger reload of images from DB
+{ type: "PORTAL_LIST_UPDATED", data: any[] } // Sync Portal data to Side Panel
+
 
 #### Cross-Context Communication
 - **Content Script ↔ MAIN world**: Uses `window.postMessage()` with `{ type: "MAIN" | "CONTENT", message: string, data: any }`
+- **Side Panel ↔ Window**: Uses `window.postMessage()` for features like Smart Zoom (`APPLY_SMART_ZOOM`)
 - **Background broadcasts**: `broadcastUpdate()` function sends `STORAGE_UPDATED` to all contexts when session storage changes
 
 #### Important: Async Callbacks
@@ -78,6 +89,10 @@ xonapp-default-rtdb/
 
 #### Sync Implementation (see FIREBASE_SYNC_IMPLEMENTATION.md)
 - **ExtraInfo**: Order notes use `GET_EXTRA_INFO` and `UPDATE_EXTRA_INFO` messages to background
+- **Side Panel Images**:
+  - Uses `src/sidepanel/utils/firebaseSync.ts` to listen for new images in `scanData/`
+  - Images are cached locally in IndexedDB (via `idb`) for performance
+  - Background sends `IMAGES_UPDATED` when new data arrives
 - Background queries/updates Firebase, then broadcasts to all tabs
 - No local storage for this data - single source of truth in Firebase
 
@@ -143,6 +158,12 @@ function forceChange(input: HTMLInputElement) {
 }
 // Click cell → wait for input → set value → forceChange → blur
 ```
+
+#### Side Panel & AI Integration
+**Feature**: Side Panel providing auxiliary tools (Images, AI Orders) alongside the main Portal UI.
+- **Auto-Zoom**: intelligently updates zoom/pan presets based on the active field in the Portal (e.g., zooms into `WEIGHT` crop when Weight field is focused).
+- **AI Orders**: Displays a processed list of orders (parsed via AI) and allows one-click filling into the Portal form.
+- **Throttle**: Prevents rapid-fire actions (like "Next Image") using a 1s throttle in `SidePanel.tsx`.
 
 #### Portal Processing Queue
 Background script manages processing queue with these functions:

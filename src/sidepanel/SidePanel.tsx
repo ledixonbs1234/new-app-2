@@ -424,6 +424,22 @@ const SidePanel: React.FC = () => {
       return <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>Chưa có dữ liệu. Hãy dùng "Dùng AI" ở Popup.</div>;
     }
 
+    // 1. Tính toán COD phổ biến nhất (Mode)
+    const codCounts = new Map<number, number>();
+    aiOrders.forEach(o => {
+      const cod = o.COD || 0;
+      codCounts.set(cod, (codCounts.get(cod) || 0) + 1);
+    });
+
+    let majorityCOD = -1;
+    let maxCount = 0;
+    for (const [cod, count] of codCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        majorityCOD = cod;
+      }
+    }
+
     return (
       <div
         id="ai-orders-list"
@@ -470,6 +486,15 @@ const SidePanel: React.FC = () => {
               <span style={{ fontSize: '12px', color: '#ccc', fontStyle: 'italic' }}>Chưa xác định màu</span>
             )}
           </div>
+          {/* Thêm thông tin về COD phổ biến nếu có sự chênh lệch */}
+          {codCounts.size > 1 && maxCount < aiOrders.length && (
+            <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #eee', fontSize: '12px' }}>
+              <span style={{ color: '#666' }}>COD phổ biến: </span>
+              <b style={{ color: '#1890ff' }}>{majorityCOD.toLocaleString()}</b>
+              <span style={{ color: '#999' }}> ({maxCount} đơn)</span>
+              <span style={{ marginLeft: 8, color: '#ff4d4f' }}>• Khác: {aiOrders.length - maxCount} đơn</span>
+            </div>
+          )}
         </div>
 
         {/* --- DANH SÁCH ĐƠN HÀNG (GIỮ NGUYÊN) --- */}
@@ -480,6 +505,7 @@ const SidePanel: React.FC = () => {
 
         {aiOrders.map((order, idx) => {
           const isSelected = idx === aiSelectedIndex;
+          const isAbnormalCOD = majorityCOD !== -1 && order.COD !== majorityCOD;
 
           // Logic màu sắc từng item (giữ nguyên code cũ của bạn)
           const ms = order.MAUSAC ? order.MAUSAC.toUpperCase() : "";
@@ -506,14 +532,26 @@ const SidePanel: React.FC = () => {
             tagStyle.border = '1px solid #d9d9d9';
           }
 
+          // Style background cho item khác thường
+          let bgStyle = '#fff';
+          let borderStyle = '1px solid #d9d9d9';
+
+          if (isSelected) {
+            bgStyle = '#e6f7ff';
+            borderStyle = '1px solid #1890ff';
+          } else if (isAbnormalCOD) {
+            bgStyle = '#fff1f0'; // Light red/pink warning
+            borderStyle = '1px solid #ffccc7'; // Red border
+          }
+
           return (
             <div
               key={idx}
               id={`ai-order-${idx}`}
               onClick={() => handleSelectAIOrder(idx)}
               style={{
-                background: isSelected ? '#e6f7ff' : '#fff',
-                border: isSelected ? '1px solid #1890ff' : '1px solid #d9d9d9',
+                background: bgStyle,
+                border: borderStyle,
                 borderRadius: '8px',
                 padding: '10px',
                 marginBottom: '8px',
@@ -540,7 +578,7 @@ const SidePanel: React.FC = () => {
                     </Tag>
                   )}
                   {order.COD > 0 && (
-                    <Tag color="green" style={{ margin: 0, fontSize: '11px' }}>
+                    <Tag color={isAbnormalCOD ? "red" : "green"} style={{ margin: 0, fontSize: '11px', fontWeight: isAbnormalCOD ? 'bold' : 'normal' }}>
                       <DollarOutlined /> {order.COD.toLocaleString()}
                     </Tag>
                   )}
@@ -871,7 +909,7 @@ const SidePanel: React.FC = () => {
 
   return (
     <div className="sidepanel-container" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-     
+
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <Tabs
           activeKey={activeTab}
@@ -942,12 +980,12 @@ const SidePanel: React.FC = () => {
 
                 <div className="sidepanel-content" style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
-          <Space>
-            <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined />} onClick={handleClearAllImages} /></Tooltip>
-            <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
-          </Space>
-        </div>
+                    <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
+                    <Space>
+                      <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined />} onClick={handleClearAllImages} /></Tooltip>
+                      <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
+                    </Space>
+                  </div>
                   <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <Space>
                       <Button size="small" icon={<LeftOutlined />} onClick={handlePreviousImage} disabled={selectedIndex === 0} />
