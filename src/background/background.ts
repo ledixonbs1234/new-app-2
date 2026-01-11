@@ -5020,12 +5020,12 @@ async function handleAIOrders(data: any) {
       // Map dữ liệu từ Firebase sang cấu trúc Order của app
       const mappedOrders: Order[] = rawData.map((item: any) => ({
         // Map maHieu vào MAHIEU riêng biệt
-        MAHIEU: item.maHieu || "", 
-        
+        MAHIEU: item.maHieu || "",
+
         // GOC có thể để là địa chỉ hoặc chuỗi gốc tùy logic cũ, 
         // ở đây mình map diaChi vào GOC để hiển thị fallback nếu cần
-        GOC: item.diaChi || item.maHieu || "", 
-        
+        GOC: item.diaChi || item.maHieu || "",
+
         NGUOINHAN: item.tenNguoiNhan || "",
         DIACHI: item.diaChi || "",
         SDT: item.soDienThoai || "",
@@ -5373,7 +5373,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           formData.append("actType", "4");
           formData.append("actResult", "490"); // 490 = Phát thành công/Giải quyết xong
           formData.append("ttkId", ticketId);
-          formData.append("actContent", "PTC");
+          formData.append("actContent", "<-Tạm đóng->");
           formData.append("file", "undefined");
           formData.append("isProcess", "true");
           formData.append("isCompensated", "false");

@@ -40,7 +40,8 @@
         "webNavigation",
         "scripting",
         "sidePanel",
-        "cookies"
+        "cookies",
+        "downloads"
     ],
     "web_accessible_resources": [
         {
