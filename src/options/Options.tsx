@@ -11,14 +11,15 @@ import NewConfigRow from './components/NewConfigRow';
 import CreateCMSModal from './components/CreateCMSModal';
 import ExtraInfoEditor from './components/ExtraInfoEditor';
 import BulkCMSModal from './components/BulkCMSModal';
+import CheckComplete from './CheckComplete';
 import { handleBulkCloseCMS } from './modals/bulkCloseModal';
 import { ExtendedOrder, BulkCMSItem } from '../types/vnpost';
 import { handleAutoGenerateCMS, handleAutoCloseCMS } from '../features/autoProcess';
 import { useFiltering } from '../features/filters';
 import { useOrderData } from '../hooks';
 import { fetchAccountSettings, fetchOrderHistory } from '../services/api';
-import { 
-    getCMSTemplates, saveCMSTemplates, getCMSAutoConfigs, saveCMSAutoConfigs, 
+import {
+    getCMSTemplates, saveCMSTemplates, getCMSAutoConfigs, saveCMSAutoConfigs,
     fetchCMSData, getExtraInfo,
     createCMSTicket, forwardCMSTicket
 } from '../services/chromeMessage';
@@ -69,6 +70,7 @@ const Options: React.FC = () => {
     const [bulkCloseItems, setBulkCloseItems] = useState<any[]>([]);
     const [isAutoClosing, setIsAutoClosing] = useState(false);
     const [isAutoClosingProcessing, setIsAutoClosingProcessing] = useState(false);
+    const [currentView, setCurrentView] = useState<'list' | 'checkComplete'>('list');
 
     useEffect(() => {
         const initializeOptions = async () => {
@@ -244,7 +246,7 @@ const Options: React.FC = () => {
         setSingleSearchLoading(true);
         try {
             const newOrder = await handleFetchSingleOrder(itemCode, token, orgCode, senderInfo || undefined);
-            
+
             if (newOrder) {
                 // Clear table and show only this order
                 setOrders([newOrder]);
@@ -543,12 +545,12 @@ const Options: React.FC = () => {
             const historyData: OrderHistoryResponse = await historyRes.json();
 
             // 3. Extra Info (Firebase) - using service
-             const extraInfoRes = await getExtraInfo(order.itemCode);
-             const extraInfo = extraInfoRes?.status === 'success' ? extraInfoRes.data : '';
+            const extraInfoRes = await getExtraInfo(order.itemCode);
+            const extraInfo = extraInfoRes?.status === 'success' ? extraInfoRes.data : '';
 
-             // 4. CMS Data - using service
-             const cmsDataRes = await fetchCMSData(order.itemCode);
-             const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
+            // 4. CMS Data - using service
+            const cmsDataRes = await fetchCMSData(order.itemCode);
+            const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
 
             const updates = {
                 detail: detailData,
@@ -1157,6 +1159,10 @@ const Options: React.FC = () => {
         setBulkCMSModalOpen(true);
     };
 
+    if (currentView === 'checkComplete') {
+        return <CheckComplete onBack={() => setCurrentView('list')} />;
+    }
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
             <div className="bg-white/80 backdrop-blur-sm shadow-lg mb-6 sticky top-0 z-50 border-b border-slate-200">
@@ -1195,6 +1201,14 @@ const Options: React.FC = () => {
                                 <div className="text-xs text-gray-500">{senderInfo.code}</div>
                             </div>
                         )}
+                        <Button
+                            size="small"
+                            type="primary"
+                            onClick={() => setCurrentView('checkComplete')}
+                            className="rounded-lg shadow-sm bg-purple-600 hover:bg-purple-500 border-none mr-2"
+                        >
+                            Check Complete
+                        </Button>
                         <Tooltip title="Xóa Cache">
                             <Button size="small" icon={<DeleteOutlined />} danger onClick={handleClearCache} className="rounded-lg shadow-sm" />
                         </Tooltip>
@@ -1687,9 +1701,9 @@ const Options: React.FC = () => {
                                             });
 
                                             const saveData = await saveRes.json();
-                                             if (!saveData.result || saveData.message !== 'Success') {
-                                                 throw new Error(saveData.message || 'Failed to save result');
-                                             }
+                                            if (!saveData.result || saveData.message !== 'Success') {
+                                                throw new Error(saveData.message || 'Failed to save result');
+                                            }
 
                                             // Delay 1s giữa save result và change status
                                             await new Promise(resolve => setTimeout(resolve, 1000));
