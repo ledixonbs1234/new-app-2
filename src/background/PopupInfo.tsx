@@ -37,5 +37,6 @@ type ItemDetailProp = {
   codAmount:string;
   dispatchNumber:string;
   receiverAddress:string;
-  receiverProvinceCode:string
+  receiverProvinceCode:string,
+  receiverProvinceCodeExt:string
 };

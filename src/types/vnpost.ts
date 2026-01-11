@@ -99,6 +99,7 @@ export interface Order {
     DIACHI: string;
     SDT: string;
     COD: number;
+    MAHIEU?: string;
 }
 export interface ExtraInfo {
     maVanDon: string;

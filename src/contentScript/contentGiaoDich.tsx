@@ -512,6 +512,19 @@ function listenForFillForm() {
           nameInput.dispatchEvent(new Event('input', { bubbles: true }));
           nameInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
+        if (order.MAHIEU) {
+          const ttNumberInput = document.getElementById(ELEMENT_IDS.TT_NUMBER) as HTMLInputElement;
+          if (!ttNumberInput) {
+            console.warn("[GiaoTich] ttNumber input not found");
+            // Không return ở đây để các trường khác vẫn được điền
+          } else {
+            console.log("[GiaoTich] Filling ttNumber:", order.MAHIEU);
+            ttNumberInput.value = order.MAHIEU;
+            ttNumberInput.dispatchEvent(new Event('input', { bubbles: true }));
+            ttNumberInput.dispatchEvent(new Event('change', { bubbles: true }));
+            ttNumberInput.dispatchEvent(new Event('blur', { bubbles: true }));
+          }
+        }
 
 
 
@@ -619,7 +632,7 @@ function monitorParcelIndex(): void {
 
   // Store observer và cleanup function vào global để dọn dẹp sau
   (window as any)._parcelIndexObserver = observer;
-  
+
   // Lưu reference tới element và listener để removeEvent khi deactivate
   (window as any)._parcelInputRef = parcelIndexInput;
   (window as any)._parcelInputListener = inputListener;
@@ -1611,12 +1624,12 @@ function deactivateScript(): void {
     (window as any)._parcelIndexObserver.disconnect();
     (window as any)._parcelIndexObserver = null;
   }
-  
+
   // Remove event listener thủ công
   if ((window as any)._parcelInputRef && (window as any)._parcelInputListener) {
-      (window as any)._parcelInputRef.removeEventListener('input', (window as any)._parcelInputListener);
-      (window as any)._parcelInputRef = null;
-      (window as any)._parcelInputListener = null;
+    (window as any)._parcelInputRef.removeEventListener('input', (window as any)._parcelInputListener);
+    (window as any)._parcelInputRef = null;
+    (window as any)._parcelInputListener = null;
   }
 
   // Reset lastParcelIndexValue

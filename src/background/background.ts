@@ -962,7 +962,7 @@ async function findPortalTabId(
   maKH: string = "",
   hdrId?: string | undefined,
 ): Promise<number | undefined> {
-  await delay(500); // Đợi một chút để đảm bảo tab đã load xong
+  await delay(300); // Đợi một chút để đảm bảo tab đã load xong
   console.log("handleSendAutoToPortal: Bắt đầu kiểm tra tab Portal...");
   let foundReadyTabId: number | null = null;
   let readyTabInfo: chrome.tabs.Tab | null = null; // Lưu thông tin tab tìm thấy
@@ -1054,7 +1054,7 @@ async function findPortalTabId(
         });
         await waitForTabToLoad(foundReadyTabId);
       }
-      await delay(500);
+      await delay(300);
 
       // *** Gọi trực tiếp handleSendToPortal ***
       // Hàm này sẽ tự động lấy tab đang active (chính là tab vừa được kích hoạt)
@@ -1328,6 +1328,7 @@ async function handleDataChange(
       updateToPC("checkdingoais", JSON.stringify(result));
     },
     getmypostdata: async (data: any) => await handleGetMyPostData(data),
+    aiorders: async (data: any) => await handleAIOrders(data),
     continueAuto: async (_data: any) => {
       // Không cần data.DoiTuong cho lệnh này
       console.log("Received 'continueAuto' command from Firebase.");
@@ -2775,14 +2776,25 @@ const prepareBlobs = async (maHieus: string[]) => {
     }
   }
 };
+interface ProvinceItem {
+  ten_tinh: string;
+  ma_tinh: string[];
+}
 
-// Lưu trữ dữ liệu tỉnh thành để không phải load lại nhiều lần
-let tinhThanhData: { vo: string[]; ra: string[] } | null = null;
+interface TinhThanhData {
+  vo: ProvinceItem[];
+  ra: ProvinceItem[];
+  quangnam: ProvinceItem[];
+  quangngai: ProvinceItem[];
+}
+
+// Lưu trữ dữ liệu tỉnh thành
+let tinhThanhData: TinhThanhData | null = null;
 /**
  * Nạp dữ liệu từ file tinhthanh.json.
  * Sử dụng cache để chỉ nạp một lần duy nhất.
  */
-const loadTinhThanhData = async () => {
+const loadTinhThanhData = async (): Promise<TinhThanhData> => {
   if (tinhThanhData) {
     return tinhThanhData;
   }
@@ -2793,11 +2805,11 @@ const loadTinhThanhData = async () => {
       throw new Error("Không thể tải file tinhthanh.json");
     }
     tinhThanhData = await response.json();
-    return tinhThanhData;
+    return tinhThanhData!;
   } catch (error) {
     console.error("Lỗi khi nạp dữ liệu tỉnh thành:", error);
-    // Trả về đối tượng rỗng để tránh lỗi ở các bước sau
-    return { vo: [], ra: [] };
+    // Trả về object rỗng đúng kiểu để tránh lỗi
+    return { vo: [], ra: [], quangnam: [], quangngai: [] };
   }
 };
 
@@ -2892,83 +2904,119 @@ const getSortingGroup = (
 const handlePrintSortTinhVaNoiDung = async (data: any) => {
   try {
     // Bước 1: Lấy dữ liệu tỉnh thành từ file JSON
-    const provinces = await loadTinhThanhData();
+    const provinceData = await loadTinhThanhData();
 
-    // Bước 2: Lấy dữ liệu chi tiết các mã hiệu
+    // Bước 2: Tạo các Set mã tỉnh để tra cứu nhanh (O(1))
+    const voCodes = new Set<string>();
+    const raCodes = new Set<string>();
+    const quangNamCodes = new Set<string>();
+    const quangNgaiCodes = new Set<string>();
+
+    // Helper để fill Set từ dữ liệu JSON
+    const fillSet = (list: ProvinceItem[] | undefined, targetSet: Set<string>) => {
+      if (!list) return;
+      list.forEach(province => {
+        if (province.ma_tinh) {
+          province.ma_tinh.forEach(code => targetSet.add(code.toString()));
+        }
+      });
+    };
+
+    fillSet(provinceData.vo, voCodes);
+    fillSet(provinceData.ra, raCodes);
+    fillSet(provinceData.quangnam, quangNamCodes);
+    fillSet(provinceData.quangngai, quangNgaiCodes);
+
+    // Bước 3: Lấy dữ liệu chi tiết các mã hiệu từ API
     const res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
     if (!res) {
       console.error("Không lấy được dữ liệu chi tiết từ Portal.");
       updateToPhone("error", "Lỗi: Không lấy được dữ liệu chi tiết từ Portal.");
       return;
     }
-    console.log("Dữ liệu gốc từ API:", res);
 
-    // Bước 3: Làm phẳng mảng để có danh sách tất cả các item
+    // Bước 4: Làm phẳng mảng để có danh sách tất cả các item
     const allItems = (res as NguoiGuiDetailProp[]).flatMap(
-      (m) => m.itemDetails,
+      (m) => m.itemDetails
     );
 
-    // *** ĐỊNH NGHĨA THỨ TỰ ƯU TIÊN MỚI ***
-    // Gán một giá trị số cho mỗi nhóm. Số nhỏ hơn sẽ được ưu tiên xếp trước.
-    const groupPriorities: { [key: string]: number } = {
-      quang_nam: 1,
-      quang_ngai: 2,
-      ra: 3,
-      vo: 4,
-      khong_xac_dinh: 5, // Xếp cuối cùng
+    // Bước 5: Định nghĩa mức độ ưu tiên sắp xếp
+    // Nhỏ hơn xếp trước
+    const PRIORITY = {
+      QUANG_NAM: 1,
+      QUANG_NGAI: 2,
+      RA: 3,
+      VO: 4,     // Bao gồm cả Bình Định (55)
+      UNKNOWN: 5
     };
 
-    // Bước 4: Sắp xếp mảng allItems theo logic đa cấp mới
+    // Hàm xác định nhóm ưu tiên dựa trên mã tỉnh (Logic Flutter)
+    const getGroupPriority = (item: any): number => {
+      // Lấy mã tỉnh, ưu tiên receiverProvinceCode (thường là mã 2 số), nếu không có dùng Ext
+      // Lưu ý: ItemDetailProp cần có trường chứa mã tỉnh. 
+      // Trong type cũ bạn khai báo: receiverProvinceCode, receiverProvinceCodeExt
+      // Cần đảm bảo dữ liệu API trả về có trường này.
+      let code = item.receiverProvinceCodeExt || item.receiverProvinceCode || "";
+      code = code.trim();
+
+      if (!code) return PRIORITY.UNKNOWN;
+
+      // Xử lý đặc biệt cho Bình Định (Mã 55)
+      if (code === '55') {
+        // Logic Flutter:
+        // if (_isBinhDinhSpecialLocation(item.Address)) { ... } else { aggregatedCounts['VÔ']++ }
+
+        // Hiện tại chưa có danh sách địa danh đặc biệt của Bình Định, 
+        // nên ta xử lý mặc định vào nhóm VÔ (theo nhánh else của Flutter).
+        // Nếu sau này có danh sách "địa danh đặc biệt", thêm logic check item.receiverAddress ở đây.
+        return PRIORITY.VO;
+      }
+
+      if (quangNamCodes.has(code)) return PRIORITY.QUANG_NAM;
+      if (quangNgaiCodes.has(code)) return PRIORITY.QUANG_NGAI;
+      if (raCodes.has(code)) return PRIORITY.RA;
+      if (voCodes.has(code)) return PRIORITY.VO;
+
+      return PRIORITY.UNKNOWN;
+    };
+
+    // Bước 6: Sắp xếp danh sách
     allItems.sort((a, b) => {
       // Tiêu chí 1: Sắp xếp theo Nhóm (Quảng Nam -> Quảng Ngãi -> Ra -> Vô)
-      const safeProvinces = provinces ?? { vo: [], ra: [] };
-      const groupA = getSortingGroup(a.receiverAddress, safeProvinces);
-      const groupB = getSortingGroup(b.receiverAddress, safeProvinces);
-
-      const priorityA = groupPriorities[groupA];
-      const priorityB = groupPriorities[groupB];
+      const priorityA = getGroupPriority(a);
+      const priorityB = getGroupPriority(b);
 
       if (priorityA !== priorityB) {
-        return priorityA - priorityB; // So sánh trực tiếp độ ưu tiên
+        return priorityA - priorityB;
       }
 
-      // *** BẮT ĐẦU THAY ĐỔI ***
-      // Nếu cùng nhóm chính, chuyển sang tiêu chí 2
-      // Tiêu chí 2: Sắp xếp theo dispatchNumber để nhóm các chuỗi giống hệt nhau lại với nhau.
-      // Chúng ta sử dụng localeCompare để so sánh chuỗi một cách tự nhiên.
-      // Điều này sẽ đặt "DO" cạnh "DO", "TRANG" cạnh "TRANG", v.v.
-      const dispatchA = a.dispatchNumber || ""; // Xử lý trường hợp null/undefined
-      const dispatchB = b.dispatchNumber || ""; // Xử lý trường hợp null/undefined
+      // Tiêu chí 2: Nếu cùng nhóm, sắp xếp theo dispatchNumber (nội dung ghi chú/màu sắc)
+      const dispatchA = a.dispatchNumber || "";
+      const dispatchB = b.dispatchNumber || "";
 
-      const dispatchComparison = dispatchA.localeCompare(dispatchB);
-      if (dispatchComparison !== 0) {
-        return dispatchComparison;
-      }
-      // *** KẾT THÚC THAY ĐỔI ***
-
-      // Nếu mọi tiêu chí đều giống nhau, giữ nguyên thứ tự
-      return 0;
+      return dispatchA.localeCompare(dispatchB);
     });
-    const safeProvinces = provinces ?? { vo: [], ra: [] };
-    console.log(
-      "Dữ liệu sau khi sắp xếp:",
-      allItems.map((item) => ({
-        ma: item.ttNumber,
-        diaChi: item.receiverAddress,
-        nhom: getSortingGroup(item.receiverAddress, safeProvinces),
-      })),
-    );
 
-    // Bước 5: Trích xuất chỉ ttNumber từ danh sách đã sắp xếp
+    // Log kiểm tra
+    console.log("Dữ liệu sau khi sắp xếp (Mã - Tỉnh - Nhóm):");
+    allItems.forEach(item => {
+      const code = item.receiverProvinceCodeExt || item.receiverProvinceCode || "";
+      console.log(`${item.ttNumber} - Code: ${code} - Priority: ${getGroupPriority(item)} - Dispatch: ${item.dispatchNumber}`);
+    });
+
+    // Bước 7: Trích xuất ttNumber và In
     const sortedMaHieus = allItems.map((item) => item.ttNumber);
 
-    console.log("Danh sách mã hiệu cuối cùng để in:", sortedMaHieus);
+    if (sortedMaHieus.length === 0) {
+      updateToPhone("error", "Không có mã nào để in sau khi lọc.");
+      return;
+    }
 
-    // Bước 6: Gọi hàm in
     await printMaHieus(sortedMaHieus);
-  } catch (error) {
+
+  } catch (error: any) {
     console.error("Đã xảy ra lỗi trong quá trình xử lý in:", error);
-    updateToPhone("error", `Lỗi khi sắp xếp và in: ${error}`);
+    updateToPhone("error", `Lỗi khi sắp xếp và in: ${error.message}`);
   }
 };
 
@@ -3100,7 +3148,7 @@ const handleGetMaHieus = async (data: any) => {
         Address: n.receiverAddress,
         Name: n.receiverName,
         Date: n.createdDate,
-        ProvinceCode: n.receiverProvinceCode,
+        ProvinceCode: n.receiverProvinceCodeExt || n.receiverProvinceCode,
         Money: n.codAmount,
       })),
     )
@@ -4927,6 +4975,7 @@ interface Order {
   DIACHI: string;
   SDT: string;
   COD: number;
+  MAHIEU?: string;
 }
 
 interface SessionData {
@@ -4947,17 +4996,57 @@ function broadcastUpdate(payload: SessionData) {
     }
   });
 }
-const save_order = (msg: any, sendResponse: (response: any) => void) => {
+const internalSaveOrders = (orders: Order[]) => {
   const dataToSave: SessionData = {
-    orders: msg.payload.orders,
+    orders: orders,
     currentIndex: 0,
   };
-  console.log("Saving orders to session storage:", dataToSave);
+  console.log("Saving orders via internal handler:", dataToSave);
   chrome.storage.session.set(dataToSave, () => {
     broadcastUpdate(dataToSave);
-    sendResponse({ status: "ok" });
   });
 };
+const save_order = (msg: any, sendResponse: (response: any) => void) => {
+  internalSaveOrders(msg.payload.orders);
+  sendResponse({ status: "ok" });
+
+};
+async function handleAIOrders(data: any) {
+  try {
+    console.log("Received AI Orders from Firebase:", data.DoiTuong);
+    const rawData = JSON.parse(data.DoiTuong);
+
+    if (Array.isArray(rawData)) {
+      // Map dữ liệu từ Firebase sang cấu trúc Order của app
+      const mappedOrders: Order[] = rawData.map((item: any) => ({
+        // Map maHieu vào MAHIEU riêng biệt
+        MAHIEU: item.maHieu || "", 
+        
+        // GOC có thể để là địa chỉ hoặc chuỗi gốc tùy logic cũ, 
+        // ở đây mình map diaChi vào GOC để hiển thị fallback nếu cần
+        GOC: item.diaChi || item.maHieu || "", 
+        
+        NGUOINHAN: item.tenNguoiNhan || "",
+        DIACHI: item.diaChi || "",
+        SDT: item.soDienThoai || "",
+        MAUSAC: "", // Mặc định rỗng vì dữ liệu nguồn không có
+        COD: 0      // Mặc định 0
+      }));
+
+      // Lưu vào session storage
+      internalSaveOrders(mappedOrders);
+
+      // Thông báo lại cho điện thoại
+      await updateToPhone("message", `Đã đồng bộ ${mappedOrders.length} đơn hàng AI.`);
+    } else {
+      console.error("Dữ liệu aiorders không phải là mảng.");
+      await updateToPhone("message", "Lỗi: Dữ liệu AI không đúng định dạng.");
+    }
+  } catch (error: any) {
+    console.error("Error handling AI Orders:", error);
+    await updateToPhone("message", `Lỗi xử lý AI Orders: ${error.message}`);
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {

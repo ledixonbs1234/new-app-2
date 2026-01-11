@@ -529,6 +529,11 @@ const SidePanel: React.FC = () => {
                 </strong>
 
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
+                  {order.MAHIEU && (
+                    <Tag color="purple" style={{ margin: 0, fontSize: '11px', fontWeight: 'bold' }}>
+                      {order.MAHIEU}
+                    </Tag>
+                  )}
                   {order.MAUSAC && (
                     <Tag style={tagStyle}>
                       {order.MAUSAC}

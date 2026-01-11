@@ -639,6 +639,7 @@ async function processSinglePortalItem(
     if (!findAndSearchBtn) {
       throw new Error("Không tìm thấy nút 'Lưu và tìm kiếm'");
     }
+     await delay(300);
 
     (findAndSearchBtn as HTMLElement).click();
 

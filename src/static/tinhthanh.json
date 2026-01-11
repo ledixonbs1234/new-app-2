@@ -1,69 +1,406 @@
 {
   "vo": [
-    "tỉnh bình định",
-    "tỉnh phú yên",
-    "tỉnh khánh hòa",
-    "tỉnh ninh thuận",
-    "tỉnh bình thuận",
-    "tỉnh kon tum",
-    "tỉnh gia lai",
-    "tỉnh đắk lắk",
-    "tỉnh đắk nông",
-    "tỉnh lâm đồng",
-    "tỉnh bình phước",
-    "tỉnh tây ninh",
-    "tỉnh bình dương",
-    "tỉnh đồng nai",
-    "tỉnh bà rịa vũng tàu",
-    "tp. hồ chí minh",
-    "tỉnh long an",
-    "tỉnh tiền giang",
-    "tỉnh bến tre",
-    "tỉnh trà vinh",
-    "tỉnh vĩnh long",
-    "tỉnh đồng tháp",
-    "tỉnh an giang",
-    "tỉnh kiên giang",
-    "tp. cần thơ",
-    "tỉnh hậu giang",
-    "tỉnh sóc trăng",
-    "tỉnh bạc liêu",
-    "tỉnh cà mau"
+    {
+      "ten_tinh": "tỉnh bình định",
+      "ma_tinh": [
+        "55"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh phú yên",
+      "ma_tinh": [
+        "56"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh khánh hòa",
+      "ma_tinh": [
+        "57"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh ninh thuận",
+      "ma_tinh": [
+        "59"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bình thuận",
+      "ma_tinh": [
+        "77"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh kon tum",
+      "ma_tinh": [
+        "60"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh gia lai",
+      "ma_tinh": [
+        "61",
+        "62"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh đắk lắk",
+      "ma_tinh": [
+        "63",
+        "64"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh đắk nông",
+      "ma_tinh": [
+        "65"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh lâm đồng",
+      "ma_tinh": [
+        "66"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bình phước",
+      "ma_tinh": [
+        "67"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh tây ninh",
+      "ma_tinh": [
+        "80"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bình dương",
+      "ma_tinh": [
+        "75"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh đồng nai",
+      "ma_tinh": [
+        "76"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bà rịa vũng tàu",
+      "ma_tinh": [
+        "78"
+      ]
+    },
+    {
+      "ten_tinh": "tp. hồ chí minh",
+      "ma_tinh": [
+        "70",
+        "71",
+        "73",
+        "72"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh long an",
+      "ma_tinh": [
+        "82",
+        "83"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh tiền giang",
+      "ma_tinh": [
+        "84"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bến tre",
+      "ma_tinh": [
+        "86"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh trà vinh",
+      "ma_tinh": [
+        "87"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh vĩnh long",
+      "ma_tinh": [
+        "85"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh đồng tháp",
+      "ma_tinh": [
+        "81"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh an giang",
+      "ma_tinh": [
+        "90"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh kiên giang",
+      "ma_tinh": [
+        "91",
+        "92"
+      ]
+    },
+    {
+      "ten_tinh": "tp. cần thơ",
+      "ma_tinh": [
+        "94"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hậu giang",
+      "ma_tinh": [
+        "95"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh sóc trăng",
+      "ma_tinh": [
+        "96"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bạc liêu",
+      "ma_tinh": [
+        "97"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh cà mau",
+      "ma_tinh": [
+        "98"
+      ]
+    }
   ],
   "ra": [
-    "tỉnh quảng ngãi",
-    "tỉnh quảng nam",
-    "tp. đà nẵng",
-    "tỉnh thừa thiên huế",
-    "tỉnh quảng trị",
-    "tỉnh quảng bình",
-    "tỉnh hà tĩnh",
-    "tỉnh nghệ an",
-    "tỉnh thanh hóa",
-    "tỉnh ninh bình",
-    "tỉnh hòa bình",
-    "tỉnh sơn la",
-    "tỉnh điện biên",
-    "tỉnh lai châu",
-    "tỉnh lào cai",
-    "tỉnh yên bái",
-    "tỉnh phú thọ",
-    "tỉnh hà giang",
-    "tỉnh tuyên quang",
-    "tỉnh cao bằng",
-    "tỉnh bắc kạn",
-    "tỉnh thái nguyên",
-    "tỉnh lạng sơn",
-    "tỉnh bắc giang",
-    "tỉnh quảng ninh",
-    "tp. hà nội",
-    "tp. hải phòng",
-    "tỉnh hải dương",
-    "tỉnh hưng yên",
-    "tỉnh hà nam",
-    "tỉnh nam định",
-    "tỉnh thái bình",
-    "tỉnh vĩnh phúc",
-    "tỉnh bắc ninh"
+    {
+      "ten_tinh": "tp. đà nẵng",
+      "ma_tinh": [
+        "50"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh thừa thiên huế",
+      "ma_tinh": [
+        "49"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh quảng trị",
+      "ma_tinh": [
+        "48"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh quảng bình",
+      "ma_tinh": [
+        "47"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hà tĩnh",
+      "ma_tinh": [
+        "45",
+        "46"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh nghệ an",
+      "ma_tinh": [
+        "43",
+        "44"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh thanh hóa",
+      "ma_tinh": [
+        "40",
+        "41",
+        "42"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh ninh bình",
+      "ma_tinh": [
+        "08"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hòa bình",
+      "ma_tinh": [
+        "36"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh sơn la",
+      "ma_tinh": [
+        "34"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh điện biên",
+      "ma_tinh": [
+        "32"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh lai châu",
+      "ma_tinh": [
+        "30"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh lào cai",
+      "ma_tinh": [
+        "31"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh yên bái",
+      "ma_tinh": [
+        "33"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh phú thọ",
+      "ma_tinh": [
+        "35"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hà giang",
+      "ma_tinh": [
+        "20"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh tuyên quang",
+      "ma_tinh": [
+        "22"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh cao bằng",
+      "ma_tinh": [
+        "21"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bắc kạn",
+      "ma_tinh": [
+        "23"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh thái nguyên",
+      "ma_tinh": [
+        "24"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh lạng sơn",
+      "ma_tinh": [
+        "25"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bắc giang",
+      "ma_tinh": [
+        "26"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh quảng ninh",
+      "ma_tinh": [
+        "01",
+        "02"
+      ]
+    },
+    {
+      "ten_tinh": "tp. hà nội",
+      "ma_tinh": [
+        "10",
+        "12",
+        "13",
+        "11"
+      ]
+    },
+    {
+      "ten_tinh": "tp. hải phòng",
+      "ma_tinh": [
+        "04",
+        "05"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hải dương",
+      "ma_tinh": [
+        "03"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hưng yên",
+      "ma_tinh": [
+        "17"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh hà nam",
+      "ma_tinh": [
+        "18"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh nam định",
+      "ma_tinh": [
+        "07"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh thái bình",
+      "ma_tinh": [
+        "06"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh vĩnh phúc",
+      "ma_tinh": [
+        "15"
+      ]
+    },
+    {
+      "ten_tinh": "tỉnh bắc ninh",
+      "ma_tinh": [
+        "16"
+      ]
+    }
+  ],
+  "quangngai": [
+    {
+      "ten_tinh": "tỉnh quảng ngãi",
+      "ma_tinh": [
+        "53",
+        "54"
+      ]
+    }
+  ],
+  "quangnam": [
+    {
+      "ten_tinh": "tỉnh quảng nam",
+      "ma_tinh": [
+        "51",
+        "52"
+      ]
+    }
   ]
 }
