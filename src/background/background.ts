@@ -69,6 +69,7 @@ let token: string = "";
 let accountPortal: string = "";
 let passwordPortal: string = "";
 let buuCuc = "";
+let aiKeysData: any = {}; // Cache dữ liệu để trả về ngay khi popup mở
 console.log("Background script is running");
 
 // --- TRẠNG THÁI CỤC BỘ (Sử dụng type BuuGuiProps đã import) ---
@@ -524,6 +525,17 @@ async function initFirebase(): Promise<void> {
   } else {
     console.log("[BG] Using Default AI Key");
   }
+
+  // ==> THÊM MỚI: Lắng nghe AI_KEYS và Sync với Popup
+  const refAiKeys = db.ref("AI_KEYS");
+  refAiKeys.on("value", (snapshot: any) => {
+    aiKeysData = snapshot.val() || {};
+    // Broadcast tin nhắn cho bất kỳ popup/tab nào đang mở
+    chrome.runtime.sendMessage({
+      type: "AI_KEYS_UPDATED",
+      data: aiKeysData
+    }).catch(() => { }); // Bỏ qua lỗi nếu không có popup nào mở
+  });
 
   ref = db.ref(`PORTAL/CHILD/${keyMessage}/message/topc`);
   refPing = db.ref(`PORTAL/STATUS/topc`);
@@ -1502,6 +1514,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       );
     }
 
+  // ==> THÊM MỚI: Xử lý các yêu cầu liên quan đến AI Keys từ InfoTab
+  if (request.type === "AI_KEY_ACTION") {
+    handleAiKeyAction(request).then(sendResponse);
+    return true; // Giữ kênh mở cho async response
+  }
+
   // --- KIỂM TRA CỜ DỪNG LỖI ---
   // Một số message vẫn cần chạy dù có lỗi, ví dụ PING hoặc lấy thông tin cơ bản
   // Nhưng các message liên quan đến xử lý nghiệp vụ chính thì nên kiểm tra
@@ -1730,6 +1748,45 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 const preParePrintMaHieus = async (maHieus: string[]) => {
   await prepareBlobs(maHieus);
 };
+
+async function handleAiKeyAction(request: any) {
+  if (!db) return { status: "error", error: "Firebase not initialized" };
+
+  try {
+    const { action, payload } = request;
+    
+    if (action === "GET_ALL") {
+      // Trả về dữ liệu cache ngay lập tức
+      return { status: "success", data: aiKeysData };
+    }
+
+    if (action === "ADD") {
+      const newKeyRef = db.ref("AI_KEYS").push();
+      await newKeyRef.set({
+        name: payload.name,
+        key: payload.key
+      });
+      return { status: "success" };
+    }
+
+    if (action === "EDIT") {
+      await db.ref(`AI_KEYS/${payload.id}`).set({
+        name: payload.name,
+        key: payload.key
+      });
+      return { status: "success" };
+    }
+
+    if (action === "DELETE") {
+      await db.ref(`AI_KEYS/${payload.id}`).remove();
+      return { status: "success" };
+    }
+
+  } catch (error: any) {
+    console.error("AI Key Action Error:", error);
+    return { status: "error", error: error.message };
+  }
+}
 
 /**
  * Lưu thông tin thêm vào Firebase

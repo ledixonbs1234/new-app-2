@@ -17,6 +17,7 @@ declare namespace firebase {
       get(): Promise<DataSnapshot>;
       set(value: any): Promise<void>; // Added set method
       remove(): Promise<void>; // Added remove method
+      push(value?: any): Reference; 
       // ... other methods you use
     }
 

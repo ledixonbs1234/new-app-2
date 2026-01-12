@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Button, Input, Space, Card, message, List, Radio, Popconfirm, Modal } from "antd";
 import { DeleteOutlined, EditOutlined, PlusOutlined, SaveOutlined } from "@ant-design/icons";
-import { db, ref, set, onValue, remove, push } from "../utils/firebaseConfig";
 
 interface InfoTabProps {
   onSaveAccount: (acc: string, pass: string, token: string, bc: string, key: string) => void;
@@ -46,9 +45,8 @@ export default function InfoTab({ onSaveAccount }: InfoTabProps) {
 
   // Load AI Keys từ Firebase (Global)
   useEffect(() => {
-    const keysRef = ref(db, "AI_KEYS");
-    const unsubscribe = onValue(keysRef, (snapshot) => {
-      const data = snapshot.val();
+    // 1. Hàm helper chuyển đổi Object sang Array
+    const transformData = (data: any) => {
       const loadedKeys: AiKeyItem[] = [];
       if (data) {
         Object.entries(data).forEach(([id, value]: [string, any]) => {
@@ -56,8 +54,24 @@ export default function InfoTab({ onSaveAccount }: InfoTabProps) {
         });
       }
       setAiKeys(loadedKeys);
+    };
+
+    // 2. Lấy dữ liệu ban đầu
+    chrome.runtime.sendMessage({ type: "AI_KEY_ACTION", action: "GET_ALL" }, (response) => {
+      if (response && response.status === "success") {
+        transformData(response.data);
+      }
     });
-    return () => unsubscribe();
+
+    // 3. Lắng nghe sự kiện cập nhật realtime từ Background
+    const messageListener = (msg: any) => {
+      if (msg.type === "AI_KEYS_UPDATED") {
+        transformData(msg.data);
+      }
+    };
+
+    chrome.runtime.onMessage.addListener(messageListener);
+    return () => chrome.runtime.onMessage.removeListener(messageListener);
   }, []);
 
   // Xử lý lưu thông tin Account
@@ -76,34 +90,50 @@ export default function InfoTab({ onSaveAccount }: InfoTabProps) {
 
   // --- Xử lý AI Keys ---
 
-  const handleAddOrEditKey = () => {
+   const handleAddOrEditKey = () => {
     if (!inputName || !inputKey) {
       message.error("Vui lòng nhập tên và key");
       return;
     }
 
     if (editingKey) {
-      // Edit
-      set(ref(db, `AI_KEYS/${editingKey.id}`), {
-        name: inputName,
-        key: inputKey
-      }).then(() => message.success("Đã cập nhật Key"));
+      // Edit: Gửi lệnh EDIT sang background
+      chrome.runtime.sendMessage({
+        type: "AI_KEY_ACTION",
+        action: "EDIT",
+        payload: { id: editingKey.id, name: inputName, key: inputKey }
+      }, (res) => {
+        if (res?.status === "success") message.success("Đã cập nhật Key");
+        else message.error("Lỗi cập nhật Key");
+      });
     } else {
-      // Add New
-      const newKeyRef = push(ref(db, "AI_KEYS"));
-      set(newKeyRef, {
-        name: inputName,
-        key: inputKey
-      }).then(() => message.success("Đã thêm Key mới"));
+      // Add New: Gửi lệnh ADD sang background
+      chrome.runtime.sendMessage({
+        type: "AI_KEY_ACTION",
+        action: "ADD",
+        payload: { name: inputName, key: inputKey }
+      }, (res) => {
+        if (res?.status === "success") message.success("Đã thêm Key mới");
+        else message.error("Lỗi thêm Key");
+      });
     }
     closeModal();
   };
 
-  const handleDeleteKey = (id: string) => {
-    remove(ref(db, `AI_KEYS/${id}`)).then(() => {
-      message.success("Đã xóa Key");
-      if (selectedAiKeyId === id) {
-        handleSelectKey(""); // Reset nếu xóa key đang chọn
+ const handleDeleteKey = (id: string) => {
+    // Delete: Gửi lệnh DELETE sang background
+    chrome.runtime.sendMessage({
+      type: "AI_KEY_ACTION",
+      action: "DELETE",
+      payload: { id }
+    }, (res) => {
+      if (res?.status === "success") {
+        message.success("Đã xóa Key");
+        if (selectedAiKeyId === id) {
+          handleSelectKey(""); // Reset nếu xóa key đang chọn
+        }
+      } else {
+        message.error("Lỗi xóa Key");
       }
     });
   };
@@ -111,10 +141,8 @@ export default function InfoTab({ onSaveAccount }: InfoTabProps) {
   const handleSelectKey = (id: string) => {
     setSelectedAiKeyId(id);
     const selectedKeyObj = aiKeys.find(k => k.id === id);
-    const keyValue = selectedKeyObj ? selectedKeyObj.key : ""; // Nếu id rỗng (Default) thì key rỗng
+    const keyValue = selectedKeyObj ? selectedKeyObj.key : ""; 
 
-    // Lưu ID để UI biết đang chọn cái nào
-    // Lưu Key Value để background script dùng
     chrome.storage.local.set({ 
       selectedAiKeyId: id,
       selectedAiKey: keyValue 

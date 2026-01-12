@@ -65,6 +65,43 @@ const SidePanel: React.FC = () => {
   // Ref cho Timer Debounce (chờ user dừng thao tác mới lưu)
   const saveDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // =================================================================
+  // LOGIC SẮP XẾP DATA (Dùng chung cho Render và Navigation)
+  // =================================================================
+  const sortedAiOrders = useMemo(() => {
+    if (aiOrders.length === 0) return [];
+
+    // 1. Tính toán COD phổ biến (Mode)
+    const codCounts = new Map<number, number>();
+    aiOrders.forEach(o => {
+      const cod = o.COD || 0;
+      codCounts.set(cod, (codCounts.get(cod) || 0) + 1);
+    });
+
+    let majorityCOD = -1;
+    let maxCount = 0;
+    for (const [cod, count] of codCounts) {
+      if (count > maxCount) {
+        maxCount = count;
+        majorityCOD = cod;
+      }
+    }
+
+    // 2. Map giữ index gốc và gắn cờ bất thường
+    const mappedList = aiOrders.map((order, idx) => ({
+      ...order,
+      originalIndex: idx,
+      isAbnormalCOD: majorityCOD !== -1 && order.COD !== majorityCOD
+    }));
+
+    // 3. Sắp xếp: Bất thường lên đầu -> Index gốc tăng dần
+    return mappedList.sort((a, b) => {
+      if (a.isAbnormalCOD && !b.isAbnormalCOD) return -1;
+      if (!a.isAbnormalCOD && b.isAbnormalCOD) return 1;
+      return a.originalIndex - b.originalIndex;
+    });
+  }, [aiOrders]);
+
   // State Presets
   const [savedPresets, setSavedPresets] = useState<Record<FieldGroup, ZoomPreset>>(() => {
     const saved = localStorage.getItem("sidepanel_zoom_presets");
@@ -147,7 +184,33 @@ const SidePanel: React.FC = () => {
       message.error("Lỗi khi đọc URL");
     }
   };
+  const navigateSortedAI = (direction: 'next' | 'prev') => {
+    // 1. Tìm vị trí hiện tại trong danh sách ĐÃ SẮP XẾP
+    const currentSortedIndex = sortedAiOrders.findIndex(item => item.originalIndex === aiSelectedIndex);
 
+    if (currentSortedIndex === -1) return false;
+
+    // 2. Tính chỉ mục tiếp theo
+    const nextSortedIndex = direction === 'next' ? currentSortedIndex + 1 : currentSortedIndex - 1;
+
+    // 3. Kiểm tra giới hạn
+    if (nextSortedIndex >= 0 && nextSortedIndex < sortedAiOrders.length) {
+      const targetItem = sortedAiOrders[nextSortedIndex];
+
+      // 4. Chọn item dựa trên index GỐC
+      handleSelectAIOrder(targetItem.originalIndex);
+
+      // 5. Scroll tới item đó
+      setTimeout(() => {
+        const el = document.getElementById(`ai-order-${targetItem.originalIndex}`);
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+
+      return true; // Điều hướng thành công
+    }
+
+    return false; // Hết danh sách
+  };
   // 2. Mở lại trang với hdrId đã lưu
   const handleOpenSavedHdrId = () => {
     if (!savedHdrId) {
@@ -238,13 +301,10 @@ const SidePanel: React.FC = () => {
         }
         else if (activeTab === "ai_orders") {
           // Logic mới cho tab AI Orders
-          if (aiSelectedIndex < aiOrders.length - 1) {
-            const nextIndex = aiSelectedIndex + 1;
-            handleSelectAIOrder(nextIndex);
-            // Cuộn đến item đó trong danh sách (nếu cần)
-            const el = document.getElementById(`ai-order-${nextIndex}`);
-            el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
+          // --- LOGIC MỚI: Dùng hàm điều hướng theo thứ tự sắp xếp ---
+          const success = navigateSortedAI('next');
+          
+          if (success) {
             sendResponse({ status: "success", type: "ai_order" });
           } else {
             message.success("Đã hoàn thành danh sách đơn AI!");
@@ -439,7 +499,7 @@ const SidePanel: React.FC = () => {
         majorityCOD = cod;
       }
     }
-
+   
     return (
       <div
         id="ai-orders-list"
@@ -492,7 +552,7 @@ const SidePanel: React.FC = () => {
               <span style={{ color: '#666' }}>COD phổ biến: </span>
               <b style={{ color: '#1890ff' }}>{majorityCOD.toLocaleString()}</b>
               <span style={{ color: '#999' }}> ({maxCount} đơn)</span>
-              <span style={{ marginLeft: 8, color: '#ff4d4f' }}>• Khác: {aiOrders.length - maxCount} đơn</span>
+              <span style={{ marginLeft: 8, color: '#ff4d4f' }}>• Khác: {aiOrders.length - maxCount} đơn(Đã đưa lên đầu)</span>
             </div>
           )}
         </div>
@@ -503,12 +563,14 @@ const SidePanel: React.FC = () => {
           <span>Đang chọn: <b>{aiSelectedIndex + 1}</b></span>
         </div>
 
-        {aiOrders.map((order, idx) => {
+        {sortedAiOrders.map((item, sortedIndex) => {
+          // Lưu ý: Dùng item.originalIndex để xác định selection
+          const idx = item.originalIndex;
           const isSelected = idx === aiSelectedIndex;
-          const isAbnormalCOD = majorityCOD !== -1 && order.COD !== majorityCOD;
+          const isAbnormalCOD = item.isAbnormalCOD;
 
-          // Logic màu sắc từng item (giữ nguyên code cũ của bạn)
-          const ms = order.MAUSAC ? order.MAUSAC.toUpperCase() : "";
+          // Logic màu sắc từng item
+          const ms = item.MAUSAC ? item.MAUSAC.toUpperCase() : "";
           const detectedColors: string[] = [];
           if (ms.includes("DO")) detectedColors.push("#ff4d4f");
           if (ms.includes("XANH")) detectedColors.push("#1890ff");
@@ -541,14 +603,14 @@ const SidePanel: React.FC = () => {
             borderStyle = '1px solid #1890ff';
           } else if (isAbnormalCOD) {
             bgStyle = '#fff1f0'; // Light red/pink warning
-            borderStyle = '1px solid #ffccc7'; // Red border
+            borderStyle = '1px solid #ff4d4f'; // Red border
           }
 
           return (
             <div
-              key={idx}
-              id={`ai-order-${idx}`}
-              onClick={() => handleSelectAIOrder(idx)}
+              key={idx} // Key vẫn là index gốc để React tối ưu
+              id={`ai-order-${idx}`} // ID vẫn theo index gốc để scroll hoạt động
+              onClick={() => handleSelectAIOrder(idx)} // Click gọi theo index gốc
               style={{
                 background: bgStyle,
                 border: borderStyle,
@@ -558,40 +620,62 @@ const SidePanel: React.FC = () => {
                 cursor: 'pointer',
                 boxShadow: isSelected ? '0 2px 8px rgba(24, 144, 255, 0.2)' : '0 1px 2px rgba(0,0,0,0.05)',
                 transition: 'all 0.2s',
-                scrollMarginTop: '10px'
+                scrollMarginTop: '10px',
+                position: 'relative' // Để đặt badge cảnh báo nếu cần
               }}
             >
+              {/* Badge cảnh báo cho COD bất thường */}
+              {isAbnormalCOD && (
+                <div style={{
+                  position: 'absolute',
+                  top: -8,
+                  right: -8,
+                  background: '#ff4d4f',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '12px',
+                  fontWeight: 'bold',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                  zIndex: 1
+                }}>!</div>
+              )}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
                 <strong style={{ color: isSelected ? '#1890ff' : '#333', fontSize: '13px', marginRight: '8px', wordBreak: 'break-word' }}>
-                  #{idx + 1} {order.NGUOINHAN}
+                  #{sortedIndex + 1} {item.NGUOINHAN}
                 </strong>
 
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px', flexShrink: 0 }}>
-                  {order.MAHIEU && (
+                  {item.MAHIEU && (
                     <Tag color="purple" style={{ margin: 0, fontSize: '11px', fontWeight: 'bold' }}>
-                      {order.MAHIEU}
+                      {item.MAHIEU}
                     </Tag>
                   )}
-                  {order.MAUSAC && (
+                  {item.MAUSAC && (
                     <Tag style={tagStyle}>
-                      {order.MAUSAC}
+                      {item.MAUSAC}
                     </Tag>
                   )}
-                  {order.COD > 0 && (
+                  {item.COD > 0 && (
                     <Tag color={isAbnormalCOD ? "red" : "green"} style={{ margin: 0, fontSize: '11px', fontWeight: isAbnormalCOD ? 'bold' : 'normal' }}>
-                      <DollarOutlined /> {order.COD.toLocaleString()}
+                      <DollarOutlined /> {item.COD.toLocaleString()}
                     </Tag>
                   )}
                 </div>
               </div>
 
               <div style={{ fontSize: '12px', color: '#666', display: 'flex', gap: 6, alignItems: 'center' }}>
-                <PhoneOutlined /> {order.SDT}
+                <PhoneOutlined /> {item.SDT}
               </div>
 
               <div style={{ fontSize: '12px', color: '#666', marginTop: 4, display: 'flex', gap: 6 }}>
                 <EnvironmentOutlined style={{ marginTop: 3, flexShrink: 0 }} />
-                <span style={{ lineHeight: '1.4' }}>{order.DIACHI}</span>
+                <span style={{ lineHeight: '1.4' }}>{item.DIACHI}</span>
               </div>
 
               <div style={{
@@ -604,7 +688,7 @@ const SidePanel: React.FC = () => {
                 fontStyle: 'italic',
                 borderLeft: '2px solid #ddd'
               }}>
-                "{order.GOC}"
+                "{item.GOC}"
               </div>
             </div>
           );
@@ -988,9 +1072,13 @@ const SidePanel: React.FC = () => {
                   </div>
                   <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                     <Space>
-                      <Button size="small" icon={<LeftOutlined />} onClick={handlePreviousImage} disabled={selectedIndex === 0} />
-                      <span style={{ fontSize: 12 }}>{selectedIndex + 1}/{images.length}</span>
-                      <Button size="small" icon={<RightOutlined />} onClick={handleNextImage} disabled={selectedIndex === images.length - 1} />
+                      <Button size="small" icon={<LeftOutlined />} onClick={() => activeTab === 'images' ? handlePreviousImage() : navigateSortedAI('prev')} disabled={activeTab === 'images' ? selectedIndex === 0 : (sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) === 0)} />
+                      <span style={{ fontSize: 12 }}>
+                        {activeTab === 'images' 
+                          ? `${selectedIndex + 1}/${images.length}` 
+                          : `${sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) + 1}/${aiOrders.length}`}
+                      </span>
+                      <Button size="small" icon={<RightOutlined />} onClick={() => activeTab === 'images' ? handleNextImage() : navigateSortedAI('next')} disabled={activeTab === 'images' ? selectedIndex === images.length - 1 : (sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) === aiOrders.length - 1)} />
                     </Space>
                     <Space>
                       <span style={{ fontSize: 12 }}>Auto Zoom:</span>
