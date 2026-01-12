@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Button, Table, Card, Typography, message, Modal, Space, Checkbox } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined, CopyOutlined, FileTextOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
+import CMSTicketItem from './components/CMSTicketItem';
 
 const { Title } = Typography;
 
@@ -22,6 +23,11 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     // Filter states
     const [filterSuccess, setFilterSuccess] = useState(false);
     const [filterPaid, setFilterPaid] = useState(false);
+    const [filterReturnSuccess, setFilterReturnSuccess] = useState(false);
+
+    // Excel storage states
+    const [excelData, setExcelData] = useState<Map<string, any>>(new Map());
+    const [lastExcelUpdate, setLastExcelUpdate] = useState<string>('');
 
     // Logic for Auto-detecting download
     useEffect(() => {
@@ -69,8 +75,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         };
     }, []);
 
-    const fetchData = async () => {
+    const fetchData = async (providedExcelMap?: Map<string, any>) => {
         setLoading(true);
+        const mapToUse = providedExcelMap || excelData;
         try {
             const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&searchInfoCode=&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=500&column=ttkId&desending=1&type=5&managedOrg=&managedUsr=&ttkCodeRef=", {
                 "headers": {
@@ -133,8 +140,21 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             });
 
             console.log('Parsed Data:', parsedData);
-            setData(parsedData);
-            message.success(`Đã tải ${parsedData.length} bản ghi`);
+
+            // Merge with existing Excel data
+            const mergedData = parsedData.map(item => {
+                // QUAN TRỌNG: Dùng mapToUse để lấy dữ liệu mới nhất
+                const excelInfo = mapToUse.get(item.trackingNumber);
+                return {
+                    ...item,
+                    excelStatus: excelInfo?.status || '',
+                    paymentStatus: excelInfo?.payment || '',
+                    codAmount: excelInfo?.cod || 0,
+                };
+            });
+
+            setData(mergedData);
+            message.success(`Đã tải ${mergedData.length} bản ghi`);
 
         } catch (error) {
             console.error("Fetch Error:", error);
@@ -144,8 +164,36 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         }
     };
 
+    // Load Excel data from storage on mount
     useEffect(() => {
-        fetchData();
+        const initData = async () => {
+            setLoading(true); // Bật loading ngay lập tức
+
+            // Bước 1: Load Excel Data từ Storage
+            let loadedMap = new Map<string, any>();
+            try {
+                const result = await new Promise<any>((resolve) => {
+                    chrome.storage.local.get(['checkCompleteExcelData', 'checkCompleteExcelTimestamp'], resolve);
+                });
+
+                if (result.checkCompleteExcelData) {
+                    loadedMap = new Map(Object.entries(result.checkCompleteExcelData));
+                    setExcelData(loadedMap);
+                    setLastExcelUpdate(result.checkCompleteExcelTimestamp || '');
+                    console.log('✅ Loaded Excel data from storage:', loadedMap.size, 'items');
+                } else {
+                    console.log('ℹ️ No Excel data in storage');
+                }
+            } catch (err) {
+                console.error("Error loading storage:", err);
+            }
+
+            // Bước 2: Gọi Fetch Data và truyền loadedMap vào
+            // Lúc này loadedMap chắc chắn đã có dữ liệu (nếu storage có)
+            await fetchData(loadedMap);
+        };
+
+        initData();
     }, []);
 
     const handleBulkClose = async () => {
@@ -227,7 +275,11 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         }, (response) => {
             setDetailLoading(false);
             if (response && response.status === 'success') {
-                setCurrentCmsData(response.data);
+                // Add trackingNumber to response data for CMSTicketItem
+                setCurrentCmsData({
+                    ...response.data,
+                    trackingNumber: trackingNumber
+                });
                 setDetailModalOpen(true);
             } else {
                 message.error('Không tìm thấy dữ liệu CMS hoặc lỗi kết nối');
@@ -335,19 +387,31 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             console.log('Mapped Excel Data:', dataMap);
             console.log('Total mapped items:', dataMap.size);
 
-            // Update data state
-            const newData = data.map(item => {
-                const excelInfo = dataMap.get(item.trackingNumber);
-                return {
-                    ...item,
-                    excelStatus: excelInfo ? excelInfo.status : '',
-                    paymentStatus: excelInfo ? excelInfo.payment : '',
-                    codAmount: excelInfo ? excelInfo.cod : 0,
-                };
-            });
+            // Save to chrome.storage.local
+            const dataMapObj = Object.fromEntries(dataMap);
+            const timestamp = new Date().toLocaleString('vi-VN');
 
-            setData(newData);
-            message.success(`Đã cập nhật trạng thái cho ${dataMap.size} mã vận đơn`);
+            chrome.storage.local.set({
+                checkCompleteExcelData: dataMapObj,
+                checkCompleteExcelTimestamp: timestamp
+            }, () => {
+                setExcelData(dataMap);
+                setLastExcelUpdate(timestamp);
+
+                // Update data state with Excel info
+                const newData = data.map(item => {
+                    const excelInfo = dataMap.get(item.trackingNumber);
+                    return {
+                        ...item,
+                        excelStatus: excelInfo ? excelInfo.status : '',
+                        paymentStatus: excelInfo ? excelInfo.payment : '',
+                        codAmount: excelInfo ? excelInfo.cod : 0,
+                    };
+                });
+
+                setData(newData);
+                message.success(`Đã lưu dữ liệu Excel (${dataMap.size} mã vận đơn) - ${timestamp}`);
+            });
 
             // Clear input value to allow re-uploading same file
             e.target.value = '';
@@ -355,30 +419,19 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         reader.readAsBinaryString(file);
     };
 
-    // Render logic for tickets inside Modal
+    // Render logic for tickets inside Modal - using CMSTicketItem component
     const renderTickets = () => {
         if (!currentCmsData || !currentCmsData.tickets || currentCmsData.tickets.length === 0) {
             return <div className="text-gray-400 italic text-center py-8">Không có dữ liệu CMS</div>;
         }
         return (
             <div className="max-h-[60vh] overflow-y-auto">
-                {currentCmsData.tickets.map((t: any, idx: number) => (
-                    <div key={idx} className="mb-4 border border-gray-200 rounded-lg p-3 shadow-sm bg-white">
-                        <div className="font-bold text-blue-700 mb-2 border-b pb-1 flex justify-between">
-                            <span>{t.ticketCode}</span>
-                            <span className="text-xs text-gray-500 font-normal">{t.createdTime}</span>
-                        </div>
-                        <div className="space-y-2">
-                            {t.actions?.map((a: any, ai: number) => (
-                                <div key={ai} className="bg-gray-50 p-2 rounded text-sm border border-gray-100">
-                                    <div className="font-semibold text-xs text-slate-600 mb-1">
-                                        {a.unit} • {a.date}
-                                    </div>
-                                    <div className="text-gray-800 whitespace-pre-wrap">{a.content}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
+                {currentCmsData.tickets.map((ticket: any, idx: number) => (
+                    <CMSTicketItem
+                        key={idx}
+                        ticket={ticket}
+                        itemCode={currentCmsData.trackingNumber || ''}
+                    />
                 ))}
             </div>
         );
@@ -387,7 +440,22 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     const columns = [
         // Removed ID column
         // { title: 'ID', dataIndex: 'complaintCode', key: 'complaintCode', render: (text: string) => <b>{text}</b> },
-        { title: 'Số hiệu', dataIndex: 'trackingNumber', key: 'trackingNumber', render: (text: string) => <a href={`https://bccp.vnpost.vn/BCCP.aspx?act=Trace&id=${text}`} target="_blank" rel="noreferrer">{text}</a> },
+        {
+            title: 'Số hiệu',
+            dataIndex: 'trackingNumber',
+            key: 'trackingNumber',
+            render: (text: string) => (
+                <a
+                    onClick={(e) => {
+                        e.preventDefault();
+                        handleViewDetail(text);
+                    }}
+                    style={{ cursor: 'pointer', color: '#1890ff' }}
+                >
+                    {text}
+                </a>
+            )
+        },
         {
             title: 'COD',
             dataIndex: 'codAmount',
@@ -402,6 +470,23 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         { title: 'Trạng thái CMS', dataIndex: 'statusText', key: 'statusText', render: (text: string) => <span style={{ color: 'green' }}>{text}</span> },
         { title: 'Trạng thái đơn', dataIndex: 'excelStatus', key: 'excelStatus', render: (text: string) => <span style={{ fontWeight: 'bold', color: 'blue' }}>{text}</span> },
         { title: 'Trạng thái nộp', dataIndex: 'paymentStatus', key: 'paymentStatus', render: (text: string) => <span style={{ color: 'purple' }}>{text}</span> },
+        {
+            title: 'BCCP',
+            key: 'bccp',
+            width: 80,
+            render: (_: any, record: any) => (
+                <Button
+                    size="small"
+                    type="link"
+                    onClick={() => {
+                        const url = `https://bccp.vnpost.vn/BCCP.aspx?act=Trace&id=${record.trackingNumber}`;
+                        window.open(url, '_blank');
+                    }}
+                >
+                    Tra cứu
+                </Button>
+            )
+        },
         {
             title: 'Hành động',
             key: 'action',
@@ -433,11 +518,22 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
     // Filter Logic
     const finalData = data.filter(item => {
-        if (filterSuccess && item.excelStatus !== 'Đã phát thành công') return false;
+        // 1. Lọc theo trạng thái thanh toán (Giữ nguyên)
         if (filterPaid) {
             const p = item.paymentStatus ? item.paymentStatus.toLowerCase() : '';
             if (!p.includes('cod')) return false;
         }
+
+        // 2. Lọc theo trạng thái đơn hàng (SỬA ĐOẠN NÀY)
+        // Nếu có bất kỳ checkbox trạng thái nào được bật (Success hoặc ReturnSuccess)
+        if (filterSuccess || filterReturnSuccess) {
+            const matchSuccess = filterSuccess && item.excelStatus === 'Đã phát thành công';
+            const matchReturn = filterReturnSuccess && item.excelStatus === 'Phát hoàn thành công';
+
+            // Nếu không khớp với bất kỳ trạng thái nào đang bật thì loại bỏ
+            if (!matchSuccess && !matchReturn) return false;
+        }
+
         return true;
     });
 
@@ -458,54 +554,64 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                         </Title>
                     </div>
 
-                    <div className="flex gap-2">
-                        <Button
-                            icon={<CopyOutlined />}
-                            onClick={handleCopyTraceLink}
-                        >
-                            Copy Link Tra Cứu
-                        </Button>
+                    <div className="flex flex-col gap-2">
+                        {lastExcelUpdate && (
+                            <div className="text-xs text-gray-500">
+                                📊 Đối soát Excel lần cuối: {lastExcelUpdate}
+                            </div>
+                        )}
+                        <div className="flex gap-2">
+                            <Button
+                                icon={<CopyOutlined />}
+                                onClick={handleCopyTraceLink}
+                            >
+                                Copy Link Tra Cứu
+                            </Button>
 
-                        <div style={{ position: 'relative', overflow: 'hidden', display: 'inline-block' }}>
-                            <Button icon={<FileTextOutlined />}>Đối soát Excel</Button>
-                            <input
-                                type="file"
-                                id="btn-excel-upload"
-                                onChange={handleExcelUpload}
-                                accept=".xlsx, .xls"
-                                style={{
-                                    position: 'absolute',
-                                    left: 0,
-                                    top: 0,
-                                    opacity: 0,
-                                    width: '100%',
-                                    height: '100%',
-                                    cursor: 'pointer'
-                                }}
-                            />
+                            <div style={{ position: 'relative', overflow: 'hidden', display: 'inline-block' }}>
+                                <Button icon={<FileTextOutlined />}>Đối soát Excel</Button>
+                                <input
+                                    type="file"
+                                    id="btn-excel-upload"
+                                    onChange={handleExcelUpload}
+                                    accept=".xlsx, .xls"
+                                    style={{
+                                        position: 'absolute',
+                                        left: 0,
+                                        top: 0,
+                                        opacity: 0,
+                                        width: '100%',
+                                        height: '100%',
+                                        cursor: 'pointer'
+                                    }}
+                                />
+                            </div>
+
+                            <Button
+                                type="primary"
+                                danger
+                                disabled={selectedRowKeys.length === 0}
+                                onClick={handleBulkClose}
+                            >
+                                Đóng ({selectedRowKeys.length})
+                            </Button>
+                            <Button
+                                type="primary"
+                                icon={<ReloadOutlined />}
+                                loading={loading}
+                                onClick={() => fetchData(excelData)}
+                            >
+                                Tải lại
+                            </Button>
                         </div>
-
-                        <Button
-                            type="primary"
-                            danger
-                            disabled={selectedRowKeys.length === 0}
-                            onClick={handleBulkClose}
-                        >
-                            Đóng ({selectedRowKeys.length})
-                        </Button>
-                        <Button
-                            type="primary"
-                            icon={<ReloadOutlined />}
-                            loading={loading}
-                            onClick={fetchData}
-                        >
-                            Tải lại
-                        </Button>
                     </div>
 
                     <div className="flex gap-4">
                         <Checkbox checked={filterSuccess} onChange={e => setFilterSuccess(e.target.checked)}>
                             Phát Thành công
+                        </Checkbox>
+                        <Checkbox checked={filterReturnSuccess} onChange={e => setFilterReturnSuccess(e.target.checked)}>
+                            Phát Hoàn Thành công
                         </Checkbox>
                         <Checkbox checked={filterPaid} onChange={e => setFilterPaid(e.target.checked)}>
                             Đã nộp COD
