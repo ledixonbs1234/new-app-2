@@ -21,7 +21,8 @@ let isProcessingPortalItem = false; // Cờ để kiểm tra processSinglePortal
 let isScriptActive = false; // Trạng thái script có đang hoạt động không
 let domObserver: MutationObserver | null = null; // Observer cho DOM changes
 let lastParcelIndexValue = -1; // Theo dõi giá trị parcelIndex để phát hiện khi tăng
-
+// 1. Thêm biến để lưu giá trị cũ của input cần kiểm tra
+let lastAutoSavedValue: string = "";
 // ID của các element thường dùng
 const ELEMENT_IDS = {
   RECEIVER_ADDRESS: "receiverAddress",
@@ -156,7 +157,7 @@ function displayGocData(gocContent: string) {
       border: "1px dashed #722ed1", // Viền tím
       borderRadius: "4px",
       color: "#531dab", // Màu chữ tím đậm
-      fontSize: "13px",
+      fontSize: "15px",
       fontWeight: "500",
       fontFamily: "monospace", // Font code để dễ nhìn
       whiteSpace: "pre-wrap", // Giữ định dạng xuống dòng nếu có
@@ -173,6 +174,57 @@ function displayGocData(gocContent: string) {
   // Cập nhật nội dung
   gocElement.textContent = `📋 GỐC: ${gocContent}`;
 
+  // Hiệu ứng nháy để báo hiệu cập nhật
+  gocElement.style.backgroundColor = "#d3adf7";
+  setTimeout(() => {
+    gocElement!.style.backgroundColor = "#f9f0ff";
+  }, 500);
+}
+
+function displayWarning(message: string) {
+  // Tìm element cha
+  const parentElement = document.querySelector(DIA_BAN_PARENT_SELECTOR) as HTMLElement;
+
+  if (!parentElement) {
+    console.warn("[GiaoTich] Không tìm thấy element cha Địa bàn để chèn GOC.");
+    return;
+  }
+
+  // Kiểm tra xem đã có element hiển thị GOC chưa
+  let gocElement = document.getElementById(CUSTOM_GOC_ID);
+
+  if (!gocElement) {
+    // Nếu chưa có, tạo mới
+    gocElement = document.createElement("div");
+    gocElement.id = CUSTOM_GOC_ID;
+
+    // Style cho đẹp
+    Object.assign(gocElement.style, {
+      width: "100%", // Xuống dòng
+      marginTop: "5px",
+      marginLeft: "10px", // Căn lề giống các input radio
+      padding: "5px 10px",
+      backgroundColor: "#f9f0ff", // Màu nền tím nhạt
+      border: "1px dashed #722ed1", // Viền tím
+      borderRadius: "4px",
+      color: "#531dab", // Màu chữ tím đậm
+      fontSize: "13px",
+      fontWeight: "500",
+      fontFamily: "monospace", // Font code để dễ nhìn
+      whiteSpace: "pre-wrap", // Giữ định dạng xuống dòng nếu có
+      display: "block"
+    });
+
+    // Chèn vào cuối parent
+    parentElement.appendChild(gocElement);
+
+    // Vì parent là MuiGrid (flex), để element này xuống dòng đẹp, ta có thể set parent flex-wrap
+    parentElement.style.flexWrap = "wrap";
+  }
+  gocElement.innerHTML = `<span style="color: red; font-weight: 900; font-size: 16px; text-transform: uppercase;">⚠️ ${message} ⚠️</span>`;
+  gocElement.style.backgroundColor = "#fff1f0"; // Nền đỏ nhạt
+  gocElement.style.border = "2px solid red";
+  gocElement.style.padding = "10px";
   // Hiệu ứng nháy để báo hiệu cập nhật
   gocElement.style.backgroundColor = "#d3adf7";
   setTimeout(() => {
@@ -556,14 +608,60 @@ function listenForFillForm() {
         }
         setChiDanPhat("- Liên hệ người nhận trước khi phát.\n- CHO KHÁCH XEM HÀNG, Khách xem hàng không nhận không thu phí hủy ĐH \n- Phát một phần đơn hàng (DOP2) khi có yêu cầu.\n - Hoàn trả một phần đơn hàng theo BKC: 59CVOTHITHUAN319.\n- Phát không thành công vui lòng liên hệ với người gửi: 0366 576 671 \n- Liên hệ người gửi trước khi Chuyển hoàn và Chuyển hoàn về BCG");
 
-        // 4. Điền COD (nếu có trường nhập tiền thu hộ - tùy vào giao diện portal)
-        // Lưu ý: ID này có thể thay đổi tùy portal, ở đây dùng ID giả định hoặc logic tìm element
-        // Dựa vào code cũ, COD thường nằm ở input trọng lượng hoặc dịch vụ cộng thêm
-        // Nếu muốn điền vào ô Ghi chú hoặc ô khác, thêm vào đây.
+        // --- 2. LOGIC KIỂM TRA GIÁ TRỊ VÀ AUTO SAVE (Sửa đổi) ---
+        console.log("[GiaoTich] Checking value change...");
 
-        // Ví dụ: Điền GOC vào ô ghi chú nếu có
-        // const noteInput = document.querySelector('textarea[name="note"]') as HTMLTextAreaElement;
-        // if(noteInput) { ... }
+        // Selector input cần kiểm tra (Ví dụ: Cước phí, Tổng tiền...)
+        const targetInputSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(6) > div:nth-child(6) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-4 > input";
+        const saveButtonSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button";
+
+        // Luôn chờ kiểm tra dù có AutoSave hay không
+        setTimeout(() => {
+          const targetInput = document.querySelector(targetInputSelector) as HTMLInputElement;
+
+          if (targetInput) {
+            const currentValue = targetInput.value;
+            console.log(`[GiaoTich] Validation - Current: "${currentValue}", Last: "${lastAutoSavedValue}"`);
+
+            // --- ĐIỀU KIỆN KIỂM TRA ---
+            // 1. Giá trị không được trống
+            // 2. Giá trị PHẢI KHÁC giá trị của đơn trước đó
+            if (currentValue && currentValue.trim() !== "" && currentValue !== lastAutoSavedValue) {
+
+              // TRƯỜNG HỢP HỢP LỆ (Value changed)
+              console.log("[GiaoTich] Value changed. Updating tracker.");
+              lastAutoSavedValue = currentValue; // Cập nhật giá trị mới nhất để so sánh lần sau
+
+              // Chỉ bấm nút Lưu nếu có cờ autoSave
+              if (order.autoSave) {
+                console.log("[GiaoTich] Auto Save is ON. Clicking save in 500ms...");
+                setTimeout(() => {
+                  const saveBtn = document.querySelector(saveButtonSelector) as HTMLElement;
+                  if (saveBtn) {
+                    saveBtn.click();
+                    console.log("[GiaoTich] ✅ Auto Saved!");
+
+                    // Visual feedback
+                    const gocElement = document.getElementById(CUSTOM_GOC_ID);
+                    if (gocElement) {
+                      gocElement.innerHTML += ' <span style="color: green; font-weight: bold;">(Đã lưu tự động)</span>';
+                    }
+                  }
+                }, 500);
+              }
+
+            } else {
+              // TRƯỜNG HỢP LỖI (Value không đổi hoặc rỗng)
+              // Chạy cảnh báo cho cả trường hợp AutoSave và Manual
+              console.warn("[GiaoTich] ❌ Value unchanged or empty. Warning user.");
+
+              // Hiển thị cảnh báo ĐỎ ĐẬM
+              displayWarning("Địa chỉ tự động không thay đổi hãy chú ý");
+            }
+          } else {
+            console.warn("[GiaoTich] Target input for validation not found.");
+          }
+        }, 800); // Delay chờ Portal tính toán/load lại data
 
         sendResponse({ status: "success" });
       } catch (e: any) {
@@ -756,6 +854,10 @@ function toggleSidePanel(): void {
       window._layoutObserver.disconnect();
       delete window._layoutObserver;
     }
+
+    // --- THÊM: Xóa trạng thái mở trong session ---
+    sessionStorage.removeItem('VNPOST_SIDEPANEL_OPEN_STATE');
+
     return;
   }
 
@@ -766,6 +868,9 @@ function toggleSidePanel(): void {
 
   // Khởi động Observer để đồng bộ menu React
   initMenuObserver();
+
+  // --- THÊM: Lưu trạng thái mở vào session ---
+  sessionStorage.setItem('VNPOST_SIDEPANEL_OPEN_STATE', 'true');
 }
 
 /**
@@ -1746,6 +1851,25 @@ async function initialize(): Promise<void> {
 
   // Attach smart zoom listeners cho các field quan trọng
   attachSmartZoomListenersToAllFields();
+  try {
+    const result = await new Promise<any>(resolve =>
+      chrome.storage.local.get(["keepSidePanelOpen"], resolve)
+    );
+
+    const wasOpen = sessionStorage.getItem('VNPOST_SIDEPANEL_OPEN_STATE') === 'true';
+    const shouldKeepOpen = result.keepSidePanelOpen === true;
+
+    // Chỉ mở lại nếu: User bật setting VÀ trước đó panel đang mở
+    if (shouldKeepOpen && wasOpen) {
+      console.log("[GiaoTich] 🔄 Auto-reopening Side Panel (Keep Tab active)");
+      // Kiểm tra xem đã mở chưa để tránh mở trùng (dù toggleSidePanel đã check nhưng cẩn thận hơn)
+      if (!document.getElementById(SIDE_PANEL_ID)) {
+        toggleSidePanel();
+      }
+    }
+  } catch (e) {
+    console.error("[GiaoTich] Lỗi auto-reopen sidepanel:", e);
+  }
 }
 
 /**

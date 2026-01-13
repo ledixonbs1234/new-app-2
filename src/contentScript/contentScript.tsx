@@ -634,7 +634,7 @@ async function processSinglePortalItem(
     // Bấm nút "Lưu và tìm tiếp" hoặc tương đương
     const findAndSearchBtn = await waitForElm(
       "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button",
-      10
+      20
     );
     if (!findAndSearchBtn) {
       throw new Error("Không tìm thấy nút 'Lưu và tìm kiếm'");

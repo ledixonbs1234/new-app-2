@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag } from "antd";
+import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag, Checkbox } from "antd";
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined, DollarOutlined, PhoneOutlined, EnvironmentOutlined, RobotOutlined, SaveOutlined, LinkOutlined } from "@ant-design/icons";
 import { Order, StoredImage } from "../types/vnpost";
@@ -30,7 +30,16 @@ const SidePanel: React.FC = () => {
   const [savedHdrId, setSavedHdrId] = useState<string>(() => {
     return localStorage.getItem("sidepanel_saved_hdr_id") || "";
   });
-
+  const [isAutoSaveNormal, setIsAutoSaveNormal] = useState<boolean>(() => {
+    const saved = localStorage.getItem("sidepanel_auto_save_normal");
+    return saved !== null ? JSON.parse(saved) : false;
+  });
+  const [keepTabOpen, setKeepTabOpen] = useState<boolean>(false);
+  const handleToggleAutoSave = (e: any) => {
+    const checked = e.target.checked;
+    setIsAutoSaveNormal(checked);
+    localStorage.setItem("sidepanel_auto_save_normal", JSON.stringify(checked));
+  };
   const [autoZoomEnabled, setAutoZoomEnabled] = useState<boolean>(() => {
     const saved = localStorage.getItem("sidepanel_auto_zoom_enabled");
     return saved !== null ? JSON.parse(saved) : true;
@@ -228,6 +237,15 @@ const SidePanel: React.FC = () => {
     };
   }
   const lastAutoNextTimeRef = useRef<number>(0);
+
+  useEffect(() => {
+    // Load cài đặt "Giữ Tab" từ storage
+    chrome.storage.local.get(["keepSidePanelOpen"], (result) => {
+      if (result.keepSidePanelOpen !== undefined) {
+        setKeepTabOpen(result.keepSidePanelOpen);
+      }
+    });
+  }, []);
   // =================================================================
   // INIT & LOAD DATA
   // =================================================================
@@ -303,7 +321,7 @@ const SidePanel: React.FC = () => {
           // Logic mới cho tab AI Orders
           // --- LOGIC MỚI: Dùng hàm điều hướng theo thứ tự sắp xếp ---
           const success = navigateSortedAI('next');
-          
+
           if (success) {
             sendResponse({ status: "success", type: "ai_order" });
           } else {
@@ -476,6 +494,13 @@ const SidePanel: React.FC = () => {
     return () => chrome.runtime.onMessage.removeListener(handlePortalUpdate);
   }, []);
 
+  const handleToggleKeepTab = (e: any) => {
+    const checked = e.target.checked;
+    setKeepTabOpen(checked);
+    chrome.storage.local.set({ keepSidePanelOpen: checked });
+    message.success(checked ? "Đã bật chế độ Giữ Tab khi refresh" : "Đã tắt chế độ Giữ Tab");
+  };
+
   // =================================================================
   // RENDER AI TAB CONTENT (Cập nhật hàm này)
   // =================================================================
@@ -499,7 +524,7 @@ const SidePanel: React.FC = () => {
         majorityCOD = cod;
       }
     }
-   
+
     return (
       <div
         id="ai-orders-list"
@@ -555,12 +580,23 @@ const SidePanel: React.FC = () => {
               <span style={{ marginLeft: 8, color: '#ff4d4f' }}>• Khác: {aiOrders.length - maxCount} đơn(Đã đưa lên đầu)</span>
             </div>
           )}
+
+          <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #eee' }}>
+            <Checkbox
+              checked={isAutoSaveNormal}
+              onChange={handleToggleAutoSave}
+              style={{ fontSize: '12px' }}
+            >
+              <span style={{ color: '#1890ff', fontWeight: 500 }}>Tự động Lưu đơn thường</span>
+              <span style={{ color: '#999', marginLeft: 4, fontSize: '11px' }}>(Check giá trị &ne; cũ &rarr; Lưu)</span>
+            </Checkbox>
+          </div>
         </div>
 
         {/* --- DANH SÁCH ĐƠN HÀNG (GIỮ NGUYÊN) --- */}
         <div style={{ marginBottom: 8, padding: '0 8px', display: 'flex', justifyContent: 'space-between', color: '#666' }}>
           <span>Danh sách chi tiết:</span>
-          <span>Đang chọn: <b>{aiSelectedIndex + 1}</b></span>
+          <span>Đang chọn: <b>  {sortedAiOrders.findIndex(item => item.originalIndex === aiSelectedIndex) + 1}</b></span>
         </div>
 
         {sortedAiOrders.map((item, sortedIndex) => {
@@ -836,13 +872,18 @@ const SidePanel: React.FC = () => {
     chrome.storage.session.set({ currentIndex: index });
 
     const order = aiOrders[index];
-
+    const orderInfo = sortedAiOrders.find(item => item.originalIndex === index);
+    const isAbnormal = orderInfo?.isAbnormalCOD || false;
+    const shouldAutoSave = isAutoSaveNormal && !isAbnormal;
     // Gửi lệnh điền form xuống Content Script
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
       chrome.tabs.sendMessage(tab.id, {
         type: "FILL_FORM_DATA_AI",
-        payload: order
+        payload: {
+          ...order,
+          autoSave: shouldAutoSave // Gửi cờ này xuống content script
+        }// Gửi cờ này xuống content script
       });
 
       // Focus vào tab để user có thể nhập tiếp hoặc lưu
@@ -1038,6 +1079,15 @@ const SidePanel: React.FC = () => {
                       </Button>
                     </Space>
                   </div>
+                  <div style={{ padding: '0 12px 8px 12px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
+                     <Checkbox 
+                        checked={keepTabOpen} 
+                        onChange={handleToggleKeepTab}
+                        style={{ fontSize: '12px' }}
+                      >
+                        <span style={{ color: '#1890ff', fontWeight: 500 }}>Giữ Tab khi Refresh</span>
+                     </Checkbox>
+                  </div>
                   <div style={{ padding: 8, borderBottom: '1px solid #eee', background: '#fff', display: 'flex', justifyContent: 'space-between' }}>
                     <span>Tổng: <b>{portalList.length}</b></span>
                     <Button size="small" icon={<RightOutlined />} onClick={handlePrintPortalList}>In Danh Sách</Button>
@@ -1074,8 +1124,8 @@ const SidePanel: React.FC = () => {
                     <Space>
                       <Button size="small" icon={<LeftOutlined />} onClick={() => activeTab === 'images' ? handlePreviousImage() : navigateSortedAI('prev')} disabled={activeTab === 'images' ? selectedIndex === 0 : (sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) === 0)} />
                       <span style={{ fontSize: 12 }}>
-                        {activeTab === 'images' 
-                          ? `${selectedIndex + 1}/${images.length}` 
+                        {activeTab === 'images'
+                          ? `${selectedIndex + 1}/${images.length}`
                           : `${sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) + 1}/${aiOrders.length}`}
                       </span>
                       <Button size="small" icon={<RightOutlined />} onClick={() => activeTab === 'images' ? handleNextImage() : navigateSortedAI('next')} disabled={activeTab === 'images' ? selectedIndex === images.length - 1 : (sortedAiOrders.findIndex(x => x.originalIndex === aiSelectedIndex) === aiOrders.length - 1)} />
