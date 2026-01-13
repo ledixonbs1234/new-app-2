@@ -117,6 +117,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 const trackingLink = row.querySelector('td:nth-child(5) a');
                 const trackingNumber = trackingLink?.textContent?.trim();
 
+                const location = row.querySelector('td:nth-child(6)')?.textContent?.trim();
                 const serviceType = row.querySelector('td:nth-child(7)')?.textContent?.trim();
                 const note = row.querySelector('td:nth-child(8)')?.textContent?.trim();
                 const createDate = row.querySelector('td:nth-child(9)')?.textContent?.trim();
@@ -130,6 +131,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                         status,
                         complaintCode,
                         trackingNumber,
+                        location,
                         serviceType,
                         note,
                         createDate,
@@ -349,36 +351,23 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 // Based on log: __EMPTY_1 contains tracking number
                 const code = row['__EMPTY_1'] ||  // Tracking number column!
                     row['Số hiệu BG'] ||
-                    row['Mã vận đơn'] ||
-                    row['Tracking'] ||
-                    row['Số hiệu'] ||
                     '';
 
-                if (code && code !== 'Số hiệu BG' && code !== 'Mã vận đơn') { // Skip header rows
+                if (code && code !== 'Số hiệu BG') { // Skip header rows
                     // Get status from "Kết quả phát" column
                     const status = row['Kết quả phát_1'] ||
-                        row['Kết quả hiện tại'] ||
-                        row['Trạng thái cuối cùng'] ||
                         '';
 
                     // Get payment status - it's in __EMPTY_13 based on log
-                    const payment = row['Trạng thái nộp tiền bưu tá'] ||
+                    const payment = row['Trạng thái'] ||
                         '';
 
-                    // Get COD amount - 'Số tiền' is the correct column
-                    const codStr = row['Số tiền'] ||
-                        row['COD - Phát hàng thu tiền'] ||
-                        row['COD'] ||
-                        '0';
-                    // Clean brackets and dots: "[....]" -> "", "1,000" -> "1000"
-                    const cleanedCod = String(codStr).replace(/[\[\].,]/g, '').trim();
-                    const cod = parseInt(cleanedCod) || 0;
 
                     if (code.trim()) {
                         dataMap.set(code.trim(), {
                             status: status.trim(),
                             payment: payment.trim(),
-                            cod: cod
+                            cod: 0
                         });
                     }
                 }
@@ -441,6 +430,12 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         // Removed ID column
         // { title: 'ID', dataIndex: 'complaintCode', key: 'complaintCode', render: (text: string) => <b>{text}</b> },
         {
+            title: 'STT',
+            key: 'stt',
+            width: 40,
+            render: (_: any, __: any, index: number) => index + 1
+        },
+        {
             title: 'Số hiệu',
             dataIndex: 'trackingNumber',
             key: 'trackingNumber',
@@ -456,14 +451,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 </a>
             )
         },
-        {
-            title: 'COD',
-            dataIndex: 'codAmount',
-            key: 'codAmount',
-            width: 60,
-            render: (cod: number) => cod > 0 ? <span className="text-green-600 font-bold">COD</span> : null
-        },
-        { title: 'Loại dịch vụ', dataIndex: 'serviceType', key: 'serviceType' },
+
         { title: 'Nội dung', dataIndex: 'note', key: 'note' },
         { title: 'Ngày tạo', dataIndex: 'createDate', key: 'createDate' },
         { title: 'Hạn xử lý', dataIndex: 'deadline', key: 'deadline' },
@@ -521,7 +509,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         // 1. Lọc theo trạng thái thanh toán (Giữ nguyên)
         if (filterPaid) {
             const p = item.paymentStatus ? item.paymentStatus.toLowerCase() : '';
-            if (!p.includes('cod')) return false;
+            if (!p.includes('thu tiền bưu tá')) return false;
         }
 
         // 2. Lọc theo trạng thái đơn hàng (SỬA ĐOẠN NÀY)
@@ -632,7 +620,25 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             </Card>
 
             <Modal
-                title={<span className="text-lg font-bold text-blue-600">📦 Chi tiết CMS</span>}
+                title={
+                    <div className="flex items-center justify-between">
+                        <span className="text-lg font-bold text-blue-600">
+                            📦 CMS của {currentCmsData?.trackingNumber || '...'}
+                        </span>
+                        <Button
+                            type="primary"
+                            className="mr-10"
+                            size="small"
+                            onClick={() => {
+                                const url = `https://bccp.vnpost.vn/BCCP.aspx?act=Trace&id=${currentCmsData?.trackingNumber}`;
+                                window.open(url, '_blank');
+                            }}
+                            disabled={!currentCmsData?.trackingNumber}
+                        >
+                            Tra cứu BCCP
+                        </Button>
+                    </div>
+                }
                 open={detailModalOpen}
                 onCancel={() => setDetailModalOpen(false)}
                 footer={null}
