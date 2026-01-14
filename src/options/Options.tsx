@@ -12,6 +12,7 @@ import CreateCMSModal from './components/CreateCMSModal';
 import ExtraInfoEditor from './components/ExtraInfoEditor';
 import BulkCMSModal from './components/BulkCMSModal';
 import CheckComplete from './CheckComplete';
+import AutoReminderSettings from './components/AutoReminderSettings';
 import { handleBulkCloseCMS } from './modals/bulkCloseModal';
 import { ExtendedOrder, BulkCMSItem } from '../types/vnpost';
 import { handleAutoGenerateCMS, handleAutoCloseCMS } from '../features/autoProcess';
@@ -70,7 +71,7 @@ const Options: React.FC = () => {
     const [bulkCloseItems, setBulkCloseItems] = useState<any[]>([]);
     const [isAutoClosing, setIsAutoClosing] = useState(false);
     const [isAutoClosingProcessing, setIsAutoClosingProcessing] = useState(false);
-    const [currentView, setCurrentView] = useState<'list' | 'checkComplete'>('list');
+    const [currentView, setCurrentView] = useState<'list' | 'checkComplete' | 'autoReminder'>('list');
 
     useEffect(() => {
         const initializeOptions = async () => {
@@ -1163,6 +1164,22 @@ const Options: React.FC = () => {
         return <CheckComplete onBack={() => setCurrentView('list')} />;
     }
 
+    if (currentView === 'autoReminder') {
+        return (
+            <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
+                <div className="bg-white/80 backdrop-blur-sm shadow-lg mb-6 sticky top-0 z-50 border-b border-slate-200 p-4">
+                    <div className="flex items-center gap-3">
+                        <Button onClick={() => setCurrentView('list')}>← Quay lại</Button>
+                        <Title level={4} style={{ margin: 0 }} className="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
+                            ⏰ Tự Động Lập CMS Hối Hàng
+                        </Title>
+                    </div>
+                </div>
+                <AutoReminderSettings />
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
             <div className="bg-white/80 backdrop-blur-sm shadow-lg mb-6 sticky top-0 z-50 border-b border-slate-200">
@@ -1208,6 +1225,14 @@ const Options: React.FC = () => {
                             className="rounded-lg shadow-sm bg-purple-600 hover:bg-purple-500 border-none mr-2"
                         >
                             Check Complete
+                        </Button>
+                        <Button
+                            size="small"
+                            type="primary"
+                            onClick={() => setCurrentView('autoReminder')}
+                            className="rounded-lg shadow-sm bg-green-600 hover:bg-green-500 border-none mr-2"
+                        >
+                            ⏰ Tự Động CMS
                         </Button>
                         <Tooltip title="Xóa Cache">
                             <Button size="small" icon={<DeleteOutlined />} danger onClick={handleClearCache} className="rounded-lg shadow-sm" />

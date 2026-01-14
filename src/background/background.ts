@@ -31,6 +31,18 @@ import { ImportedImage } from "../types/vnpost";
 declare var XLSX: any;
 declare var firebase: any; // Khai báo firebase
 
+// Auto Reminder Scheduler imports
+import {
+  setupDailyAlarm,
+  checkAndRunAutoReminder,
+  enableAutoReminder,
+  disableAutoReminder,
+  updateTimeWindow,
+  getAutoReminderConfig,
+  getAutoReminderLogs,
+  clearAutoReminderLogs
+} from './autoReminderScheduler';
+
 type FirebaseConfig = {
   apiKey: string;
   authDomain: string;
@@ -550,6 +562,11 @@ async function initFirebase(): Promise<void> {
 
   // Khởi tạo các giá trị timestamp lần đầu
   startImageListener();
+
+  // Initialize Auto Reminder Scheduler
+  setupDailyAlarm();
+  console.log('[Auto Reminder] Scheduler initialized');
+
   console.log(
     "Firebase initialized, listening for scanned items and commands on key:",
     keyMessage,
@@ -1754,7 +1771,7 @@ async function handleAiKeyAction(request: any) {
 
   try {
     const { action, payload } = request;
-    
+
     if (action === "GET_ALL") {
       // Trả về dữ liệu cache ngay lập tức
       return { status: "success", data: aiKeysData };
@@ -5472,6 +5489,92 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
       })();
       return true; // Giữ kết nối async
+    }
+
+    // Auto Reminder handlers
+    if (msg.type === "RUN_AUTO_REMINDER") {
+      (async () => {
+        try {
+          await checkAndRunAutoReminder(true); // Force run
+          sendResponse({ status: 'success', message: 'Đã kích hoạt kiểm tra tự động' });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "ENABLE_AUTO_REMINDER") {
+      (async () => {
+        try {
+          await enableAutoReminder();
+          sendResponse({ status: 'success' });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "DISABLE_AUTO_REMINDER") {
+      (async () => {
+        try {
+          await disableAutoReminder();
+          sendResponse({ status: 'success' });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "UPDATE_AUTO_REMINDER_TIME") {
+      (async () => {
+        try {
+          const { startHour, endHour } = msg.payload;
+          await updateTimeWindow(startHour, endHour);
+          sendResponse({ status: 'success' });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "GET_AUTO_REMINDER_CONFIG") {
+      (async () => {
+        try {
+          const config = await getAutoReminderConfig();
+          sendResponse({ status: 'success', config });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "GET_AUTO_REMINDER_LOGS") {
+      (async () => {
+        try {
+          const logs = await getAutoReminderLogs();
+          sendResponse({ status: 'success', logs });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === "CLEAR_AUTO_REMINDER_LOGS") {
+      (async () => {
+        try {
+          await clearAutoReminderLogs();
+          sendResponse({ status: 'success' });
+        } catch (error: any) {
+          sendResponse({ status: 'error', error: error.message });
+        }
+      })();
+      return true;
     }
   }
 });
