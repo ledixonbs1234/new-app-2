@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Table, Card, Typography, message, Modal, Space, Checkbox } from 'antd';
+import { Button, Table, Card, Typography, message, Modal, Space } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined, CopyOutlined, FileTextOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import CMSTicketItem from './components/CMSTicketItem';
@@ -21,9 +21,10 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     const [detailLoading, setDetailLoading] = useState(false);
 
     // Filter states
-    const [filterSuccess, setFilterSuccess] = useState(false);
-    const [filterPaid, setFilterPaid] = useState(false);
-    const [filterReturnSuccess, setFilterReturnSuccess] = useState(false);
+    // Filter states removed
+    // const [filterSuccess, setFilterSuccess] = useState(false);
+    // const [filterPaid, setFilterPaid] = useState(false);
+    // const [filterReturnSuccess, setFilterReturnSuccess] = useState(false);
 
     // Excel storage states
     const [excelData, setExcelData] = useState<Map<string, any>>(new Map());
@@ -426,7 +427,13 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         );
     };
 
-    const columns = [
+    // Generate unique values for filters
+    const getUniqueValues = (data: any[], key: string) => {
+        const values = data.map(item => item[key]).filter(Boolean);
+        return [...new Set(values)].map(val => ({ text: val, value: val }));
+    };
+
+    const columns: any = [
         // Removed ID column
         // { title: 'ID', dataIndex: 'complaintCode', key: 'complaintCode', render: (text: string) => <b>{text}</b> },
         {
@@ -452,12 +459,35 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             )
         },
 
-        { title: 'Nội dung', dataIndex: 'note', key: 'note' },
+        {
+            title: 'Nội dung',
+            dataIndex: 'note',
+            key: 'note',
+            filters: getUniqueValues(data, 'note'),
+            onFilter: (value: string, record: any) => record.note && record.note.indexOf(value) === 0,
+            filterSearch: true
+        },
         { title: 'Ngày tạo', dataIndex: 'createDate', key: 'createDate' },
         { title: 'Hạn xử lý', dataIndex: 'deadline', key: 'deadline' },
         { title: 'Trạng thái CMS', dataIndex: 'statusText', key: 'statusText', render: (text: string) => <span style={{ color: 'green' }}>{text}</span> },
-        { title: 'Trạng thái đơn', dataIndex: 'excelStatus', key: 'excelStatus', render: (text: string) => <span style={{ fontWeight: 'bold', color: 'blue' }}>{text}</span> },
-        { title: 'Trạng thái nộp', dataIndex: 'paymentStatus', key: 'paymentStatus', render: (text: string) => <span style={{ color: 'purple' }}>{text}</span> },
+        {
+            title: 'Trạng thái đơn',
+            dataIndex: 'excelStatus',
+            key: 'excelStatus',
+            render: (text: string) => <span style={{ fontWeight: 'bold', color: 'blue' }}>{text}</span>,
+            filters: getUniqueValues(data, 'excelStatus'),
+            onFilter: (value: string, record: any) => record.excelStatus === value,
+            filterSearch: true
+        },
+        {
+            title: 'Trạng thái nộp',
+            dataIndex: 'paymentStatus',
+            key: 'paymentStatus',
+            render: (text: string) => <span style={{ color: 'purple' }}>{text}</span>,
+            filters: getUniqueValues(data, 'paymentStatus'),
+            onFilter: (value: string, record: any) => record.paymentStatus === value,
+            filterSearch: true
+        },
         {
             title: 'BCCP',
             key: 'bccp',
@@ -505,25 +535,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     ];
 
     // Filter Logic
-    const finalData = data.filter(item => {
-        // 1. Lọc theo trạng thái thanh toán (Giữ nguyên)
-        if (filterPaid) {
-            const p = item.paymentStatus ? item.paymentStatus.toLowerCase() : '';
-            if (!p.includes('thu tiền bưu tá')) return false;
-        }
-
-        // 2. Lọc theo trạng thái đơn hàng (SỬA ĐOẠN NÀY)
-        // Nếu có bất kỳ checkbox trạng thái nào được bật (Success hoặc ReturnSuccess)
-        if (filterSuccess || filterReturnSuccess) {
-            const matchSuccess = filterSuccess && item.excelStatus === 'Đã phát thành công';
-            const matchReturn = filterReturnSuccess && item.excelStatus === 'Phát hoàn thành công';
-
-            // Nếu không khớp với bất kỳ trạng thái nào đang bật thì loại bỏ
-            if (!matchSuccess && !matchReturn) return false;
-        }
-
-        return true;
-    });
+    // Filter Logic removed - moved to Table columns
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 p-4">
@@ -594,22 +606,12 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                         </div>
                     </div>
 
-                    <div className="flex gap-4">
-                        <Checkbox checked={filterSuccess} onChange={e => setFilterSuccess(e.target.checked)}>
-                            Phát Thành công
-                        </Checkbox>
-                        <Checkbox checked={filterReturnSuccess} onChange={e => setFilterReturnSuccess(e.target.checked)}>
-                            Phát Hoàn Thành công
-                        </Checkbox>
-                        <Checkbox checked={filterPaid} onChange={e => setFilterPaid(e.target.checked)}>
-                            Đã nộp COD
-                        </Checkbox>
-                    </div>
+                    {/* Filter checkboxes removed */}
                 </div>
 
                 <Table
                     rowSelection={rowSelection}
-                    dataSource={finalData}
+                    dataSource={data}
                     columns={columns}
                     rowKey="id"
                     loading={loading}
