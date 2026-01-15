@@ -115,6 +115,10 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
             return;
         }
 
+        // Set Badge to RUN (Blue)
+        chrome.action.setBadgeText({ text: 'RUN' });
+        chrome.action.setBadgeBackgroundColor({ color: '#2196F3' });
+
         await addLog(force ? '🚀 Bắt đầu chạy thủ công (Run Now)' : '🚀 Bắt đầu kiểm tra tự động');
 
         // Get orgCode from storage
@@ -135,6 +139,11 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
         const result = await processAutoReminder(orgCode);
 
         if (result.success) {
+            // Set Badge to Count (Green)
+            const countText = result.ordersProcessed !== undefined ? result.ordersProcessed.toString() : 'OK';
+            chrome.action.setBadgeText({ text: countText });
+            chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+
             await addLog(`✅ ${result.message}`);
             if (result.ordersProcessed !== undefined) {
                 await addLog(`📦 Đã xử lý ${result.ordersProcessed} đơn hàng`);
@@ -145,6 +154,10 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
             await saveConfig(config);
 
         } else {
+            // Set Badge to ERR (Red)
+            chrome.action.setBadgeText({ text: 'ERR' });
+            chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+
             await addLog(`⚠️ ${result.message}`);
         }
 
@@ -159,6 +172,10 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
         await cleanupOldCompletions();
 
     } catch (error) {
+        // Set Badge to ERR (Red)
+        chrome.action.setBadgeText({ text: 'ERR' });
+        chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
+
         console.error('[Auto Reminder] Error in checkAndRunAutoReminder:', error);
         await addLog(`❌ Lỗi hệ thống: ${error}`);
     }

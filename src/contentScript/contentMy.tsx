@@ -2582,7 +2582,15 @@ function runOrderLogic() {
             const soDienThoaiRaw = getTextFromLabel(receiverCard, 'Số điện thoại');
             // Tách phần số điện thoại ra khỏi các text/icon thừa
             const soDienThoai = soDienThoaiRaw.split(' ')[0] || 'N/A';
-            const diaChi = getTextFromLabel(receiverCard, 'Địa chỉ');
+
+            // Logic lấy địa chỉ mới: Ưu tiên địa chỉ mới (dòng 5) > địa chỉ cũ (dòng 3)
+            const newAddressEl = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(5) > td");
+            const oldAddressEl = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(3) > td");
+
+            const newAddress = newAddressEl?.textContent?.trim() || '';
+            const oldAddress = oldAddressEl?.textContent?.trim() || '';
+
+            const diaChi = newAddress || oldAddress || getTextFromLabel(receiverCard, 'Địa chỉ');
 
             // 5. Định dạng chuỗi để copy, giống với ví dụ của bạn
             const textToCopy = `${maVanDon}\n${hoTen}\n${soDienThoai}\n${diaChi}`;

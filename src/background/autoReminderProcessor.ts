@@ -17,6 +17,13 @@ interface ProcessResult {
     errors?: string[];
 }
 
+interface CMSAutoConfig {
+    orgCode: string;
+    customerName?: string;
+    ticketType: 'support' | 'complaint';
+    content: string;
+}
+
 /**
  * Check if CMS and my.vnpost.vn are logged in
  */
@@ -392,15 +399,17 @@ const SERVICE_CODE_MAPPING: { [key: string]: string } = {
 /**
  * TẠO VÀ CHUYỂN TIẾP CMS HỐI PHÁT TRỰC TIẾP (Bypass messaging)
  */
-async function createReminderCMS(order: ExtendedOrder): Promise<boolean> {
+async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoConfig[]): Promise<boolean> {
     try {
-        let content = "";
-        // return true;
+        // Tìm cấu hình theo senderCode
+        const config = cmsAutoConfigs.find(cfg => cfg.orgCode === order.orgCode);
+        let content = config ? config.content : ("Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn");
+
+        // Count safeguard (keeping existing logic)
         if (countLapCMS < 4) {
             countLapCMS++;
-            if (order.orgCode == "C019221471") {
-                content += "Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn!";
-            }
+            // Removed hardcoded content append logic here
+
 
             // --- BƯỚC 0: XÁC ĐỊNH BƯU CỤC ĐÍCH TỪ LỊCH SỬ ---
             const historyList = order.history?.orderStatusHistoryDtoList || [];
@@ -591,7 +600,15 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         console.log('[Auto Reminder] Fetching delivery orders...');
         const orders = await fetchDeliveryOrders(token, orgCode);
 
+        // Fetch CMS Auto Configs
+        const cmsAutoConfigs = await new Promise<CMSAutoConfig[]>((resolve) => {
+            chrome.storage.local.get(['cmsAutoConfigs'], (result) => {
+                resolve(result.cmsAutoConfigs || []);
+            });
+        });
+
         if (orders.length === 0) {
+
             await markAsCompleted(orgCode, orgCode, 0);
             return {
                 success: true,
@@ -695,7 +712,7 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         console.log('[Auto Reminder] Creating CMS tickets...');
         const results = await Promise.all(
             eligibleOrders.map(async (order) => {
-                const success = await createReminderCMS(order);
+                const success = await createReminderCMS(order, cmsAutoConfigs);
                 if (success) {
                     // console.log(`[Auto Reminder] ✅ Đã lập CMS hối hàng của đơn ${order.itemCode}`);
                 }
