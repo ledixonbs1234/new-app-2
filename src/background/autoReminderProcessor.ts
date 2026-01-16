@@ -25,11 +25,45 @@ interface CMSAutoConfig {
 }
 
 /**
+ * Helper: Lấy token trực tiếp từ tab my.vnpost.vn đang mở
+ * Thay thế hoàn toàn việc đọc từ chrome.storage
+ */
+async function getPortalTokenFromTab(): Promise<string | null> {
+    try {
+        // 1. Tìm tất cả các tab my.vnpost.vn
+        const tabs = await chrome.tabs.query({ url: "*://my.vnpost.vn/*" });
+
+        if (tabs.length === 0 || !tabs[0].id) {
+            console.log('[Auto Reminder] Không tìm thấy tab my.vnpost.vn nào đang mở.');
+            return null;
+        }
+
+        const targetTabId = tabs[0].id;
+
+        // 2. Tiêm script để đọc localStorage
+        const results = await chrome.scripting.executeScript({
+            target: { tabId: targetTabId },
+            func: () => localStorage.getItem('accessToken')
+        });
+
+        // 3. Xử lý kết quả
+        if (results && results[0] && results[0].result) {
+            const token = results[0].result;
+            // console.log('[Auto Reminder] Đã lấy được token từ tab đang mở.');
+            return token;
+        }
+
+        return null;
+    } catch (error) {
+        console.error('[Auto Reminder] Lỗi khi lấy token từ tab:', error);
+        return null;
+    }
+}
+/**
  * Check if CMS and my.vnpost.vn are logged in
  */
 async function checkLoginStatus(): Promise<{ cms: boolean; portal: boolean }> {
     try {
-        // Check CMS login by trying to access a CMS endpoint
         // Check CMS login by trying to access a CMS endpoint
         const cmsCheck = await fetch("https://cms.vnpost.vn/api/admin/complaints/loadformadd?type=DVBC", {
             method: "GET",
@@ -46,13 +80,8 @@ async function checkLoginStatus(): Promise<{ cms: boolean; portal: boolean }> {
 
         const cmsLoggedIn = cmsCheck.ok && !cmsCheck.url.includes('login');
 
-        // Check my.vnpost.vn login by checking for token in storage
-        const portalToken = await new Promise<string | null>((resolve) => {
-            chrome.storage.local.get(['accessToken'], (result) => {
-                resolve(result.accessToken || null);
-            });
-        });
-
+        // Check my.vnpost.vn login by fetching from active tab
+        const portalToken = await getPortalTokenFromTab();
         const portalLoggedIn = !!portalToken;
 
         return { cms: cmsLoggedIn, portal: portalLoggedIn };
@@ -340,130 +369,130 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
         let content = config ? config.content : ("Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn");
 
         // Count safeguard (keeping existing logic)
-        if (countLapCMS < 20) {
-            countLapCMS++;
-            // Removed hardcoded content append logic here
+        // if (countLapCMS < 20) {
+        // countLapCMS++;
+        // Removed hardcoded content append logic here
 
 
-            // --- BƯỚC 0: XÁC ĐỊNH BƯU CỤC ĐÍCH TỪ LỊCH SỬ ---
-            const historyList = order.history?.orderStatusHistoryDtoList || [];
-            let destOrgCode = '';
-            // Tìm mã 6 số cuối cùng trong cột địa chỉ của lịch sử
-            for (const historyItem of historyList) {
-                const addressMatch = historyItem.address?.match(/(\d{6})/);
-                if (addressMatch) {
-                    destOrgCode = addressMatch[1];
-                    break;
-                }
-            }
-
-            if (!destOrgCode) {
-                console.warn(`[Auto Reminder] Không tìm thấy bưu cục đích cho đơn ${order.itemCode}`);
-                // Bạn có thể chọn dừng lại hoặc vẫn tạo ticket nhưng không forward
-            }
-
-            // --- BƯỚC 1: TẠO TICKET MỚI (CREATE) ---
-            const expirationDate = new Date();
-            expirationDate.setDate(expirationDate.getDate() + 1); // Support +1 ngày
-            const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
-            const ttkSrvIdL3 = SERVICE_CODE_MAPPING[order.serviceCode || ''] || SERVICE_CODE_MAPPING["DEFAULT"];
-
-            const troubleticketData = {
-                ttkType: "2",
-                ttkContactName: "Bưu cục Bồng Sơn 1",
-                ttkSource: "1",
-                ttkSeverity: "1",
-                ttkReason: "134",
-                ttkContactNumber: "02563861718",
-                ttkContactEmail: "",
-                ttkContent: content,
-                accntCodeRef: "", accntName: "", accntMobile: "",
-                ttkSrvIdL2: "62",
-                ttkSrvIdL3: ttkSrvIdL3,
-                ttkExpiration: expiration,
-                ttkContactAddr: "", accntAddr: "", accntCode: "", accntPostcode: "",
-                accntProvince: "", accntDistrict: "", accntWards: "", accntEmail: "",
-                contactPostcode: "", contactProvince: "", contactDistrict: "", contactWards: "",
-                accntAddrDetail: "", ttkContactAddrDetail: "",
-                ttkSrvId: 1,
-                parcelId: order.itemCode,
-                postageData: {
-                    parcelId: order.itemCode,
-                    poAcc: "", poName: "", managerOrg: "", poWeigh: "", poRate: "",
-                    poClassify: "", poSenderName: "", poSenderPhone: "", poSenderAddress: "",
-                    poSenderAddressDetail: "", poReceiverName: "", poReceiverPhone: "",
-                    poReceiverAddress: "", poReceiverAddressDetail: "", poParcelDirection: "",
-                    poSend: "", poSendName: "", poSenderEmail: "", poStatus: "", poMethod: ""
-                }
-            };
-
-            const createForm = new FormData();
-            createForm.append("type", "DVBC");
-            createForm.append("troubleticketData", new Blob([JSON.stringify(troubleticketData)], { type: "application/json" }));
-
-            const createRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
-                method: "POST",
-                body: createForm,
-                credentials: "include"
-            });
-
-            const createResult = await createRes.json();
-
-            if (createResult.result !== true || !createResult.code) {
-                console.error(`[Auto Reminder] Lỗi tạo CMS cho ${order.itemCode}:`, createResult.message);
-                return false;
-            }
-
-            const ticketCode = createResult.code; // Đây là mã ticket vừa tạo (VD: ttkId)
-            console.log(`[Auto Reminder] ✅ Đã tạo ticket ${ticketCode} cho đơn ${order.itemCode}`);
-
-            // --- BƯỚC 2: CHỜ HỆ THỐNG ĐỒNG BỘ (DELAY 3S) ---
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // --- BƯỚC 3: CHUYỂN TIẾP (FORWARD) NẾU CÓ BƯU CỤC ĐÍCH ---
-            if (destOrgCode) {
-                // 3.1 Lấy thông tin tên bưu cục đích
-                const orgRes = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${destOrgCode}`, {
-                    credentials: "include",
-                    headers: { "x-requested-with": "XMLHttpRequest" }
-                });
-                const orgData = await orgRes.json();
-
-                if (orgData && orgData.length > 0) {
-                    const orgInfo = { orgCode: orgData[0].orgCode, name: orgData[0].name };
-
-                    // 3.2 Gửi lệnh chuyển tiếp (giống logic trong handleForward)
-                    const dataOrgObj = [{
-                        tempId: 72,
-                        orgCode: orgInfo.orgCode,
-                        orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
-                        filename: "",
-                        comment: content,
-                        file: "",
-                        type: 2,
-                        number: 1
-                    }];
-
-                    const forwardForm = new FormData();
-                    forwardForm.append("dataOrg", new Blob([JSON.stringify(dataOrgObj)], { type: "application/json" }));
-                    forwardForm.append("ids", ticketCode);
-
-                    const forwardRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
-                        method: "PUT",
-                        body: forwardForm,
-                        credentials: "include"
-                    });
-
-                    const forwardResult = await forwardRes.json();
-                    if (forwardResult.result === true) {
-                        console.log(`[Auto Reminder] ➡️ Đã chuyển tiếp ticket ${ticketCode} đến ${orgInfo.orgCode}`);
-                    } else {
-                        console.warn(`[Auto Reminder] ⚠️ Tạo thành công nhưng chuyển tiếp thất bại cho ${order.itemCode}`);
-                    }
-                }
-                return true;
+        // --- BƯỚC 0: XÁC ĐỊNH BƯU CỤC ĐÍCH TỪ LỊCH SỬ ---
+        const historyList = order.history?.orderStatusHistoryDtoList || [];
+        let destOrgCode = '';
+        // Tìm mã 6 số cuối cùng trong cột địa chỉ của lịch sử
+        for (const historyItem of historyList) {
+            const addressMatch = historyItem.address?.match(/(\d{6})/);
+            if (addressMatch) {
+                destOrgCode = addressMatch[1];
+                break;
             }
         }
+
+        if (!destOrgCode) {
+            console.warn(`[Auto Reminder] Không tìm thấy bưu cục đích cho đơn ${order.itemCode}`);
+            // Bạn có thể chọn dừng lại hoặc vẫn tạo ticket nhưng không forward
+        }
+
+        // --- BƯỚC 1: TẠO TICKET MỚI (CREATE) ---
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 1); // Support +1 ngày
+        const expiration = `${String(expirationDate.getDate()).padStart(2, '0')}/${String(expirationDate.getMonth() + 1).padStart(2, '0')}/${expirationDate.getFullYear()}`;
+        const ttkSrvIdL3 = SERVICE_CODE_MAPPING[order.serviceCode || ''] || SERVICE_CODE_MAPPING["DEFAULT"];
+
+        const troubleticketData = {
+            ttkType: "2",
+            ttkContactName: "Bưu cục Bồng Sơn 1",
+            ttkSource: "1",
+            ttkSeverity: "1",
+            ttkReason: "134",
+            ttkContactNumber: "02563861718",
+            ttkContactEmail: "",
+            ttkContent: content,
+            accntCodeRef: "", accntName: "", accntMobile: "",
+            ttkSrvIdL2: "62",
+            ttkSrvIdL3: ttkSrvIdL3,
+            ttkExpiration: expiration,
+            ttkContactAddr: "", accntAddr: "", accntCode: "", accntPostcode: "",
+            accntProvince: "", accntDistrict: "", accntWards: "", accntEmail: "",
+            contactPostcode: "", contactProvince: "", contactDistrict: "", contactWards: "",
+            accntAddrDetail: "", ttkContactAddrDetail: "",
+            ttkSrvId: 1,
+            parcelId: order.itemCode,
+            postageData: {
+                parcelId: order.itemCode,
+                poAcc: "", poName: "", managerOrg: "", poWeigh: "", poRate: "",
+                poClassify: "", poSenderName: "", poSenderPhone: "", poSenderAddress: "",
+                poSenderAddressDetail: "", poReceiverName: "", poReceiverPhone: "",
+                poReceiverAddress: "", poReceiverAddressDetail: "", poParcelDirection: "",
+                poSend: "", poSendName: "", poSenderEmail: "", poStatus: "", poMethod: ""
+            }
+        };
+
+        const createForm = new FormData();
+        createForm.append("type", "DVBC");
+        createForm.append("troubleticketData", new Blob([JSON.stringify(troubleticketData)], { type: "application/json" }));
+
+        const createRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save", {
+            method: "POST",
+            body: createForm,
+            credentials: "include"
+        });
+
+        const createResult = await createRes.json();
+
+        if (createResult.result !== true || !createResult.code) {
+            console.error(`[Auto Reminder] Lỗi tạo CMS cho ${order.itemCode}:`, createResult.message);
+            return false;
+        }
+
+        const ticketCode = createResult.code; // Đây là mã ticket vừa tạo (VD: ttkId)
+        console.log(`[Auto Reminder] ✅ Đã tạo ticket ${ticketCode} cho đơn ${order.itemCode}`);
+
+        // --- BƯỚC 2: CHỜ HỆ THỐNG ĐỒNG BỘ (DELAY 3S) ---
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // --- BƯỚC 3: CHUYỂN TIẾP (FORWARD) NẾU CÓ BƯU CỤC ĐÍCH ---
+        if (destOrgCode) {
+            // 3.1 Lấy thông tin tên bưu cục đích
+            const orgRes = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${destOrgCode}`, {
+                credentials: "include",
+                headers: { "x-requested-with": "XMLHttpRequest" }
+            });
+            const orgData = await orgRes.json();
+
+            if (orgData && orgData.length > 0) {
+                const orgInfo = { orgCode: orgData[0].orgCode, name: orgData[0].name };
+
+                // 3.2 Gửi lệnh chuyển tiếp (giống logic trong handleForward)
+                const dataOrgObj = [{
+                    tempId: 72,
+                    orgCode: orgInfo.orgCode,
+                    orgName: `${orgInfo.orgCode} - ${orgInfo.name}`,
+                    filename: "",
+                    comment: content,
+                    file: "",
+                    type: 2,
+                    number: 1
+                }];
+
+                const forwardForm = new FormData();
+                forwardForm.append("dataOrg", new Blob([JSON.stringify(dataOrgObj)], { type: "application/json" }));
+                forwardForm.append("ids", ticketCode);
+
+                const forwardRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/change", {
+                    method: "PUT",
+                    body: forwardForm,
+                    credentials: "include"
+                });
+
+                const forwardResult = await forwardRes.json();
+                if (forwardResult.result === true) {
+                    console.log(`[Auto Reminder] ➡️ Đã chuyển tiếp ticket ${ticketCode} đến ${orgInfo.orgCode}`);
+                } else {
+                    console.warn(`[Auto Reminder] ⚠️ Tạo thành công nhưng chuyển tiếp thất bại cho ${order.itemCode}`);
+                }
+            }
+            return true;
+        }
+        // }
 
         return true; // Trả về true vì ít nhất bước tạo đã thành công
 
