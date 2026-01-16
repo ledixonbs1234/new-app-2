@@ -1,6 +1,5 @@
-import { PayloadAction, createSlice, current } from "@reduxjs/toolkit";
+import { PayloadAction, createSlice } from "@reduxjs/toolkit";
 import { BuuGuiProps, KhachHangProps, KhachLeProps, KhachNuocMamProps } from "../states/states";
-import { set } from "firebase/database";
 
 
 // ADD: Định nghĩa kiểu cho một đơn hàng

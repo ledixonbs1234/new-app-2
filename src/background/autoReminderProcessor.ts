@@ -69,7 +69,7 @@ async function checkLoginStatus(): Promise<{ cms: boolean; portal: boolean }> {
 async function fetchDeliveryOrders(
     token: string,
     orgCode: string
-): Promise<ExtendedOrder[]> {
+): Promise<ExtendedOrder[] | null> {
     try {
         const targetStatus = ['11', '12', '13'];
 
@@ -113,7 +113,7 @@ async function fetchDeliveryOrders(
 
         if (!response.ok) {
             console.error(`Failed to fetch orders: ${response.status}`);
-            return [];
+            return null;
         }
 
         const data = await response.json();
@@ -131,7 +131,7 @@ async function fetchDeliveryOrders(
 
     } catch (error) {
         console.error('Error fetching delivery orders:', error);
-        return [];
+        return null;
     }
 }
 
@@ -296,72 +296,6 @@ async function fetchOrderHistory(itemCode: string, token: string): Promise<Order
 }
 let countLapCMS = 0;
 
-// async function createReminderCMS(order: ExtendedOrder): Promise<boolean> {
-//     try {
-//         var content = "";
-//         if (countLapCMS < 4) {
-//             countLapCMS++;
-//             if (order.orgCode == "C019221471") {
-//                 content += "Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn!";
-//             }
-//             debugger
-//             if (content != "") {
-//                 const response = await new Promise<any>((resolve) => {
-//                     chrome.runtime.sendMessage({
-//                         event: 'CONTENTMY',
-//                         type: 'CREATE_CMS_TICKET_V2',
-//                         payload: {
-//                             maVanDon: order.itemCode,
-//                             serviceCode: order.serviceCode || 'EMS',
-//                             ticketType: 'support',
-//                             content: content
-//                         }
-//                     }, (response) => {
-//                         console.log(content);
-//                         debugger;
-//                         resolve(response);
-
-//                     });
-//                 });
-
-//                 console.log(content);
-//                 return response?.status === 'success';
-//             }
-
-//         }
-
-//         // - CHO KHÁCH XEM HÀNG, Khách xem hàng không nhận không thu phí hủy ĐH 
-//         // - Phát một phần đơn hàng (DOP2) khi có yêu cầu.
-//         //  - Hoàn trả một phần đơn hàng theo BKC: 59CVOTHITHUAN319.
-//         // - Phát không thành công vui lòng liên hệ với người gửi: 0366 576 671 
-//         // - Liên hệ người gửi trước khi Chuyển hoàn và Chuyển hoàn về BCG
-//         // const response = await new Promise<any>((resolve) => {
-//         //     chrome.runtime.sendMessage({
-//         //         event: 'CONTENTMY',
-//         //         type: 'CREATE_CMS_TICKET_V2',
-//         //         payload: {
-//         //             maVanDon: order.itemCode,
-//         //             serviceCode: order.serviceCode || 'EMS',
-//         //             ticketType: 'support',
-//         //             content: content
-//         //         }
-//         //     }, (response) => {
-//         //         resolve(response);
-//         //     });
-//         //     resolve({
-//         //         status: 'success'
-//         //     });
-//         // });
-
-//         return true;
-
-//         // return response?.status === 'success';
-
-//     } catch (error) {
-//         console.error(`Error creating CMS for ${order.itemCode}:`, error);
-//         return false;
-//     }
-// }
 
 // Bảng mapping dịch vụ (copy từ background.ts)
 const SERVICE_CODE_MAPPING: { [key: string]: string } = {
@@ -406,7 +340,7 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
         let content = config ? config.content : ("Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn");
 
         // Count safeguard (keeping existing logic)
-        if (countLapCMS < 4) {
+        if (countLapCMS < 20) {
             countLapCMS++;
             // Removed hardcoded content append logic here
 
@@ -606,6 +540,14 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
                 resolve(result.cmsAutoConfigs || []);
             });
         });
+
+        if (orders === null) {
+            // Error case (network or auth)
+            return {
+                success: false,
+                message: 'Lỗi khi lấy danh sách đơn hàng (API Error)'
+            };
+        }
 
         if (orders.length === 0) {
 

@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Spin, Alert, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag, Checkbox } from "antd";
+import { Spin, Button, Space, Tooltip, message, Switch, Modal, Tabs, Table, Tag, Checkbox } from "antd";
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined, UndoOutlined, LeftOutlined, RightOutlined, ClearOutlined, DeleteOutlined, DollarOutlined, PhoneOutlined, EnvironmentOutlined, RobotOutlined, SaveOutlined, LinkOutlined } from "@ant-design/icons";
 import { Order, StoredImage } from "../types/vnpost";
-import { syncAllImages, SyncProgress, listenToFirebaseImages } from "./utils/firebaseSync";
+import { syncAllImages, listenToFirebaseImages } from "./utils/firebaseSync";
 import { getAllImages, initDB } from "./utils/imageDB";
 import ImageViewer from "./components/ImageViewer";
 import ThumbnailGallery from "./components/ThumbnailGallery";
@@ -23,10 +23,7 @@ const SidePanel: React.FC = () => {
     return saved !== null ? parseInt(saved, 10) : 0;
   });
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [syncProgress, setSyncProgress] = useState<SyncProgress>({
-    total: 0, downloaded: 0, failed: 0, status: "idle",
-  });
+  /* error and syncProgress removed */
   const [savedHdrId, setSavedHdrId] = useState<string>(() => {
     return localStorage.getItem("sidepanel_saved_hdr_id") || "";
   });
@@ -51,13 +48,11 @@ const SidePanel: React.FC = () => {
     return localStorage.getItem("sidepanel_active_tab") || "images";
   });
   const [portalList, setPortalList] = useState<any[]>([]);
-  const [portalLoading, setPortalLoading] = useState<boolean>(false);
+  /* portalLoading removed */
   const [aiOrders, setAiOrders] = useState<Order[]>([]);
   const [aiSelectedIndex, setAiSelectedIndex] = useState<number>(0);
   // Hàm xử lý lưu vị trí scroll (có debounce để tránh ghi storage quá nhiều)
-  const saveScrollPosition = useCallback(debounceLocal((key: string, value: number) => {
-    localStorage.setItem(`sidepanel_scroll_${key}`, value.toString());
-  }, 300), []);
+  /* saveScrollPosition removed */
   // Refs
   const imageViewerRef = useRef<{
     applyZoomPreset: (preset: ZoomPreset) => void;
@@ -229,13 +224,7 @@ const SidePanel: React.FC = () => {
     const targetUrl = `https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=${savedHdrId}`;
     chrome.tabs.update({ url: targetUrl });
   };
-  function debounceLocal(func: Function, wait: number) {
-    let timeout: NodeJS.Timeout;
-    return function (...args: any[]) {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => func(...args), wait);
-    };
-  }
+
   const lastAutoNextTimeRef = useRef<number>(0);
 
   useEffect(() => {
@@ -768,7 +757,7 @@ const SidePanel: React.FC = () => {
   const loadImages = async () => {
     try {
       setLoading(true);
-      setError(null);
+      /* setError(null) removed */
 
       // 1. Khởi tạo DB
       await initDB();
@@ -801,7 +790,6 @@ const SidePanel: React.FC = () => {
 
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Lỗi tải ảnh");
       setLoading(false);
     }
   };
@@ -1030,7 +1018,7 @@ const SidePanel: React.FC = () => {
   // RENDER
   // =================================================================
 
-  const selectedImage = images[selectedIndex];
+
 
   return (
     <div className="sidepanel-container" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -1080,13 +1068,13 @@ const SidePanel: React.FC = () => {
                     </Space>
                   </div>
                   <div style={{ padding: '0 12px 8px 12px', background: '#fff', borderBottom: '1px solid #f0f0f0' }}>
-                     <Checkbox 
-                        checked={keepTabOpen} 
-                        onChange={handleToggleKeepTab}
-                        style={{ fontSize: '12px' }}
-                      >
-                        <span style={{ color: '#1890ff', fontWeight: 500 }}>Giữ Tab khi Refresh</span>
-                     </Checkbox>
+                    <Checkbox
+                      checked={keepTabOpen}
+                      onChange={handleToggleKeepTab}
+                      style={{ fontSize: '12px' }}
+                    >
+                      <span style={{ color: '#1890ff', fontWeight: 500 }}>Giữ Tab khi Refresh</span>
+                    </Checkbox>
                   </div>
                   <div style={{ padding: 8, borderBottom: '1px solid #eee', background: '#fff', display: 'flex', justifyContent: 'space-between' }}>
                     <span>Tổng: <b>{portalList.length}</b></span>
@@ -1117,7 +1105,7 @@ const SidePanel: React.FC = () => {
                     <h3 style={{ margin: 0 }}>Hình Ảnh ({images.length})</h3>
                     <Space>
                       <Tooltip title="Xóa tất cả"><Button danger type="text" icon={<ClearOutlined />} onClick={handleClearAllImages} /></Tooltip>
-                      <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} loading={syncProgress.status === "syncing"} />
+                      <Button type="text" icon={<ReloadOutlined />} onClick={handleRefresh} />
                     </Space>
                   </div>
                   <div style={{ marginTop: 8, padding: 8, background: "#f5f5f5", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>

@@ -1,9 +1,9 @@
 
 
-import { Button, Card, Input, message, Space, Tabs, TabsProps } from "antd";
+import { Button, Card, message, Space, Tabs, TabsProps } from "antd";
 import { useEffect, useState } from "react";
 import './popup.css';
-import { setOrders, clearOrders, Order, setCurrentIndex } from "./popup.slice";
+import { setOrders, setCurrentIndex } from "./popup.slice";
 import { useDispatch } from "react-redux";
 import TextArea from "antd/es/input/TextArea";
 import BatchAddTab from "./components/BatchAddTab";
@@ -15,7 +15,7 @@ export default function Popup() {
   // State cho tab "Thêm dữ liệu" (JSON & AI)
   const [jsonInput, setJsonInput] = useState<string>("");
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const baseColors: string[] = ["TRANG", "DO", "XANH"];
+
   // Load dữ liệu ban đầu
   useEffect(() => {
     console.log("Popup is running...");
@@ -182,41 +182,7 @@ và đây là kết quả của tôi
   }
 
   // --- HÀM ĐẾM MÀU TỔNG HỢP ---
-  function demTongHopMau(data: Order[], colorsToFind: string[]): Map<string, number> {
-    // 1. Khởi tạo Map để lưu kết quả đếm.
-    // Key là màu (chữ hoa), value là số lần đếm.
-    const colorCounts = new Map<string, number>();
-    colorsToFind.forEach(color => {
-      colorCounts.set(color.toUpperCase(), 0);
-    });
 
-    // 2. Tạo một biểu thức chính quy từ mảng các màu cần tìm.
-    // Ví dụ: ['TRANG', 'DO', 'XANH'] -> /TRANG|DO|XANH/gi
-    const searchPattern = new RegExp(colorsToFind.join('|'), 'gi');
-
-    // 3. Lặp qua từng item trong mảng orderData
-    for (const item of data) {
-      const mausacString = item.MAUSAC;
-
-      // 4. Dùng .match() để tìm tất cả các chuỗi con khớp với regex
-      const matches = mausacString.match(searchPattern);
-      // Ví dụ: 
-      // "TRANGTRANG".match(/TRANG|DO|XANH/gi) -> ['TRANG', 'TRANG']
-      // "XANHDO".match(/TRANG|DO|XANH/gi)     -> ['XANH', 'DO']
-      // "Không có".match(...)                -> null
-
-      // 5. Nếu tìm thấy, lặp qua các kết quả và cập nhật bộ đếm
-      if (matches) {
-        for (const match of matches) {
-          const standardizedMatch = match.toUpperCase(); // Chuẩn hóa về chữ hoa
-          const currentCount = colorCounts.get(standardizedMatch) || 0;
-          colorCounts.set(standardizedMatch, currentCount + 1);
-        }
-      }
-    }
-
-    return colorCounts;
-  }
 
   const items: TabsProps['items'] = [
     {

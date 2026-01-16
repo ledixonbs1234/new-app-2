@@ -639,7 +639,7 @@ async function processSinglePortalItem(
     if (!findAndSearchBtn) {
       throw new Error("Không tìm thấy nút 'Lưu và tìm kiếm'");
     }
-     await delay(300);
+    await delay(300);
 
     (findAndSearchBtn as HTMLElement).click();
 
@@ -973,7 +973,7 @@ async function changeKL(kl: any) {
       //   formR.setState({
       //     formValue: { ...formR.state.formValue, weight: klTemp },
       //   });
-      const buttons = document.querySelector('.rt-tbody button.btn-link');
+
       await waitForElm('.rt-tbody button.btn-link')
 
       await delay(100);

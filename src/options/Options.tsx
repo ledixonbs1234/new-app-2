@@ -524,66 +524,7 @@ const Options: React.FC = () => {
         }
     };
 
-    const fetchOrderFullInfo = async (order: ExtendedOrder, forceRefresh = false) => {
-        const now = Date.now();
-        if (!forceRefresh && order.lastUpdated && (now - order.lastUpdated < 3 * 60 * 60 * 1000)) {
-            return;
-        }
 
-        updateOrderState(order.orderHdrId, { loading: true });
-
-        try {
-            // 1. Detail
-            const detailRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderHdr/${order.orderHdrId}`, {
-                headers: { 'Authorization': token, 'Capikey': '19001111' }
-            });
-            const detailData: OrderDetail = await detailRes.json();
-
-            // 2. History
-            const historyRes = await fetch(`https://api-pre-my.vnpost.vn/myvnp-web/v1/OrderTemplate/historynew?itemCode=${order.itemCode}`, {
-                headers: { 'Authorization': token, 'Capikey': '19001111' }
-            });
-            const historyData: OrderHistoryResponse = await historyRes.json();
-
-            // 3. Extra Info (Firebase) - using service
-            const extraInfoRes = await getExtraInfo(order.itemCode);
-            const extraInfo = extraInfoRes?.status === 'success' ? extraInfoRes.data : '';
-
-            // 4. CMS Data - using service
-            const cmsDataRes = await fetchCMSData(order.itemCode);
-            const cmsData = cmsDataRes?.status === 'success' ? cmsDataRes.data : null;
-
-            const updates = {
-                detail: detailData,
-                history: historyData,
-                extraInfo: extraInfo,
-                cmsData: cmsData,
-                lastUpdated: Date.now(),
-                loading: false,
-                receiverAddress: detailData.receiverAddress
-            };
-
-            updateOrderState(order.orderHdrId, updates);
-
-            // Save to cache
-            chrome.storage.local.get('ordersCache', (result) => {
-                const cache = result.ordersCache || {};
-                cache[order.orderHdrId] = {
-                    detail: detailData,
-                    history: historyData,
-                    extraInfo: extraInfo,
-                    cmsData: cmsData,
-                    lastUpdated: Date.now(),
-                    receiverAddress: detailData.receiverAddress
-                };
-                chrome.storage.local.set({ ordersCache: cache });
-            });
-
-        } catch (error) {
-            console.error(`Error fetching info for ${order.itemCode}`, error);
-            updateOrderState(order.orderHdrId, { loading: false });
-        }
-    };
 
     const updateOrderState = (orderHdrId: string, updates: Partial<ExtendedOrder>) => {
         setOrders(prev => prev.map(o => o.orderHdrId === orderHdrId ? { ...o, ...updates } : o));
@@ -1059,7 +1000,7 @@ const Options: React.FC = () => {
     const rowSelection = {
         selectedRowKeys,
         onChange: onSelectChange,
-        onSelectAll: (selected: boolean, selectedRows: ExtendedOrder[], changeRows: ExtendedOrder[]) => {
+        onSelectAll: (selected: boolean) => {
             if (selected) {
                 // Khi check "Select All" - chọn tất cả đơn hàng
                 const allKeys = filteredOrders.map(order => order.orderHdrId);

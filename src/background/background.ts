@@ -136,7 +136,6 @@ let isStoppedOnError: boolean = false;
  * Type: boolean
  */
 let isFinalProcessingTriggered: boolean = false;
-const BUFFER_SIZE = 5;
 
 // --- STATE MỚI CHO PORTAL SIDEPANEL ---
 // Lưu danh sách items đang được xử lý trong phiên "sendautotoportal"
@@ -356,7 +355,7 @@ async function openSidePanel(windowId: number): Promise<void> {
 
 const GOOGLE_ORIGIN = 'https://www.google.com';
 
-chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
+chrome.tabs.onUpdated.addListener(async (tabId, _info, tab) => {
   if (!tab.url) return;
   const url = new URL(tab.url);
   // Enables the side panel on google.com
@@ -375,20 +374,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
   }
 });
 
-/**
- * Mở side panel cho tab cụ thể
- */
-async function openSidePanelForTab(tabId: number): Promise<void> {
-  try {
-    const tab = await chrome.tabs.get(tabId);
-    if (tab.windowId) {
-      await chrome.sidePanel.open({ windowId: tab.windowId });
-      console.log("Side panel opened for tab:", tabId);
-    }
-  } catch (error) {
-    console.error("Failed to open side panel for tab:", error);
-  }
-}
+
 
 /**
  * Remove sidepanel iframe from page if exists
@@ -410,19 +396,6 @@ async function closeSidePanelInPage(tabId: number): Promise<void> {
     // Silently ignore
   }
 }
-
-/**
- * Đóng side panel (nếu cần)
- */
-async function closeSidePanel(windowId: number): Promise<void> {
-  try {
-    // Chrome API không có close trực tiếp, user phải đóng thủ công
-    console.log("Side panel can only be closed by user");
-  } catch (error) {
-    console.error("Failed to close side panel:", error);
-  }
-}
-// --- END SIDE PANEL HELPER FUNCTIONS ---
 
 // Helper function for safe JSON parsing from fetch responses
 const safeFetch = async (url: string, options?: RequestInit): Promise<any> => {
@@ -1074,7 +1047,7 @@ async function findPortalTabId(
       } else {
         //this is url https://portalkhl.vnpost.vn/accept-api-dtl?hdrId=1054056772
         // --- Sử dụng hàm ensurePortalLogin ---
-        const loginResult = await ensurePortalLogin(foundReadyTabId);
+        await ensurePortalLogin(foundReadyTabId);
 
         // Nếu đăng nhập thành công và cần mở lại tab đúng URL (do đăng nhập có thể điều hướng)
         await chrome.tabs.update(foundReadyTabId, {
@@ -1152,39 +1125,6 @@ async function findPortalTabId(
   }
 }
 
-// --- HÀM MỚI: Trigger việc in ấn ---
-async function triggerPrint(): Promise<void> {
-  // Lấy danh sách MaBuuGui của những item đã xử lý thành công VÀ còn trong list cuối cùng
-  const maBgsToPrint = allScannedItems
-    .filter((item) => processedItems.has(item.MaBuuGui)) // Lọc các object hợp lệ
-    .map((item) => item.MaBuuGui); // Chỉ lấy MaBuuGui (string)
-
-  console.log("Triggering print for valid processed MaBuuGui:", maBgsToPrint);
-
-  if (maBgsToPrint.length === 0) {
-    console.log("No valid items to print.");
-    updateToPhone("info", "Không có mã hợp lệ nào để in.");
-    chrome.action.setBadgeText({ text: "" });
-    return;
-  }
-
-  updateToPhone("info", `Đang chuẩn bị in ${maBgsToPrint.length} mã...`);
-
-  await printMaHieus(maBgsToPrint); // Hàm in nhận mảng string MaBuuGui
-
-  // Reset trạng thái sau khi in (tùy thuộc luồng mong muốn)
-  // Có thể cần xóa processedItems, reset cờ lỗi,...
-  // processedItems.clear();
-  // isStoppedOnError = false; // Reset lỗi nếu muốn phiên làm việc tiếp theo bắt đầu lại
-  // isFinalProcessingTriggered = false;
-  chrome.action.setBadgeText({ text: "OK" });
-  chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
-  await delay(2000);
-  chrome.action.setBadgeText({ text: "" });
-  processedItems.clear(); // Xóa lịch sử xử lý cho phiên mới
-  isStoppedOnError = false; // Reset lỗi cho phiên mới
-  isFinalProcessingTriggered = false;
-}
 // --- HÀM TIỆN ÍCH MỚI: So sánh mảng đối tượng dựa trên MaBuuGui ---
 function objectArraysAreEqual(a: BuuGuiProps[], b: BuuGuiProps[]): boolean {
   if (a === b) return true;
@@ -1339,7 +1279,7 @@ async function handleDataChange(
     xoanhieubg: async (data: any) => {
       await handleXoaNhieuBuuGui(data.DoiTuong);
     },
-    checkportal: async (data: any) => {
+    checkportal: async (_data: any) => {
       await handleCheckPortal();
     },
     laylan: async (data: any) => {
@@ -1719,7 +1659,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       // Giải pháp đơn giản: Trigger lại logic xử lý đơn lẻ giống processSinglePortalItem
 
       // Gọi hàm xử lý (bất đồng bộ)
-      handleExecuteSingleItemFromPanel(maBuuGui).then((res: any) => {
+      handleExecuteSingleItemFromPanel(maBuuGui).then((_res: any) => {
         // Gửi event cập nhật lại cho Panel (nếu cần)
         broadcastPortalListUpdate();
       });
@@ -2887,50 +2827,6 @@ const loadTinhThanhData = async (): Promise<TinhThanhData> => {
   }
 };
 
-/**
- * Xóa dấu tiếng Việt khỏi một chuỗi, và chuyển đổi 'đ' thành 'd'.
- * Đây là bước quan trọng để so sánh với danh sách tỉnh không dấu.
- * @param str Chuỗi đầu vào có dấu.
- * @returns Chuỗi đã được xóa dấu và chuyển thành chữ thường.
- */
-const removeDiacritics = (str: string): string => {
-  if (!str) return "";
-  return str
-    .toLowerCase() // 1. Chuyển thành chữ thường
-    .normalize("NFD") // 2. Tách ký tự và dấu (e.g., 'vĩnh' -> 'v' + 'i' + 'n' + 'h' + '´')
-    .replace(/[\u0300-\u036f]/g, "") // 3. Xóa tất cả các ký tự dấu
-    .replace(/đ/g, "d"); // 4. Xử lý riêng chữ 'đ' thành 'd'
-};
-
-/**
- * Xác định hướng đi ('ra', 'vo', hoặc 'khong_xac_dinh') từ địa chỉ.
- * @param address - Chuỗi địa chỉ người nhận.
- * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
- * @returns 'ra', 'vo', hoặc 'khong_xac_dinh'.
- */
-const getDirection = (
-  address: string,
-  provinces: { vo: string[]; ra: string[] },
-): string => {
-  const normalizedAddress = removeDiacritics(address.toLowerCase());
-
-  // Kiểm tra trong danh sách "ra" trước
-  for (const province of provinces.ra) {
-    if (normalizedAddress.lastIndexOf(province) != -1) {
-      return "ra";
-    }
-  }
-
-  // Kiểm tra trong danh sách "vô"
-  for (const province of provinces.vo) {
-    if (normalizedAddress.lastIndexOf(province) != -1) {
-      return "vo";
-    }
-  }
-
-  // Nếu không tìm thấy
-  return "khong_xac_dinh";
-};
 
 // --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
 /**
@@ -2940,40 +2836,7 @@ const getDirection = (
  * @param provinces - Đối tượng chứa mảng 'ra' và 'vo'.
  * @returns 'quang_nam', 'quang_ngai', 'ra', 'vo', hoặc 'khong_xac_dinh'.
  */
-const getSortingGroup = (
-  address: string,
-  provinces: { vo: string[]; ra: string[] },
-): string => {
-  const normalizedAddress = address.toLowerCase();
 
-  // Ưu tiên kiểm tra các trường hợp đặc biệt trước
-  if (normalizedAddress.lastIndexOf("quảng nam") != -1) {
-    return "quang_nam";
-  }
-  if (normalizedAddress.lastIndexOf("quảng ngãi") != -1) {
-    return "quang_ngai";
-  }
-
-  // Nếu không phải trường hợp đặc biệt, kiểm tra trong danh sách "ra"
-  for (const province of provinces.ra) {
-    // Bỏ qua các tỉnh đã được xử lý riêng để tránh trùng lặp
-    if (province === "quảng nam" || province === "quảng ngãi") continue;
-
-    if (normalizedAddress.lastIndexOf(province) != -1) {
-      return "ra";
-    }
-  }
-
-  // Kiểm tra trong danh sách "vô"
-  for (const province of provinces.vo) {
-    if (normalizedAddress.lastIndexOf(province) != -1) {
-      return "vo";
-    }
-  }
-
-  // Nếu không tìm thấy
-  return "khong_xac_dinh";
-};
 // --- HÀM XỬ LÝ CHÍNH ĐÃ ĐƯỢC CẬP NHẬT ---
 const handlePrintSortTinhVaNoiDung = async (data: any) => {
   try {
@@ -3745,18 +3608,9 @@ async function ensurePortalLogin(
 }
 // --- KẾT THÚC HÀM MỚI ---
 
-// Biến global để lưu hdrId sau khi khởi tạo thành công
-let currentHdrId: string | null = null;
 
-// Hàm helper để lấy hdrId hiện tại
-const getCurrentHdrId = (): string | null => {
-  return currentHdrId;
-};
 
-// Hàm reset hdrId
-const resetCurrentHdrId = (): void => {
-  currentHdrId = null;
-};
+
 
 const waitForContentScriptReady = async (
   tabId: number,
@@ -3787,7 +3641,6 @@ const khoiTaoPortal = async (
 ): Promise<{ hdrId: string; tabId: number } | null> => {
   try {
     console.log("Bắt đầu khởi tạo Portal...", data);
-    currentHdrId = null;
 
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
@@ -3896,7 +3749,6 @@ const khoiTaoPortal = async (
         }
 
         if (foundHdrId) {
-          currentHdrId = foundHdrId;
           updateToPhone("message", `Khởi tạo thành công. ID: ${foundHdrId}`);
           return { hdrId: foundHdrId, tabId: loadedTab.id };
         } else {
@@ -5255,7 +5107,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     console.log("[Background] 📨 Received QUERY_SIDEPANEL_STATUS from content script");
 
     // Check if side panel is open by trying to send a message to it
-    chrome.runtime.sendMessage({ type: "SIDEPANEL_PING" }, (response) => {
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_PING" }, () => {
       const isOpen = !chrome.runtime.lastError;
       console.log("[Background] Side panel status:", isOpen ? "OPEN" : "CLOSED");
       sendResponse({ isOpen });
@@ -5297,7 +5149,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     console.log("[Background] 📨 Received SIDEPANEL_NEXT_IMAGE from content script");
 
     // Forward to side panel
-    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, () => {
       if (chrome.runtime.lastError) {
         console.log("[Background] ❌ Error forwarding next image request:", chrome.runtime.lastError.message);
         sendResponse({ status: "error", message: chrome.runtime.lastError.message });
@@ -6600,7 +6452,7 @@ async function startImageListener() {
   console.log(`[BG-Sync] Đang lắng nghe thay đổi tại: ${path}`);
 
   // Dùng style cũ: db.ref().on()
-  db.ref(path).on("value", (snapshot: any) => {
+  db.ref(path).on("value", () => {
     // Debounce nhẹ để tránh spam nếu dữ liệu thay đổi liên tục
     console.log("[BG-Sync] Firebase thay đổi -> Trigger Sync");
     bgSyncImages();

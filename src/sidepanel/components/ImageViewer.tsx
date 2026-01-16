@@ -1,12 +1,4 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from "react";
-import { Button, Space, Tooltip } from "antd";
-import {
-  ZoomInOutlined,
-  ZoomOutOutlined,
-  RotateLeftOutlined,
-  RotateRightOutlined,
-  UndoOutlined,
-} from "@ant-design/icons";
 import { StoredImage } from "../../types/vnpost";
 import { createImageObjectURL, revokeImageObjectURL } from "../utils/imageDB";
 
@@ -90,17 +82,6 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
     }
   }), [zoom, pan, rotation]);
 
-  // --- Logic Zoom/Pan/Rotate ---
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.2, 5));
-  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.2, 1));
-  const handleRotateLeft = () => setRotation((prev) => (prev - 90) % 360);
-  const handleRotateRight = () => setRotation((prev) => (prev + 90) % 360);
-  
-  const handleReset = () => {
-    setZoom(1);
-    setRotation(0);
-    setPan({ x: 0, y: 0 });
-  };
 
   const handleWheel = (e: React.WheelEvent) => {
     // e.preventDefault();

@@ -95,38 +95,6 @@ function removeAccents(str: string): string {
     .replace(/Đ/g, "D");
 }
 
-function getElementByXpath(path: string): Node | null {
-  try {
-    return document.evaluate(path, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
-  } catch (error) {
-    console.error("[GiaoTich] Lỗi khi tìm element bằng XPath:", path, error);
-    return null;
-  }
-}
-
-function waitForElmGiaoTich(selector: string, timeout: number = 5000): Promise<HTMLElement | null> {
-  return new Promise((resolve) => {
-    const element = document.querySelector(selector);
-    if (element) {
-      return resolve(element as HTMLElement);
-    }
-
-    const startTime = Date.now();
-    const observer = new MutationObserver(() => {
-      const targetElement = document.querySelector(selector);
-      if (targetElement) {
-        resolve(targetElement as HTMLElement);
-        observer.disconnect();
-      }
-      if (Date.now() - startTime > timeout) {
-        resolve(null);
-        observer.disconnect();
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-  });
-}
 /**
  * Hàm hiển thị text GOC vào cuối element Địa bàn
  */
@@ -312,7 +280,7 @@ function requestNextImage(): void {
     }
 
     console.log("[GiaoTich] 🖼️ Requesting side panel to show next image");
-    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, (response) => {
+    chrome.runtime.sendMessage({ type: "SIDEPANEL_NEXT_IMAGE" }, () => {
       if (chrome.runtime.lastError) {
         // Bỏ qua lỗi nếu sidepanel đóng đột ngột
         // console.log("[GiaoTich] Error requesting next image:", chrome.runtime.lastError.message);
@@ -1158,7 +1126,7 @@ function checkPress(e: KeyboardEvent): void {
 function setChiDanPhat(infoText?: string): void {
   var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
   if (phoneSender) {
-    if (phoneSender.textContent.includes("2412279") || phoneSender.textContent.includes("2412278") || phoneSender.textContent.includes("6576671")) {
+    if (phoneSender.textContent?.includes("2412279") || phoneSender.textContent?.includes("2412278") || phoneSender.textContent?.includes("6576671")) {
       var info1 = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8 > textarea") as HTMLTextAreaElement;
       if (info1) {
         // nếu info trống
@@ -1284,7 +1252,7 @@ async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: stri
     case ELEMENT_IDS.TT_NUMBER:
       setChiDanPhat();
       var phoneSender = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-2 > div > div > div > div > div:nth-child(2)");
-      if (phoneSender && phoneSender.textContent.includes("14159")) {
+      if (phoneSender && phoneSender.textContent?.includes("14159")) {
         const serviceInfo = document.getElementsByName("serviceCode")[0] as HTMLInputElement | undefined;
         const firstChar = ele.value.charAt(0).toUpperCase();
 

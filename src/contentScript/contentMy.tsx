@@ -1,5 +1,4 @@
-import { Order } from "../popup/popup.slice";
-import { delay, waitForElm } from "./utils";
+import { delay } from "./utils";
 function forceChange(e: HTMLInputElement) {
     e.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     e.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
@@ -129,23 +128,14 @@ async function handleAddBatchRows(payload: { rowCount: number; content: string; 
     }
 }
 
-var listDichVu = ["Tiêu chuẩn TMĐT ĐG", "Nhanh - TMĐT ĐG"]
-var tinhKien = ['kon tum', 'gia lai', 'dak lak', 'binh dinh', 'phu yen', 'khanh hoa', 'quang nam', 'quang ngai', 'da nang']
-// <<< THAY ĐỔI 1: Quản lý trạng thái toàn cục >>>
-// Mảng này sẽ lưu trữ tất cả các MutationObserver đang hoạt động
-// để chúng ta có thể dọn dẹp chúng sau này.
 let activeObservers: MutationObserver[] = [];
 
 // ==========================================================================
 // Cấu hình & Biến toàn cục
 // ==========================================================================
 
-const ADDRESS_INPUT_ID: string = "form-create-order_receiverAddress";
 const GHOST_INPUT_ID: string = "ghost-address-input-suggestion";
 
-let addressData: AddressItem[] = []; // Mảng chứa các đối tượng địa chỉ
-let currentSuggestion: string | null = null; // Gợi ý hiện tại
-let ghostInput: HTMLInputElement | null = null; // Tham chiếu đến element ghost input
 let checkInterval: number | null = null; // Polling interval cho modal check
 
 // ==========================================================================
@@ -155,7 +145,6 @@ let checkInterval: number | null = null; // Polling interval cho modal check
 const MODAL_SELECTOR = 'div[role="dialog"]';
 const MODAL_BODY_SELECTOR = '.ant-modal-body';
 const ANT_TABLE_CONTENT_SELECTOR = '.ant-table-content';
-const ANT_TABLE_TBODY_SELECTOR = '.ant-table-tbody';
 const ANT_TABLE_ROW_SELECTOR = 'tr.ant-table-row';
 
 // Button & UI Selectors
@@ -166,13 +155,6 @@ const EXTRA_INFO_CONTAINER_ID = 'custom-extra-info-container';
 const EXTRA_INFO_ROW_ID = 'custom-extra-info-row';
 const CMS_COL_ID = 'custom-cms-col';
 const CMS_MODAL_OVERLAY_ID = 'custom-cms-modal-overlay';
-
-// Form selectors
-const FORM_CREATE_ORDER_ID = 'form-create-order';
-const FORM_WEIGHT_ID = 'form-create-order_weight';
-const FORM_SALE_ORDER_CODE_ID = 'form-create-order_saleOrderCode';
-const FORM_RECEIVER_ADDRESS_ID = 'form-create-order_receiverAddress';
-
 // ==========================================================================
 // Helper Functions
 // ==========================================================================
@@ -255,7 +237,6 @@ async function runMainLogic() {
     console.log("Running main logic for URL:", window.location.href);
     // `element` ở đây được TypeScript hiểu là kiểu `Element`.
     // Bắt đầu chạy
-    await initialize();
 
 
     // Tìm phần tử có class 'g-avatar'
@@ -298,7 +279,7 @@ async function getCmsTemplates(): Promise<string[]> {
 /**
  * Hàm tạo và xử lý Form Chuyển tiếp (Đã tích hợp Template)
  */
-async function createForwardForm(ticketId: string, defaultOrgCode: string, contentMaVanDon: string): Promise<HTMLElement> {
+async function createForwardForm(ticketId: string, defaultOrgCode: string, _contentMaVanDon: string): Promise<HTMLElement> {
     const container = document.createElement('div');
     container.style.marginTop = '15px';
     container.style.padding = '12px';
@@ -726,103 +707,9 @@ function updateUI() {
     });
 }
 
-async function populateForm(order: Order) {
-    const fieldMapping: { [key: string]: string | number } = {
-        'form-create-order_receiverPhone': order.SDT,
-        'form-create-order_saleOrderCode': order.MAUSAC,
-        'form-create-order_receiverName': order.NGUOINHAN,
-        'form-create-order_receiverAddress': order.DIACHI,
-
-        'cod': order.COD
-    };
-    var cod = document.querySelector("#scrollableDiv > div:nth-child(2) > table > tr:nth-child(1) > td:nth-child(3) > div > div.ant-col.ant-col-10 > div > div.ant-input-number-input-wrap > input") as HTMLInputElement | HTMLTextAreaElement
-    var fullAddressElement = document.getElementById('fulladdress') as HTMLParagraphElement;
-    if (fullAddressElement) {
-        fullAddressElement.textContent = order.GOC || "Địa chỉ đầy đủ sẽ hiện thị tại đây";
-    }
-    for (const id in fieldMapping) {
-        const element = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement;
-        if (element) {
-            element.value = String(fieldMapping[id]);
-            // Kích hoạt sự kiện để các framework (React, Vue,...) nhận diện
-            element.dispatchEvent(new Event('input', { bubbles: true }));
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            if (id === 'form-create-order_receiverName') {
-                await delay(500);
-            } else if (id === 'form-create-order_receiverAddress') {
-                element.focus();
-                element.setSelectionRange(element.value.length, element.value.length);
-                element.dispatchEvent(new Event('input', { bubbles: true }));
-                element.dispatchEvent(new Event('change', { bubbles: true }));
-            } else if (id === 'form-create-order_saleOrderCode') {
-                //kiểm tra số lượng màu sắc ví dụ DO thì 1, TRANG thì 1, XANH thì 1, TRANGTRANG thì 2, TRANGDO thì 2,XANHTRANG thì 2
-                const mausac = order.MAUSAC;
-                const mausacCount = mausac.match(/(TRANG|DO|XANH)/gi)?.length || 0;
-                if (mausacCount > 1) {
-                    var de = document.querySelector("#form-create-order_weight") as HTMLInputElement;
-                    de.value = "5000";
-                    de.dispatchEvent(new Event('input', { bubbles: true }));
-                    de.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-            } else {
-                console.warn(`[Form Filler] Không tìm thấy element với ID: #${id}`);
-            }
-        }
-        if (cod) {
-            cod.value = String(order.COD);
-            cod.dispatchEvent(new Event('input', { bubbles: true }));
-            cod.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        var donmau = document.querySelector("#form-create-order_saleOrderCode") as HTMLInputElement;
-        //focus địa chỉ và caret vào cuối và enter
-        donmau.focus();
-        // address.setSelectionRange(address.value.length, address.value.length);
-        // address.dispatchEvent(new Event('input', { bubbles: true }));
-        // address.dispatchEvent(new Event('change', { bubbles: true }));
-        simulateRealClick(donmau);
-
-    }
-
-}
 
 
 //END HO DUY///////////////////////////////////////////////////
-
-
-
-
-
-function simulateRealClick(element: HTMLElement) {
-    // Hàm này mô phỏng một cú click chuột thực tế hơn
-    const mouseDownEvent = new MouseEvent('mousedown', {
-        bubbles: true,
-        cancelable: true,
-        view: window
-    });
-    const mouseUpEvent = new MouseEvent('mouseup', {
-        bubbles: true,
-        cancelable: true,
-        view: window
-    });
-    const clickEvent = new MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        view: window
-    });
-
-    element.dispatchEvent(mouseDownEvent);
-    element.dispatchEvent(mouseUpEvent);
-    element.dispatchEvent(clickEvent);
-}
-//ham bỏ dấu string
-const removeDiacritics = (str: string): string => {
-    if (!str) return '';
-    return str
-        .toLowerCase() // 1. Chuyển thành chữ thường
-        .normalize('NFD') // 2. Tách ký tự và dấu (e.g., 'vĩnh' -> 'v' + 'i' + 'n' + 'h' + '´')
-        .replace(/[\u0300-\u036f]/g, '') // 3. Xóa tất cả các ký tự dấu
-        .replace(/đ/g, 'd'); // 4. Xử lý riêng chữ 'đ' thành 'd'
-};
 
 
 function waitForElement(selector: string): Promise<HTMLElement> {
@@ -912,65 +799,6 @@ function formatLogWithColors(logText: string): HTMLElement {
     return container;
 }
 
-/**
- * Theo dõi một phần tử trong DOM và thực thi một callback sau một khoảng trễ
- * mỗi khi nó chuyển từ trạng thái "có nội dung" sang "trống/không tồn tại".
- *
- * @param selector - Chuỗi CSS selector để xác định phần tử.
- * @param callback - Hàm chứa code chính, sẽ được thực thi sau khi phần tử biến mất.
- * @param delayMs - Khoảng thời gian trễ (tính bằng mili giây) trước khi thực thi callback. Mặc định là 500.
- */
-function onContentDisappearWithDelay(
-    selector: string,
-    callback: () => void, // Lưu ý: callback không còn nhận `element` vì nó đã biến mất
-    delayMs: number = 500
-): void {
-    // Biến trạng thái để theo dõi xem nội dung có đang hiển thị hay không
-    let isContentVisible = false;
-
-    const handleStateCheck = () => {
-        const element = document.querySelector(selector) as HTMLElement | null;
-        // Điều kiện để coi là "có nội dung" không thay đổi
-        const isCurrentlyVisible =
-            element && (element.textContent?.trim().length !== 0 || element.title?.trim().length !== 0);
-
-        if (!isCurrentlyVisible && isContentVisible) {
-            // TRẠNG THÁI THAY ĐỔI: Từ đang hiển thị -> SANG KHÔNG hiển thị
-            // -> Đây là thời điểm chúng ta cần chạy code, sau khi delay
-            isContentVisible = false; // Reset lại trạng thái
-            console.log('Phát hiện thay đổi: Nội dung đã biến mất.');
-
-            // Thực thi callback sau một khoảng trễ
-            setTimeout(() => {
-                console.log(`Thực thi callback sau ${delayMs}ms.`);
-                callback();
-            }, delayMs);
-
-        } else if (isCurrentlyVisible && !isContentVisible) {
-            // TRẠNG THÁI THAY ĐỔI: Từ KHÔNG hiển thị -> SANG hiển thị
-            // -> Đánh dấu là đã nhìn thấy, sẵn sàng để theo dõi khi nó biến mất
-            isContentVisible = true;
-            console.log('Nội dung đã xuất hiện. Đang theo dõi khi nào nó biến mất...');
-        }
-    };
-
-    // Tạo một MutationObserver để lắng nghe thay đổi liên tục
-    const observer = createAndTrackObserver(() => {
-        handleStateCheck();
-    });
-
-    // Bắt đầu quan sát toàn bộ body của trang
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        characterData: true
-    });
-
-    // Kiểm tra trạng thái ban đầu ngay khi hàm được gọi
-    // Điều này quan trọng để "ghi nhận" trạng thái ban đầu của phần tử
-    handleStateCheck();
-}
 
 
 
@@ -978,78 +806,12 @@ function onContentDisappearWithDelay(
 
 
 
-// ==========================================================================
-// Hàm Tiện ích (Utility Functions)
-// ==========================================================================
-
-/**
- * Chuẩn hóa văn bản: chuyển thành chữ thường, bỏ dấu.
- */
-function normalizeText(str: string | null | undefined): string {
-    if (!str) return '';
-    return str.toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/đ/g, "d");
-}
-
-/**
- * Hàm debounce để trì hoãn việc thực thi một hàm.
- */
-function debounce<T extends (...args: any[]) => void>(func: T, delay: number): (...args: Parameters<T>) => void {
-    let timer: number;
-    return function (this: unknown, ...args: Parameters<T>) {
-        const self = this;
-        clearTimeout(timer);
-        timer = window.setTimeout(() => func.apply(self, args), delay);
-    };
-}
-
-
-
-// Định nghĩa cấu trúc của một mục địa chỉ trong data.json
-interface AddressItem {
-    NameXP?: string;
-    NameXPN?: string;
-    NameXPKD?: string;
-    NameQH?: string;
-    NameQHN?: string;
-    NameQHKD?: string;
-    NameTTP?: string;
-    NameTTPN?: string;
-    NameTTPKD?: string;
-    TypeXP?: string;
-    TypeQH?: string;
-    TypeTTP?: string;
-}
 
 
 // ==========================================================================
 // Khởi tạo và Theo dõi DOM
 // ==========================================================================
 
-/**
- * Hàm khởi tạo chính của extension.
- */
-async function initialize(): Promise<void> {
-    console.log("Extension gợi ý địa chỉ (TypeScript) đang chạy...");
-
-    try {
-        const response = await fetch(chrome.runtime.getURL('/data.json'));
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-        const data = await response.json();
-        // Kiểm tra kiểu dữ liệu của data
-        if (data && Array.isArray(data.QuocGia)) {
-            addressData = data.QuocGia;
-            console.log("Dữ liệu địa chỉ đã được tải.");
-        } else {
-            console.error("Định dạng data.json không hợp lệ.");
-        }
-    } catch (error) {
-        console.error("Lỗi khi tải data.json:", error);
-    }
-}
 
 
 function runOrderLogic() {

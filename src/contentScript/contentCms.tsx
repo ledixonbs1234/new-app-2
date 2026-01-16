@@ -75,7 +75,7 @@ function waitForStyleChange(selector: string, styleProp: keyof CSSStyleDeclarati
 }
 
 
-chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener(async (request,_, sendResponse) => {
     // Handler cho tự động search CMS
     if (request.type === "AUTO_SEARCH_CMS") {
         console.log('[CMS Auto] Received search request:', request.payload);
