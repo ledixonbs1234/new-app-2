@@ -246,3 +246,18 @@ export async function getLockStatus(orgCode: string): Promise<LockData | null> {
         return null;
     }
 }
+
+/**
+ * Get CMS auto-configurations from Firebase
+ */
+export async function getFirebaseCMSAutoConfigs(): Promise<any[]> {
+    try {
+        const db = firebase.database();
+        const configsRef = db.ref('CMS_AUTO_CONFIGS');
+        const snapshot = await configsRef.once('value');
+        return snapshot.val() || [];
+    } catch (error) {
+        console.error('Error fetching CMS auto configs from Firebase:', error);
+        return [];
+    }
+}

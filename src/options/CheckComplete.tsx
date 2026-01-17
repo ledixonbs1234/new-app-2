@@ -20,6 +20,10 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     const [currentCmsData, setCurrentCmsData] = useState<any>(null);
     const [detailLoading, setDetailLoading] = useState(false);
 
+    // Copy link chunks states
+    const [copyModalOpen, setCopyModalOpen] = useState(false);
+    const [idChunks, setIdChunks] = useState<string[][]>([]);
+
     // Filter states
     // Filter states removed
     // const [filterSuccess, setFilterSuccess] = useState(false);
@@ -305,17 +309,26 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             return;
         }
 
-        const ids = data.map(item => item.trackingNumber).filter(Boolean).join(',');
-        // Limit to reasonable length if needed, but GET params can handle quite a bit.
-        // If list is too long, we might need multiple links or POST, but user asked for this URL format.
-        const url = `https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2&id=${ids}`;
+        const validIds = data.map(item => item.trackingNumber).filter(Boolean);
 
-        navigator.clipboard.writeText(url).then(() => {
-            message.success("Đã copy link! Đang mở tab mới...");
-            window.open(url, '_blank');
-        }, () => {
-            message.error("Lỗi khi copy link");
-        });
+        if (validIds.length <= 100) {
+            const ids = validIds.join(',');
+            const url = `https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2&id=${ids}`;
+            navigator.clipboard.writeText(url).then(() => {
+                message.success("Đã copy link! Đang mở tab mới...");
+                window.open(url, '_blank');
+            }, () => {
+                message.error("Lỗi khi copy link");
+            });
+        } else {
+            // Split into chunks of 100
+            const chunks: string[][] = [];
+            for (let i = 0; i < validIds.length; i += 100) {
+                chunks.push(validIds.slice(i, i + 100));
+            }
+            setIdChunks(chunks);
+            setCopyModalOpen(true);
+        }
     };
 
     const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -346,7 +359,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 payment: string;
                 cod: number;
             }
-            const dataMap = new Map<string, ExcelData>();
+
+            // QUAN TRỌNG: Tạo Map từ dữ liệu hiện có để gộp (Merge) thay vì ghi đè
+            const nextExcelMap = new Map<string, ExcelData>(excelData);
 
             jsonData.forEach((row: any) => {
                 // Based on log: __EMPTY_1 contains tracking number
@@ -363,9 +378,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                     const payment = row['Trạng thái'] ||
                         '';
 
-
                     if (code.trim()) {
-                        dataMap.set(code.trim(), {
+                        // Cập nhật hoặc thêm mới vào Map hiện có
+                        nextExcelMap.set(code.trim(), {
                             status: status.trim(),
                             payment: payment.trim(),
                             cod: 0
@@ -374,33 +389,32 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 }
             });
 
-            console.log('Mapped Excel Data:', dataMap);
-            console.log('Total mapped items:', dataMap.size);
+            console.log('Merged Excel Data Total:', nextExcelMap.size);
 
             // Save to chrome.storage.local
-            const dataMapObj = Object.fromEntries(dataMap);
+            const dataMapObj = Object.fromEntries(nextExcelMap);
             const timestamp = new Date().toLocaleString('vi-VN');
 
             chrome.storage.local.set({
                 checkCompleteExcelData: dataMapObj,
                 checkCompleteExcelTimestamp: timestamp
             }, () => {
-                setExcelData(dataMap);
+                setExcelData(nextExcelMap);
                 setLastExcelUpdate(timestamp);
 
-                // Update data state with Excel info
+                // Update data state with Excel info - Tra cứu từ Map đã gộp
                 const newData = data.map(item => {
-                    const excelInfo = dataMap.get(item.trackingNumber);
+                    const excelInfo = nextExcelMap.get(item.trackingNumber);
                     return {
                         ...item,
-                        excelStatus: excelInfo ? excelInfo.status : '',
-                        paymentStatus: excelInfo ? excelInfo.payment : '',
-                        codAmount: excelInfo ? excelInfo.cod : 0,
+                        excelStatus: excelInfo ? excelInfo.status : item.excelStatus || '',
+                        paymentStatus: excelInfo ? excelInfo.payment : item.paymentStatus || '',
+                        codAmount: excelInfo ? excelInfo.cod : item.codAmount || 0,
                     };
                 });
 
                 setData(newData);
-                message.success(`Đã lưu dữ liệu Excel (${dataMap.size} mã vận đơn) - ${timestamp}`);
+                message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
             });
 
             // Clear input value to allow re-uploading same file
@@ -647,6 +661,42 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 width={800}
             >
                 {detailLoading ? <div className="text-center py-10"><Space><ReloadOutlined spin /> Đang tải...</Space></div> : renderTickets()}
+            </Modal>
+
+            <Modal
+                title={<span className="text-lg font-bold text-blue-600">📋 Chia nhỏ link tra cứu ({data.length} mã)</span>}
+                open={copyModalOpen}
+                onCancel={() => setCopyModalOpen(false)}
+                footer={null}
+                width={500}
+            >
+                <div className="flex flex-col gap-3">
+                    <div className="bg-blue-50 p-3 rounded-lg text-blue-700 text-sm mb-2">
+                        Hệ thống đã chia {data.length} mã hiệu thành {idChunks.length} nhóm (mỗi nhóm tối đa 100 mã) để tránh lỗi quá tải URL.
+                    </div>
+                    {idChunks.map((chunk, index) => {
+                        const ids = chunk.join(',');
+                        const url = `https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2&id=${ids}`;
+                        return (
+                            <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition-colors">
+                                <span className="font-semibold">Nhóm {index + 1} ({chunk.length} mã)</span>
+                                <Button
+                                    type="primary"
+                                    size="small"
+                                    icon={<CopyOutlined />}
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(url).then(() => {
+                                            message.success(`Đã copy link nhóm ${index + 1}!`);
+                                            window.open(url, '_blank');
+                                        });
+                                    }}
+                                >
+                                    Copy & Mở
+                                </Button>
+                            </div>
+                        );
+                    })}
+                </div>
             </Modal>
         </div>
     );

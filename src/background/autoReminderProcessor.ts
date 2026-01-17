@@ -7,7 +7,8 @@ import {
     acquireLock,
     releaseLock,
     isCompletedToday,
-    markAsCompleted
+    markAsCompleted,
+    getFirebaseCMSAutoConfigs
 } from '../services/autoReminderSync';
 
 interface ProcessResult {
@@ -212,7 +213,7 @@ function checkOrderHistory(order: ExtendedOrder): boolean {
         }
 
         // Check for excluded status
-        if (statusLower.includes('phát không thành công') ||
+        if (
             statusLower.includes('phát hàng thành công') ||
             statusLower.includes('chuyển hoàn')) {
             hasExcludedStatus = true;
@@ -267,7 +268,7 @@ async function fetchCMSDataForOrder(itemCode: string): Promise<any> {
 
         // 3. Với mỗi ticket, lấy danh sách hành động (Actions)
         for (const ticket of tickets) {
-            const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
+            const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=100&column=actId&desending=1`;
             const actionsRes = await fetch(actionsUrl, {
                 method: "GET",
                 credentials: "include",
@@ -365,7 +366,7 @@ const SERVICE_CODE_MAPPING: { [key: string]: string } = {
 async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoConfig[]): Promise<boolean> {
     try {
         // Tìm cấu hình theo senderCode
-        const config = cmsAutoConfigs.find(cfg => cfg.orgCode === order.orgCode);
+        const config = cmsAutoConfigs.find(cfg => cfg.orgCode === order.senderCode);
         let content = config ? config.content : ("Hỗ trợ phát gấp đơn hàng " + order.itemCode + " .Cảm ơn");
 
         // Count safeguard (keeping existing logic)
@@ -563,12 +564,8 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         console.log('[Auto Reminder] Fetching delivery orders...');
         const orders = await fetchDeliveryOrders(token, orgCode);
 
-        // Fetch CMS Auto Configs
-        const cmsAutoConfigs = await new Promise<CMSAutoConfig[]>((resolve) => {
-            chrome.storage.local.get(['cmsAutoConfigs'], (result) => {
-                resolve(result.cmsAutoConfigs || []);
-            });
-        });
+        // Fetch CMS Auto Configs from Firebase (Sync across devices)
+        const cmsAutoConfigs = await getFirebaseCMSAutoConfigs();
 
         if (orders === null) {
             // Error case (network or auth)

@@ -90,28 +90,35 @@ async function addLog(message: string): Promise<void> {
 
 /**
  * Main function to check and run auto reminder
- * @param force If true, bypass checks for enabled, time window, and last run date
+ * @param force If true, bypass checks for enabled, time window (dùng cho nút bấm thủ công)
+ * @param isLoginEvent If true: Được kích hoạt do đổi tài khoản/token (quan trọng cho multi-user)
  */
-export async function checkAndRunAutoReminder(force: boolean = false): Promise<void> {
+export async function checkAndRunAutoReminder(force: boolean = false, isLoginEvent: boolean = false): Promise<void> {
     try {
         const config = await getConfig();
 
-        // Check if feature is enabled (skip if forced)
+        // 1. Kiểm tra bật tắt (Vẫn cần kiểm tra kể cả khi login, nếu user tắt hẳn feature thì không chạy)
         if (!config.enabled && !force) {
             console.log('[Auto Reminder] Feature is disabled');
             return;
         }
 
-        // Check if within time window (skip if forced)
-        if (!isWithinTimeWindow(config) && !force) {
+        // 2. Kiểm tra khung giờ
+        // Nếu là force (thủ công) hoặc isLoginEvent (vừa đăng nhập) -> BỎ QUA kiểm tra giờ
+        // User muốn hễ đăng nhập vào là check ngay, bất kể 8h sáng hay 2h chiều
+        if (!isWithinTimeWindow(config) && !force && !isLoginEvent) {
             console.log('[Auto Reminder] Not within time window');
             return;
         }
 
-        // Check if already ran today (skip if forced)
+        // 3. Kiểm tra ngày chạy gần nhất (lastRunDate)
         const today = getTodayDateString();
-        if (config.lastRunDate === today && !force) {
-            console.log('[Auto Reminder] Already ran today');
+
+        // QUAN TRỌNG: Nếu là isLoginEvent -> BỎ QUA check lastRunDate global.
+        // Vì lastRunDate chỉ lưu ngày chạy của "máy tính này", không phân biệt user A hay B.
+        // Việc check đã chạy cho user này chưa sẽ do hàm processAutoReminder lo (check trên server).
+        if (config.lastRunDate === today && !force && !isLoginEvent) {
+            console.log('[Auto Reminder] Already ran today (Global check)');
             return;
         }
 
@@ -132,10 +139,16 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
             await addLog('❌ Không tìm thấy mã khách hàng. Vui lòng đăng nhập');
             return;
         }
+        const triggerReason = isLoginEvent ? 'Đổi tài khoản' : (force ? 'Thủ công' : 'Định kỳ');
+        await addLog(`🚀 Kích hoạt kiểm tra (${triggerReason}) cho khách hàng: ${orgCode}`);
 
-        await addLog(`📋 Xử lý cho khách hàng: ${orgCode}`);
+        // Set Badge đang chạy
+        chrome.action.setBadgeText({ text: '...' });
+        chrome.action.setBadgeBackgroundColor({ color: '#FFA500' });
 
         // Run the auto reminder process
+        // Hàm này bên trong đã có logic check isCompletedToday(orgCode) trên Firebase
+        // Nên nó sẽ tự động skip nếu Customer A đã chạy rồi, và chạy tiếp nếu Customer B chưa chạy.
         const result = await processAutoReminder(orgCode);
 
         if (result.success) {
@@ -148,10 +161,12 @@ export async function checkAndRunAutoReminder(force: boolean = false): Promise<v
             if (result.ordersProcessed !== undefined) {
                 await addLog(`📦 Đã xử lý ${result.ordersProcessed} đơn hàng`);
             }
-
-            // Update last run date
-            config.lastRunDate = today;
-            await saveConfig(config);
+            // Chỉ cập nhật lastRunDate global nếu là chạy định kỳ
+            // Nếu chạy do login nhiều acc, ta không chặn global để acc sau còn chạy được
+            if (!isLoginEvent && !force) {
+                config.lastRunDate = today;
+                await saveConfig(config);
+            }
 
         } else {
             // Set Badge to ERR (Red)

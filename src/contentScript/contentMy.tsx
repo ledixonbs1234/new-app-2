@@ -189,8 +189,111 @@ function getTextFromLabel(container: Element, labelText: string): string {
     return 'N/A';
 }
 
+// --- 1. Hàm đồng bộ Token (Như cũ) ---
+async function syncAuthToExtension() {
+    try {
+        // Chờ nhẹ 500ms để đảm bảo LocalStorage đã được React cập nhật sau khi login/chuyển trang
+        await delay(500);
+
+        const currentToken = localStorage.getItem('accessToken');
+        if (!currentToken) return;
+
+        // Lấy token/orgCode hiện tại trong Extension
+        const extData = await new Promise<any>((resolve) => {
+            chrome.storage.local.get(['accessToken', 'orgCode'], resolve);
+        });
+
+        // Nếu Token khác hoặc chưa có OrgCode -> Gọi API lấy thông tin
+        if (currentToken !== extData.accessToken || !extData.orgCode) {
+            console.log('[ContentMy] 🔄 Phát hiện Token mới/thay đổi. Đang đồng bộ...');
+
+            const response = await fetch('https://api-pre-my.vnpost.vn/myvnp-web/v1/Account/getAccountSetting', {
+                method: 'GET',
+                headers: {
+                    'Authorization': currentToken,
+                    'Capikey': '19001111'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.orgUserList && data.orgUserList.length > 0) {
+                    const orgInfo = data.orgUserList[0];
+
+                    chrome.storage.local.set({
+                        accessToken: currentToken,
+                        orgCode: orgInfo.orgCode
+                    }, () => {
+                        console.log(`[ContentMy] ✅ Đã cập nhật OrgCode: ${orgInfo.orgCode}`);
+                    });
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[ContentMy] Lỗi đồng bộ Auth:', error);
+    }
+}
+
+// --- 2. Hàm lắng nghe thay đổi URL (SPA Navigation) ---
+// React Router dùng History API, ta cần "hook" vào nó để biết khi nào chuyển trang
+function initNavigationListener() {
+    // Backup hàm gốc
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    // Ghi đè pushState (khi click menu chuyển trang)
+    history.pushState = function (...args) {
+        originalPushState.apply(this, args);
+        handleUrlChange();
+    };
+
+    // Ghi đè replaceState
+    history.replaceState = function (...args) {
+        originalReplaceState.apply(this, args);
+        handleUrlChange();
+    };
+
+    // Lắng nghe sự kiện Back/Forward của trình duyệt
+    window.addEventListener('popstate', handleUrlChange);
+
+    // Lắng nghe Click vào menu cụ thể (Giải quyết yêu cầu của bạn)
+    // Dùng Event Delegation trên body để không sợ ID động
+    document.body.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        // Tìm thẻ <a> gần nhất có href chứa order-manager (hoặc bất kỳ link quản lý nào)
+        const link = target.closest('a');
+        if (link && link.getAttribute('href')?.includes('/manage/order-manager')) {
+            console.log('[ContentMy] 🖱️ Phát hiện click menu:', link.getAttribute('href'));
+            // Gọi sync sau khi click
+            syncAuthToExtension();
+        }
+    });
+}
+
+function handleUrlChange() {
+    console.log('[ContentMy] 🧭 URL Changed:', window.location.href);
+    // Khi URL đổi, thường là người dùng đã đăng nhập xong hoặc chuyển view
+    // Gọi hàm sync ngay
+    syncAuthToExtension();
+
+    // Logic cũ của bạn để chạy script chính
+    if (window.location.href.includes("order-manager")) {
+        runOrderLogic(); // Hàm cũ của bạn
+    } else if (window.location.href.includes("domestic/create")) {
+        runMainLogic(); // Hàm cũ của bạn
+    } else {
+        cleanup();
+    }
+}
+
 
 window.onload = async () => {
+    initNavigationListener();
+    // Chạy kiểm tra lần đầu tiên (khi F5)
+    await syncAuthToExtension();
+
+    // Chạy logic trang hiện tại
+    handleUrlChange();
     if (window.location.href.includes("domestic/create")) {
 
         console.log("Received URL_CHANGED message. Re-initializing script.");
@@ -912,11 +1015,9 @@ function runOrderLogic() {
 
             // Kiểm tra đã xử lý chưa
             if (infoCell.querySelector('.info-edit-container')) {
-                console.log(`Row with ${maVanDon} already processed`);
                 return;
             }
 
-            console.log(`Processing row with mã vận đơn: ${maVanDon}`);
 
             // Xóa nội dung cũ
             infoCell.innerHTML = '';
@@ -2344,16 +2445,18 @@ function runOrderLogic() {
             const soDienThoaiRaw = getTextFromLabel(receiverCard, 'Số điện thoại');
             // Tách phần số điện thoại ra khỏi các text/icon thừa
             const soDienThoai = soDienThoaiRaw.split(' ')[0] || 'N/A';
+            // Hàm phụ để lấy text và xử lý trường hợp không tìm thấy ('N/A')
+            const getAddr = (label: string) => {
+                const val = getTextFromLabel(receiverCard, label);
+                return (val === 'N/A' || val === '') ? null : val;
+            };
 
-            // Logic lấy địa chỉ mới: Ưu tiên địa chỉ mới (dòng 5) > địa chỉ cũ (dòng 3)
-            const newAddressEl = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(5) > td");
-            const oldAddressEl = document.querySelector("#custom-table-orderhdr-sender > tr:nth-child(3) > td");
+            // Ưu tiên: Địa chỉ mới > Địa chỉ cũ > Địa chỉ (thường)
+            const diaChiMoi = getAddr('Địa chỉ mới');
+            const diaChiCu = getAddr('Địa chỉ cũ');
+            const diaChiThuong = getAddr('Địa chỉ'); // Trường hợp đơn chưa sửa đổi
 
-            const newAddress = newAddressEl?.textContent?.trim() || '';
-            const oldAddress = oldAddressEl?.textContent?.trim() || '';
-
-            const diaChi = newAddress || oldAddress || getTextFromLabel(receiverCard, 'Địa chỉ');
-
+            const diaChi = diaChiMoi || diaChiCu || diaChiThuong || '';
             // 5. Định dạng chuỗi để copy, giống với ví dụ của bạn
             const textToCopy = `${maVanDon}\n${hoTen}\n${soDienThoai}\n${diaChi}`;
 

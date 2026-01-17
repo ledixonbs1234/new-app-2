@@ -72,8 +72,7 @@
         },
         {
             "matches": [
-                "https://portalkhl.vnpost.vn/*",
-                "<all_urls>"
+                "https://portalkhl.vnpost.vn/*"
             ],
             "js": [
                 "contentGiaoDich.js"

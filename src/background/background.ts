@@ -5622,6 +5622,42 @@ async function fetchTicketDetail(ticketId: string): Promise<any> {
   return null;
 }
 
+chrome.storage.onChanged.addListener((changes, namespace) => {
+  if (namespace === 'local') {
+    let shouldTrigger = false;
+    let logMsg = "";
+
+    // Trường hợp 1: Mã khách hàng thay đổi (Login tài khoản khác)
+    if (changes.orgCode) {
+      const oldVal = changes.orgCode.oldValue;
+      const newVal = changes.orgCode.newValue;
+      // Chỉ chạy nếu có mã mới và khác mã cũ
+      if (newVal && newVal !== oldVal) {
+        shouldTrigger = true;
+        logMsg = `[BG] Đổi khách hàng: ${oldVal} -> ${newVal}`;
+      }
+    }
+
+    // Trường hợp 2: Token thay đổi (Login lại cùng tài khoản hoặc hết phiên)
+    if (changes.accessToken && !shouldTrigger) {
+      const oldToken = changes.accessToken.oldValue;
+      const newToken = changes.accessToken.newValue;
+      if (newToken && newToken !== oldToken) {
+        shouldTrigger = true;
+        logMsg = `[BG] Cập nhật Token mới`;
+      }
+    }
+
+    if (shouldTrigger) {
+      console.log(`${logMsg}. Kích hoạt Auto Reminder (Login Event).`);
+
+      // Gọi hàm với tham số isLoginEvent = true
+      // Để bypass check thời gian và lastRunDate global
+      checkAndRunAutoReminder(false, true);
+    }
+  }
+});
+
 /**
  * Hàm fetch CMS data qua background (bypass CORS)
  */
@@ -5687,7 +5723,7 @@ async function handleFetchCMSData(
       );
 
       // Fetch actions
-      const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=20&column=actId&desending=1`;
+      const actionsUrl = `https://cms.vnpost.vn/api/admin/complaints/gettticketaction/${ticket.ticketId}?pageIndex=1&pageSize=100&column=actId&desending=1`;
 
       const actionsResponse = await fetch(actionsUrl, {
         method: "GET",
