@@ -32,7 +32,7 @@ export const handleAutoGenerateCMS = async (
         const history = order.history?.orderStatusHistoryDtoList || [];
         const isReturn = history.some(h => {
             const statusLower = (h.statusText || "").toLowerCase();
-            return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công")||statusLower.includes("phát hoàn");
+            return statusLower.includes("chuyển hoàn") || statusLower.includes("phát hàng thành công") || statusLower.includes("phát hoàn");
         });
         if (isReturn) return false;
 
@@ -45,7 +45,7 @@ export const handleAutoGenerateCMS = async (
     }
 
     setIsAutoProcessing(true);
-    message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_map', duration: 0 });
+    message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_map', duration: 1.5 });
 
     const todayStr = dayjs().format("DD/MM/YYYY");
 

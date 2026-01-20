@@ -29,7 +29,14 @@ const normalizeText = (str: string): string => {
 // Thứ tự ưu tiên: Ra (1) -> Vô (2) -> Quảng Nam (3) -> Quảng Ngãi (4) -> Khác (5)
 const getRegionScore = (address: string): number => {
   if (!address) return 5;
-  const normAddr = normalizeText(address);
+  let normAddr = normalizeText(address);
+
+  // --- THÊM: Lọc các từ khóa tỉnh/tp để lấy phần tên địa phương ---
+  // Nếu tìm thấy từ khóa, lấy phần chuỗi phía sau nó để tránh nhầm lẫn (VD: Huyện Tịnh Biên có từ "tinh")
+  const match = normAddr.match(/(?:tinh|thanh pho|tp)[\W\s]+(.+)$/);
+  if (match && match[1]) {
+    normAddr = match[1].trim();
+  }
 
   // Check RA
   if (PROVINCE_GROUPS.RA.some(p => normAddr.includes(p))) return 1;

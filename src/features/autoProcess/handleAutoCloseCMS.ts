@@ -46,7 +46,7 @@ export const handleAutoCloseCMS = async (
     }
 
     setIsAutoClosing(true);
-    message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_close', duration: 0 });
+    message.loading({ content: `Đang phân tích ${candidateOrders.length} đơn...`, key: 'auto_close', duration: 1.5 });
 
     // Xây dựng danh sách items cần đóng
     const closeItems: CloseCMSItem[] = candidateOrders.map(order => ({
