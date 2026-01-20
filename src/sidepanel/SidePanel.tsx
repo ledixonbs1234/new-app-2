@@ -15,6 +15,62 @@ interface ZoomPreset {
   rotation: number;
 }
 
+// --- THÊM: Helper chuẩn hóa tiếng Việt để so sánh địa chỉ ---
+const normalizeText = (str: string): string => {
+  if (!str) return "";
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d");
+};
+
+// --- THÊM: Hàm xác định điểm ưu tiên của vùng ---
+// Thứ tự ưu tiên: Ra (1) -> Vô (2) -> Quảng Nam (3) -> Quảng Ngãi (4) -> Khác (5)
+const getRegionScore = (address: string): number => {
+  if (!address) return 5;
+  const normAddr = normalizeText(address);
+
+  // Check RA
+  if (PROVINCE_GROUPS.RA.some(p => normAddr.includes(p))) return 1;
+
+  // Check VO
+  if (PROVINCE_GROUPS.VO.some(p => normAddr.includes(p))) return 2;
+
+  // Check QUANG NAM
+  if (PROVINCE_GROUPS.QUANG_NAM.some(p => normAddr.includes(p))) return 3;
+
+  // Check QUANG NGAI
+  if (PROVINCE_GROUPS.QUANG_NGAI.some(p => normAddr.includes(p))) return 4;
+
+  return 5; // Không xác định
+};
+
+// --- THÊM: Định nghĩa dữ liệu tỉnh thành để map vùng miền ---
+// Dựa trên file tinhthanh.json bạn cung cấp
+const PROVINCE_GROUPS = {
+  VO: [
+    "binh dinh", "phu yen", "khanh hoa", "ninh thuan", "binh thuan",
+    "kon tum", "gia lai", "dak lak", "dak nong", "lam dong",
+    "binh phuoc", "tay ninh", "binh duong", "dong nai", "ba ria vung tau",
+    "ho chi minh", "hcm", "sai gon", // Thêm hcm/sai gon cho chắc
+    "long an", "tien giang", "ben tre", "tra vinh", "vinh long",
+    "dong thap", "an giang", "kien giang", "can tho", "hau giang",
+    "soc trang", "bac lieu", "ca mau"
+  ],
+  RA: [
+    "da nang", "thua thien hue", "quang tri", "quang binh", "ha tinh",
+    "nghe an", "thanh hoa", "ninh binh", "hoa binh", "son la",
+    "dien bien", "lai chau", "lao cai", "yen bai", "phu tho",
+    "ha giang", "tuyen quang", "cao bang", "bac kan", "thai nguyen",
+    "lang son", "bac giang", "quang ninh", "ha noi", "hai phong",
+    "hai duong", "hung yen", "ha nam", "nam dinh", "thai binh",
+    "vinh phuc", "bac ninh"
+  ],
+  QUANG_NAM: ["quang nam"],
+  QUANG_NGAI: ["quang ngai"]
+};
+
 const SidePanel: React.FC = () => {
   // State
   const [images, setImages] = useState<StoredImage[]>([]);
@@ -91,17 +147,27 @@ const SidePanel: React.FC = () => {
       }
     }
 
-    // 2. Map giữ index gốc và gắn cờ bất thường
+    // 2. Map giữ index gốc, gắn cờ bất thường và tính điểm vùng
     const mappedList = aiOrders.map((order, idx) => ({
       ...order,
       originalIndex: idx,
-      isAbnormalCOD: majorityCOD !== -1 && order.COD !== majorityCOD
+      isAbnormalCOD: majorityCOD !== -1 && order.COD !== majorityCOD,
+      regionScore: getRegionScore(order.DIACHI) // Tính điểm vùng ngay lúc map
     }));
 
-    // 3. Sắp xếp: Bất thường lên đầu -> Index gốc tăng dần
+    // 3. Sắp xếp
     return mappedList.sort((a, b) => {
+      // Ưu tiên 1: COD Bất thường lên đầu (Không phân biệt vùng miền)
       if (a.isAbnormalCOD && !b.isAbnormalCOD) return -1;
       if (!a.isAbnormalCOD && b.isAbnormalCOD) return 1;
+
+      // Ưu tiên 2: Sắp xếp theo Vùng (Ra -> Vô -> QNam -> QNgai)
+      // Nếu cùng là COD thường (hoặc cùng là COD bất thường), thì sort theo vùng
+      if (a.regionScore !== b.regionScore) {
+        return a.regionScore - b.regionScore;
+      }
+
+      // Ưu tiên 3: Index gốc tăng dần (giữ ổn định)
       return a.originalIndex - b.originalIndex;
     });
   }, [aiOrders]);
@@ -120,6 +186,7 @@ const SidePanel: React.FC = () => {
       NONE: { zoom: 1, pan: { x: 0, y: 0 }, rotation: 0 },
     };
   });
+
 
   // =================================================================
   // LOGIC LƯU PRESET MỚI (CHỦ ĐỘNG + DEBOUNCE)

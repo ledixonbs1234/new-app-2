@@ -324,7 +324,6 @@ async function fetchOrderHistory(itemCode: string, token: string): Promise<Order
         return null;
     }
 }
-let countLapCMS = 0;
 
 
 // Bảng mapping dịch vụ (copy từ background.ts)

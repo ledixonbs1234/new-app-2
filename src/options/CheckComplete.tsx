@@ -20,9 +20,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     const [currentCmsData, setCurrentCmsData] = useState<any>(null);
     const [detailLoading, setDetailLoading] = useState(false);
 
-    // Copy link chunks states
-    const [copyModalOpen, setCopyModalOpen] = useState(false);
-    const [idChunks, setIdChunks] = useState<string[][]>([]);
+    // Copy link chunks states removed
+    // const [copyModalOpen, setCopyModalOpen] = useState(false);
+    // const [idChunks, setIdChunks] = useState<string[][]>([]);
 
     // Filter states
     // Filter states removed
@@ -310,25 +310,70 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         }
 
         const validIds = data.map(item => item.trackingNumber).filter(Boolean);
-
-        if (validIds.length <= 100) {
-            const ids = validIds.join(',');
-            const url = `https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2&id=${ids}`;
-            navigator.clipboard.writeText(url).then(() => {
-                message.success("Đã copy link! Đang mở tab mới...");
-                window.open(url, '_blank');
-            }, () => {
-                message.error("Lỗi khi copy link");
-            });
-        } else {
-            // Split into chunks of 100
-            const chunks: string[][] = [];
-            for (let i = 0; i < validIds.length; i += 100) {
-                chunks.push(validIds.slice(i, i + 100));
-            }
-            setIdChunks(chunks);
-            setCopyModalOpen(true);
+        if (validIds.length === 0) {
+            message.warning("Không tìm thấy mã vận đơn hợp lệ");
+            return;
         }
+
+        // Tạo chuỗi ID (mỗi ID một dòng)
+        const idsString = validIds.join('\n');
+        const targetUrl = "https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2";
+
+        message.loading({ content: "Đang mở trang tra cứu BCCP...", key: 'bccp-process', duration: 2 });
+
+        // Mở tab mới ở chế độ background (active: false)
+        chrome.tabs.create({ url: targetUrl, active: false }, (tab) => {
+            if (!tab.id) {
+                message.error("Lỗi: Không thể mở tab mới");
+                return;
+            }
+
+            const targetTabId = tab.id;
+
+            // Lắng nghe sự kiện tab load xong
+            const listener = (startTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tabInfo: chrome.tabs.Tab) => {
+                // Chỉ xử lý nếu đúng tabID và trạng thái là 'complete'
+                if (startTabId === targetTabId && changeInfo.status === 'complete') {
+                    // Gỡ listener ngay lập tức để tránh chạy nhiều lần
+                    chrome.tabs.onUpdated.removeListener(listener);
+
+                    // Kiểm tra URL
+                    if (tabInfo.url && tabInfo.url.toLowerCase().includes("login")) {
+                        // Nếu bị redirect về trang login
+                        chrome.tabs.update(targetTabId, { active: true }); // Focus tab để user đăng nhập
+                        message.warning({ content: "Vui lòng đăng nhập BCCP, sau đó thử lại!", key: 'bccp-process', duration: 5 });
+                    } else {
+                        // Nếu đã vào được trang đích -> Inject Script
+                        message.success({ content: "Đang tự động nhập dữ liệu...", key: 'bccp-process', duration: 2 });
+
+                        chrome.scripting.executeScript({
+                            target: { tabId: targetTabId },
+                            func: (ids: string) => {
+                                // Hàm chạy trong context của trang web
+                                const checkExist = setInterval(() => {
+                                    const textarea = document.querySelector("#ctl00_MainContent_ctl00_txtInput") as HTMLTextAreaElement;
+                                    const button = document.querySelector("#ctl00_MainContent_ctl00_btnExportV2") as HTMLElement;
+
+                                    if (textarea && button) {
+                                        clearInterval(checkExist);
+                                        // Điền dữ liệu
+                                        textarea.value = ids;
+                                        // Click button "Lấy dữ liệu"
+                                        button.click();
+                                    }
+                                    // Dừng kiểm tra sau 3s nếu ko thấy (timeout)
+                                }, 500);
+
+                                setTimeout(() => clearInterval(checkExist), 3000);
+                            },
+                            args: [idsString]
+                        });
+                    }
+                }
+            };
+
+            chrome.tabs.onUpdated.addListener(listener);
+        });
     };
 
     const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -663,41 +708,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 {detailLoading ? <div className="text-center py-10"><Space><ReloadOutlined spin /> Đang tải...</Space></div> : renderTickets()}
             </Modal>
 
-            <Modal
-                title={<span className="text-lg font-bold text-blue-600">📋 Chia nhỏ link tra cứu ({data.length} mã)</span>}
-                open={copyModalOpen}
-                onCancel={() => setCopyModalOpen(false)}
-                footer={null}
-                width={500}
-            >
-                <div className="flex flex-col gap-3">
-                    <div className="bg-blue-50 p-3 rounded-lg text-blue-700 text-sm mb-2">
-                        Hệ thống đã chia {data.length} mã hiệu thành {idChunks.length} nhóm (mỗi nhóm tối đa 100 mã) để tránh lỗi quá tải URL.
-                    </div>
-                    {idChunks.map((chunk, index) => {
-                        const ids = chunk.join(',');
-                        const url = `https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2&id=${ids}`;
-                        return (
-                            <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-slate-50 transition-colors">
-                                <span className="font-semibold">Nhóm {index + 1} ({chunk.length} mã)</span>
-                                <Button
-                                    type="primary"
-                                    size="small"
-                                    icon={<CopyOutlined />}
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(url).then(() => {
-                                            message.success(`Đã copy link nhóm ${index + 1}!`);
-                                            window.open(url, '_blank');
-                                        });
-                                    }}
-                                >
-                                    Copy & Mở
-                                </Button>
-                            </div>
-                        );
-                    })}
-                </div>
-            </Modal>
+
         </div>
     );
 };
