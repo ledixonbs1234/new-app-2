@@ -579,8 +579,27 @@ function listenForFillForm() {
         // --- 2. LOGIC KIỂM TRA GIÁ TRỊ VÀ AUTO SAVE (Sửa đổi) ---
         console.log("[GiaoTich] Checking value change...");
 
-        // Selector input cần kiểm tra (Ví dụ: Cước phí, Tổng tiền...)
-        const targetInputSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(6) > div:nth-child(6) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-4 > input";
+        // Xác định selector dựa trên radio button "Địa bàn"
+        // Mặc định là 'new'
+        let isNewAddress = true;
+        const radioNew = document.querySelector('input[name="diaban2"][value="new"]') as HTMLInputElement;
+        const radioOld = document.querySelector('input[name="diaban2"][value="old"]') as HTMLInputElement;
+
+        if (radioNew && radioNew.checked) {
+          isNewAddress = true;
+        } else if (radioOld && radioOld.checked) {
+          isNewAddress = false;
+        }
+
+        let targetInputSelector = "";
+        if (isNewAddress) {
+          // Selector cho Địa bàn MỚI
+          targetInputSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(6) > div:nth-child(6) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-4 > input";
+        } else {
+          // Selector cho Địa bàn CŨ
+          targetInputSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(6) > div:nth-child(7) > div:nth-child(6) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-4 > input";
+        }
+
         const saveButtonSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button";
 
         // Luôn chờ kiểm tra dù có AutoSave hay không
@@ -589,7 +608,7 @@ function listenForFillForm() {
 
           if (targetInput) {
             const currentValue = targetInput.value;
-            console.log(`[GiaoTich] Validation - Current: "${currentValue}", Last: "${lastAutoSavedValue}"`);
+            console.log(`[GiaoTich] Validation (${isNewAddress ? 'New' : 'Old'}) - Current: "${currentValue}", Last: "${lastAutoSavedValue}"`);
 
             // --- ĐIỀU KIỆN KIỂM TRA ---
             // 1. Giá trị không được trống
@@ -598,6 +617,10 @@ function listenForFillForm() {
 
               // TRƯỜNG HỢP HỢP LỆ (Value changed)
               console.log("[GiaoTich] Value changed. Updating tracker.");
+
+              // Reset visual feedback (nếu trước đó bị đỏ/cam)
+              targetInput.style.backgroundColor = "";
+
               lastAutoSavedValue = currentValue; // Cập nhật giá trị mới nhất để so sánh lần sau
 
               // Chỉ bấm nút Lưu nếu có cờ autoSave
@@ -623,11 +646,14 @@ function listenForFillForm() {
               // Chạy cảnh báo cho cả trường hợp AutoSave và Manual
               console.warn("[GiaoTich] ❌ Value unchanged or empty. Warning user.");
 
-              // Hiển thị cảnh báo ĐỎ ĐẬM
-              displayWarning("Địa chỉ tự động không thay đổi hãy chú ý");
+              // Thay vì displayWarning, đổi màu nền input thành CAM
+              targetInput.style.backgroundColor = "orange";
+
+              // Nếu muốn vẫn log ra console hoặc toast nhẹ (tuỳ chọn)
+              // displayWarning("Địa chỉ tự động không thay đổi hãy chú ý"); 
             }
           } else {
-            console.warn("[GiaoTich] Target input for validation not found.");
+            console.warn(`[GiaoTich] Target input for validation not found. Selector: ${targetInputSelector}`);
           }
         }, 800); // Delay chờ Portal tính toán/load lại data
 
