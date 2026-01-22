@@ -11,6 +11,29 @@ import {
     getFirebaseCMSAutoConfigs
 } from '../services/autoReminderSync';
 
+/**
+ * Add log entry to storage (Duplicated from autoReminderScheduler to avoid circular dependency)
+ */
+async function addLog(message: string): Promise<void> {
+    const timestamp = new Date().toLocaleString('vi-VN');
+    const logEntry = `[${timestamp}] ${message}`;
+
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['autoReminderLogs'], (result) => {
+            const logs = result.autoReminderLogs || [];
+            logs.unshift(logEntry); // Add to beginning
+
+            // Keep only last 50 logs
+            const trimmedLogs = logs.slice(0, 50);
+
+            chrome.storage.local.set({ autoReminderLogs: trimmedLogs }, () => {
+                console.log(logEntry);
+                resolve();
+            });
+        });
+    });
+}
+
 interface ProcessResult {
     success: boolean;
     message: string;
@@ -585,6 +608,7 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         }
 
         console.log(`[Auto Reminder] Found ${orders.length} delivery orders`);
+        await addLog(`🔎 Tìm thấy ${orders.length} đơn hàng đang phát (Status 11,12,13)`);
 
         // 6. Fetch CMS data and history for all orders
         console.log('[Auto Reminder] Fetching CMS data and history...');
@@ -652,15 +676,47 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
 
         // --- CACHE & PROBE LOGIC END ---
 
-        // 7. Filter orders without CMS
-        console.log('[Auto Reminder] Filtering orders without CMS...');
-        const ordersWithoutCMS = ordersWithData.filter(hasNoCMS);
+        // 7. Filter orders
+        console.log('[Auto Reminder] Filtering orders...');
 
-        console.log(`[Auto Reminder] Found ${ordersWithoutCMS.length} orders without CMS`);
+        const eligibleOrders: ExtendedOrder[] = [];
 
-        // 8. Filter by history conditions
-        console.log('[Auto Reminder] Checking order history...');
-        const eligibleOrders = ordersWithoutCMS.filter(checkOrderHistory);
+        for (const order of ordersWithData) {
+            // Check CMS
+            if (!hasNoCMS(order)) {
+                // Uncomment to log existing CMS skips if needed, but might be spammy
+                // console.log(`[Skip] ${order.itemCode} has CMS or error`);
+                continue;
+            }
+
+            // Check History
+            if (checkOrderHistory(order)) {
+                eligibleOrders.push(order);
+            } else {
+                // Log reason for rejection
+                const history = order.history?.orderStatusHistoryDtoList || [];
+                let reason = '';
+
+                if (history.length === 0) {
+                    reason = 'Không lấy được lịch sử';
+                } else {
+                    // Quick analysis of why it failed
+                    const statusTexts = history.map(h => (h.statusText || '').toLowerCase());
+                    const hasDelivery = statusTexts.some(s => s.includes('đã xác nhận đến phát') || s.includes('đang phát hàng'));
+                    const hasExcluded = statusTexts.some(s => s.includes('phát hàng thành công') || s.includes('chuyển hoàn'));
+
+                    if (hasExcluded) reason = 'Đã phát thành công/Chuyển hoàn';
+                    else if (!hasDelivery) reason = 'Chưa có trạng thái Đang phát/Đến phát';
+                    else reason = 'Không thỏa mãn điều kiện lịch sử';
+
+                    // Log details for debugging
+                    const lastStatus = history[0]?.statusText || 'N/A';
+                    reason += ` (Cuối: ${lastStatus})`;
+                }
+
+                await addLog(`⛔ Bỏ qua ${order.itemCode}: ${reason}`);
+            }
+        }
 
         console.log(`[Auto Reminder] Found ${eligibleOrders.length} eligible orders`);
 

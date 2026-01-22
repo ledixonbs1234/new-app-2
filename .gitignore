@@ -1,4 +1,5 @@
 node_modules
 dist
-.rar
+dist.rar
+*.rar
 .agent
