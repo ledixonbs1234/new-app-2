@@ -269,6 +269,13 @@ async function fetchCMSDataForOrder(itemCode: string): Promise<any> {
         if (!searchResponse.ok) return null;
 
         const searchHtml = await searchResponse.text();
+
+        // Kiểm tra xem có phải trang login không (theo yêu cầu user: check id checkbox-signup)
+        if (searchHtml.includes('checkbox-signup')) {
+            console.warn(`[Auto Reminder] Phát hiện trang Login CMS (checkbox-signup) khi check ${itemCode}. Dừng xử lý.`);
+            return null;
+        }
+
         if (searchHtml.includes("Chưa có dữ liệu trong hệ thống")) {
             return { tickets: [] };
         }
@@ -639,19 +646,42 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         };
 
         // ** PROBE Step **: Check first order to see if CMS is accessible
-        if (orders.length > 0) {
-            const probeOrder = orders[0];
-            console.log(`[Auto Reminder] Probing CMS with order ${probeOrder.itemCode}...`);
-            const probeCmsData = await fetchCMSDataForOrder(probeOrder.itemCode);
+        // ** PROBE Step **: Verify CMS session matches user request (check admin/home for login redirect)
+        console.log(`[Auto Reminder] Probing CMS session via admin/home...`);
+        try {
+            const probeRes = await fetch("https://cms.vnpost.vn/admin/home", {
+                method: "GET",
+                credentials: "include",
+                headers: {
+                    "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"
+                }
+            });
 
-            // If probe failed (null), abort immediately
-            if (!probeCmsData) {
-                console.warn('[Auto Reminder] CMS Probe failed. Aborting to save bandwidth.');
+            // Check URL redirect
+            if (probeRes.url.toLowerCase().includes("login")) {
+                console.warn('[Auto Reminder] CMS Probe: Redirected to Login.');
                 return {
                     success: false,
-                    message: 'Không thể kết nối lấy dữ liệu CMS (Probe failed). Dừng xử lý.'
+                    message: 'CMS chưa đăng nhập (Redirected to Login). Dừng xử lý.'
                 };
             }
+
+            // Check content for login indicators
+            const probeHtml = await probeRes.text();
+            if (probeHtml.includes("checkbox-signup") || probeHtml.includes("Đăng nhập hệ thống")) {
+                console.warn('[Auto Reminder] CMS Probe: Found login form content.');
+                return {
+                    success: false,
+                    message: 'CMS chưa đăng nhập (Tìm thấy form đăng nhập). Dừng xử lý.'
+                };
+            }
+
+        } catch (error) {
+            console.warn('[Auto Reminder] CMS Probe: Network error.', error);
+            return {
+                success: false,
+                message: 'Không thể kết nối CMS (Probe Error). Dừng xử lý.'
+            };
         }
 
         const ordersWithData: ExtendedOrder[] = await Promise.all(
