@@ -319,9 +319,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         const idsString = validIds.join('\n');
         const targetUrl = "https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2";
 
-        message.loading({ content: "Đang mở trang tra cứu BCCP...", key: 'bccp-process', duration: 2 });
+        message.loading({ content: "Đang mở trang tra cứu và lấy dữ liệu...", key: 'bccp-process', duration: 0 });
 
-        // Mở tab mới ở chế độ background (active: false)
+        // Mở tab mới ở chế độ background
         chrome.tabs.create({ url: targetUrl, active: false }, (tab) => {
             if (!tab.id) {
                 message.error("Lỗi: Không thể mở tab mới");
@@ -334,45 +334,196 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             const listener = (startTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tabInfo: chrome.tabs.Tab) => {
                 // Chỉ xử lý nếu đúng tabID và trạng thái là 'complete'
                 if (startTabId === targetTabId && changeInfo.status === 'complete') {
-                    // Gỡ listener ngay lập tức để tránh chạy nhiều lần
+                    // Gỡ listener ngay lập tức
                     chrome.tabs.onUpdated.removeListener(listener);
 
-                    // Kiểm tra URL
+                    // Kiểm tra URL login
                     if (tabInfo.url && tabInfo.url.toLowerCase().includes("login")) {
-                        // Nếu bị redirect về trang login
-                        chrome.tabs.update(targetTabId, { active: true }); // Focus tab để user đăng nhập
+                        chrome.tabs.update(targetTabId, { active: true });
                         message.warning({ content: "Vui lòng đăng nhập BCCP, sau đó thử lại!", key: 'bccp-process', duration: 5 });
                     } else {
-                        // Nếu đã vào được trang đích -> Inject Script
-                        message.success({ content: "Đang tự động nhập dữ liệu...", key: 'bccp-process', duration: 2 });
+                        // Nếu đã vào được trang đích -> Inject Script để fetch dữ liệu
+                        message.loading({ content: "Đang tự động lấy dữ liệu...", key: 'bccp-process', duration: 0 });
 
                         chrome.scripting.executeScript({
                             target: { tabId: targetTabId },
-                            func: (ids: string) => {
-                                // Hàm chạy trong context của trang web
-                                const checkExist = setInterval(() => {
-                                    const textarea = document.querySelector("#ctl00_MainContent_ctl00_txtInput") as HTMLTextAreaElement;
-                                    const button = document.querySelector("#ctl00_MainContent_ctl00_btnExportV2") as HTMLElement;
+                            func: async (ids: string) => {
+                                try {
+                                    // Helper wait function
+                                    const waitForElement = (selector: string): Promise<Element | null> => {
+                                        return new Promise((resolve) => {
+                                            if (document.querySelector(selector)) {
+                                                return resolve(document.querySelector(selector));
+                                            }
+                                            const observer = new MutationObserver(() => {
+                                                if (document.querySelector(selector)) {
+                                                    observer.disconnect();
+                                                    resolve(document.querySelector(selector));
+                                                }
+                                            });
+                                            observer.observe(document.body, { childList: true, subtree: true });
+                                            // Timeout after 10s
+                                            setTimeout(() => {
+                                                observer.disconnect();
+                                                resolve(null);
+                                            }, 10000);
+                                        });
+                                    };
 
-                                    if (textarea && button) {
-                                        clearInterval(checkExist);
-                                        // Điền dữ liệu
-                                        textarea.value = ids;
-                                        // Click button "Lấy dữ liệu"
-                                        button.click();
+                                    const textarea = await waitForElement("#ctl00_MainContent_ctl00_txtInput") as HTMLTextAreaElement;
+                                    const button = document.querySelector("#ctl00_MainContent_ctl00_btnExportV2") as HTMLInputElement;
+
+                                    if (!textarea || !button) {
+                                        return { status: 'error', message: 'Không tìm thấy khung nhập liệu' };
                                     }
-                                    // Dừng kiểm tra sau 3s nếu ko thấy (timeout)
-                                }, 500);
 
-                                setTimeout(() => clearInterval(checkExist), 3000);
+                                    // Điền dữ liệu vào textarea
+                                    textarea.value = ids;
+
+                                    // Chuẩn bị form data thay vì click button
+                                    const form = document.getElementById("aspnetForm") as HTMLFormElement;
+                                    if (!form) return { status: 'error', message: 'Không tìm thấy form' };
+
+                                    const formData = new FormData(form);
+                                    // Cập nhật giá trị textarea trong formData (mặc dù đã gán vào DOM, nhưng FormData lấy từ form hiện tại, an toàn hơn là set lại)
+                                    formData.set(textarea.name, ids);
+
+                                    // Thêm button click event data (ASP.NET cần biết button nào được click)
+                                    formData.set(button.name, button.value || 'Lấy dữ liệu');
+
+                                    // Fetch request
+                                    const response = await fetch(window.location.href, {
+                                        method: 'POST',
+                                        body: formData
+                                    });
+
+                                    if (!response.ok) {
+                                        throw new Error(`HTTP error! status: ${response.status}`);
+                                    }
+
+                                    const blob = await response.blob();
+
+                                    // Convert blob to base64 to send back to extension
+                                    return new Promise((resolve, reject) => {
+                                        const reader = new FileReader();
+                                        reader.onloadend = () => {
+                                            const base64data = reader.result;
+                                            resolve({ status: 'success', data: base64data });
+                                        };
+                                        reader.onerror = reject;
+                                        reader.readAsDataURL(blob);
+                                    });
+
+                                } catch (err: any) {
+                                    return { status: 'error', message: err.message };
+                                }
                             },
                             args: [idsString]
+                        }).then((results) => {
+                            const result = results[0].result as any;
+                            if (result && result.status === 'success') {
+                                // Close the tab immediately
+                                chrome.tabs.remove(targetTabId);
+
+                                message.success({ content: "Đã lấy dữ liệu thành công!", key: 'bccp-process', duration: 3 });
+
+                                // Process the returned Excel file (Base64)
+                                const b64 = result.data.split(',')[1]; // Remove "data:application/vnd.openxmlformats...;base64,"
+                                // @ts-ignore
+                                const wb = XLSX.read(b64, { type: 'base64' });
+                                const wsname = wb.SheetNames[0];
+                                const ws = wb.Sheets[wsname];
+                                // @ts-ignore
+                                const jsonData = XLSX.utils.sheet_to_json(ws, { range: 1 });
+
+                                mergeExcelData(jsonData);
+
+                            } else {
+                                message.error({ content: `Lỗi: ${result?.message || 'Không xác định'}`, key: 'bccp-process' });
+                                // Keep tab open for debugging if needed, or close? Maybe keep open
+                                chrome.tabs.update(targetTabId, { active: true });
+                            }
+                        }).catch((err) => {
+                            console.error(err);
+                            message.error({ content: "Lỗi script: " + err.message, key: 'bccp-process' });
                         });
                     }
                 }
             };
 
             chrome.tabs.onUpdated.addListener(listener);
+        });
+    };
+
+    const mergeExcelData = (jsonData: any[]) => {
+        // DEBUG: Log first row to see column names
+        if (jsonData.length > 0) {
+            console.log('Excel Column Names (Row 2):', Object.keys(jsonData[0] as any));
+            console.log('First Data Row Sample:', jsonData[0]);
+        }
+
+        // Mapping
+        interface ExcelData {
+            status: string;
+            payment: string;
+            cod: number;
+        }
+
+        // QUAN TRỌNG: Tạo Map từ dữ liệu hiện có để gộp (Merge) thay vì ghi đè
+        const nextExcelMap = new Map<string, ExcelData>(excelData);
+
+        jsonData.forEach((row: any) => {
+            // Based on log: __EMPTY_1 contains tracking number
+            const code = row['__EMPTY_1'] ||  // Tracking number column!
+                row['Số hiệu BG'] ||
+                '';
+
+            if (code && code !== 'Số hiệu BG') { // Skip header rows
+                // Get status from "Kết quả phát" column
+                const status = row['Kết quả phát_1'] ||
+                    '';
+
+                // Get payment status - it's in __EMPTY_13 based on log
+                const payment = row['Trạng thái'] ||
+                    '';
+
+                if (code.toString().trim()) {
+                    // Cập nhật hoặc thêm mới vào Map hiện có
+                    nextExcelMap.set(code.toString().trim(), {
+                        status: status.trim(),
+                        payment: payment.trim(),
+                        cod: 0
+                    });
+                }
+            }
+        });
+
+        console.log('Merged Excel Data Total:', nextExcelMap.size);
+
+        // Save to chrome.storage.local
+        const dataMapObj = Object.fromEntries(nextExcelMap);
+        const timestamp = new Date().toLocaleString('vi-VN');
+
+        chrome.storage.local.set({
+            checkCompleteExcelData: dataMapObj,
+            checkCompleteExcelTimestamp: timestamp
+        }, () => {
+            setExcelData(nextExcelMap);
+            setLastExcelUpdate(timestamp);
+
+            // Update data state with Excel info - Tra cứu từ Map đã gộp
+            const newData = data.map(item => {
+                const excelInfo = nextExcelMap.get(item.trackingNumber);
+                return {
+                    ...item,
+                    excelStatus: excelInfo ? excelInfo.status : item.excelStatus || '',
+                    paymentStatus: excelInfo ? excelInfo.payment : item.paymentStatus || '',
+                    codAmount: excelInfo ? excelInfo.cod : item.codAmount || 0,
+                };
+            });
+
+            setData(newData);
+            message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
         });
     };
 
@@ -392,75 +543,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             // @ts-ignore
             const jsonData = XLSX.utils.sheet_to_json(ws, { range: 1 }); // Start from row 2 (index 1)
 
-            // DEBUG: Log first row to see column names
-            if (jsonData.length > 0) {
-                console.log('Excel Column Names (Row 2):', Object.keys(jsonData[0] as any));
-                console.log('First Data Row Sample:', jsonData[0]);
-            }
-
-            // Mapping
-            interface ExcelData {
-                status: string;
-                payment: string;
-                cod: number;
-            }
-
-            // QUAN TRỌNG: Tạo Map từ dữ liệu hiện có để gộp (Merge) thay vì ghi đè
-            const nextExcelMap = new Map<string, ExcelData>(excelData);
-
-            jsonData.forEach((row: any) => {
-                // Based on log: __EMPTY_1 contains tracking number
-                const code = row['__EMPTY_1'] ||  // Tracking number column!
-                    row['Số hiệu BG'] ||
-                    '';
-
-                if (code && code !== 'Số hiệu BG') { // Skip header rows
-                    // Get status from "Kết quả phát" column
-                    const status = row['Kết quả phát_1'] ||
-                        '';
-
-                    // Get payment status - it's in __EMPTY_13 based on log
-                    const payment = row['Trạng thái'] ||
-                        '';
-
-                    if (code.trim()) {
-                        // Cập nhật hoặc thêm mới vào Map hiện có
-                        nextExcelMap.set(code.trim(), {
-                            status: status.trim(),
-                            payment: payment.trim(),
-                            cod: 0
-                        });
-                    }
-                }
-            });
-
-            console.log('Merged Excel Data Total:', nextExcelMap.size);
-
-            // Save to chrome.storage.local
-            const dataMapObj = Object.fromEntries(nextExcelMap);
-            const timestamp = new Date().toLocaleString('vi-VN');
-
-            chrome.storage.local.set({
-                checkCompleteExcelData: dataMapObj,
-                checkCompleteExcelTimestamp: timestamp
-            }, () => {
-                setExcelData(nextExcelMap);
-                setLastExcelUpdate(timestamp);
-
-                // Update data state with Excel info - Tra cứu từ Map đã gộp
-                const newData = data.map(item => {
-                    const excelInfo = nextExcelMap.get(item.trackingNumber);
-                    return {
-                        ...item,
-                        excelStatus: excelInfo ? excelInfo.status : item.excelStatus || '',
-                        paymentStatus: excelInfo ? excelInfo.payment : item.paymentStatus || '',
-                        codAmount: excelInfo ? excelInfo.cod : item.codAmount || 0,
-                    };
-                });
-
-                setData(newData);
-                message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
-            });
+            mergeExcelData(jsonData);
 
             // Clear input value to allow re-uploading same file
             e.target.value = '';
