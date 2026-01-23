@@ -1,10 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Table, Card, Typography, message, Modal, Space } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined, CopyOutlined, FileTextOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ReloadOutlined, CopyOutlined, FileTextOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import CMSTicketItem from './components/CMSTicketItem';
 
 const { Title } = Typography;
+
+// Helper function to parse Vietnamese date string (DD/MM/YYYY HH:mm:ss)
+const parseVietnameseDate = (dateStr: string) => {
+    if (!dateStr || typeof dateStr !== 'string') return 0;
+    try {
+        const parts = dateStr.trim().split(' ');
+        const datePart = parts[0];
+        const timePart = parts[1] || '00:00:00';
+
+        const [day, month, year] = datePart.split('/').map(Number);
+        const [hour, minute, second] = timePart.split(':').map(Number);
+
+        return new Date(year, month - 1, day, hour, minute, second).getTime();
+    } catch (e) {
+        return 0;
+    }
+};
 
 interface CheckCompleteProps {
     onBack: () => void;
@@ -33,6 +50,11 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     // Excel storage states
     const [excelData, setExcelData] = useState<Map<string, any>>(new Map());
     const [lastExcelUpdate, setLastExcelUpdate] = useState<string>('');
+
+    // CMS Cache states
+    const [cmsCache, setCmsCache] = useState<Map<string, any>>(new Map());
+    const [lastCMSUpdate, setLastCMSUpdate] = useState<string>('');
+    const [cmsLoading, setCmsLoading] = useState(false);
 
     // Logic for Auto-detecting download
     useEffect(() => {
@@ -80,9 +102,10 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         };
     }, []);
 
-    const fetchData = async (providedExcelMap?: Map<string, any>) => {
+    const fetchData = async (providedExcelMap?: Map<string, any>, providedCMSCache?: Map<string, any>) => {
         setLoading(true);
         const mapToUse = providedExcelMap || excelData;
+        const cmsToUse = providedCMSCache || cmsCache;
         try {
             const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&searchInfoCode=&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=500&column=ttkId&desending=1&type=5&managedOrg=&managedUsr=&ttkCodeRef=", {
                 "headers": {
@@ -148,15 +171,38 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
             console.log('Parsed Data:', parsedData);
 
-            // Merge with existing Excel data
+            // Merge with existing Excel data and CMS cache
             const mergedData = parsedData.map(item => {
                 // QUAN TRỌNG: Dùng mapToUse để lấy dữ liệu mới nhất
                 const excelInfo = mapToUse.get(item.trackingNumber);
+
+                // Merge CMS cache
+                const cmsData = cmsToUse.get(item.trackingNumber);
+                let cmsLastActionDate = '';
+                let cmsLastActionUnit = '';
+                let cmsLastContent = '';
+
+                if (cmsData && cmsData.tickets && cmsData.tickets.length > 0) {
+                    const lastTicket = cmsData.tickets[cmsData.tickets.length - 1];
+                    const lastAction = lastTicket.actions && lastTicket.actions.length > 0
+                        ? lastTicket.actions[lastTicket.actions.length - 1]
+                        : null;
+
+                    if (lastAction) {
+                        cmsLastActionDate = lastAction.date;
+                        cmsLastActionUnit = lastAction.unit;
+                        cmsLastContent = lastAction.content;
+                    }
+                }
+
                 return {
                     ...item,
                     excelStatus: excelInfo?.status || '',
                     paymentStatus: excelInfo?.payment || '',
                     codAmount: excelInfo?.cod || 0,
+                    cmsLastActionDate,
+                    cmsLastActionUnit,
+                    cmsLastContent
                 };
             });
 
@@ -195,9 +241,17 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 console.error("Error loading storage:", err);
             }
 
-            // Bước 2: Gọi Fetch Data và truyền loadedMap vào
-            // Lúc này loadedMap chắc chắn đã có dữ liệu (nếu storage có)
-            await fetchData(loadedMap);
+            // Bước 1.5: Load CMS Cache từ Storage
+            let loadedCMSCache = new Map<string, any>();
+            try {
+                loadedCMSCache = await loadCMSCache();
+            } catch (err) {
+                console.error("Error loading CMS cache:", err);
+            }
+
+            // Bước 2: Gọi Fetch Data và truyền loadedMap và loadedCMSCache vào
+            // Lúc này loadedMap và loadedCMSCache chắc chắn đã có dữ liệu (nếu storage có)
+            await fetchData(loadedMap, loadedCMSCache);
         };
 
         initData();
@@ -213,13 +267,24 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
         message.loading({ content: `Đang xử lý 0/${totalCount}...`, key: 'bulk-progress', duration: 0 });
 
-        for (let i = 0; i < selectedRowKeys.length; i++) {
-            const key = selectedRowKeys[i];
-            const item = data.find(d => d.id === key);
+        // Split into batches of 50
+        const BATCH_SIZE = 50;
+        const batches: any[][] = [];
+        for (let i = 0; i < selectedRowKeys.length; i += BATCH_SIZE) {
+            batches.push(selectedRowKeys.slice(i, i + BATCH_SIZE));
+        }
 
-            if (item) {
+        console.log(`🚀 Bulk Close: Total ${totalCount} items, ${batches.length} batches of ${BATCH_SIZE}`);
+
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex];
+
+            // Process batch in parallel
+            const closePromises = batch.map(async (key) => {
+                const item = data.find(d => d.id === key);
+                if (!item) return { status: 'skip' };
+
                 try {
-                    // Wait for response to verify success
                     const response = await new Promise<any>((resolve) => {
                         chrome.runtime.sendMessage({
                             event: 'CONTENTMY',
@@ -234,31 +299,38 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                         });
                     });
 
-                    // Check if successful
                     if (response?.status === 'success') {
-                        successCount++;
-                        console.log(`✓ [${i + 1}/${totalCount}] Đóng thành công: ${item.complaintCode}`);
+                        return { status: 'success', code: item.complaintCode };
                     } else {
-                        failCount++;
-                        console.error(`✗ [${i + 1}/${totalCount}] Đóng thất bại: ${item.complaintCode}`, response);
+                        return { status: 'fail', code: item.complaintCode, error: response };
                     }
-
                 } catch (e) {
+                    return { status: 'error', code: item.complaintCode, error: e };
+                }
+            });
+
+            const results = await Promise.all(closePromises);
+
+            // Update counts and logs
+            results.forEach(res => {
+                if (res.status === 'success') {
+                    successCount++;
+                } else if (res.status === 'fail' || res.status === 'error') {
                     failCount++;
-                    console.error(`✗ [${i + 1}/${totalCount}] Lỗi đóng ticket:`, item.id, e);
+                    console.error(`✗ Đóng thất bại: ${res.code}`, res.error);
                 }
+            });
 
-                // Update progress
-                message.loading({
-                    content: `Đang xử lý ${i + 1}/${totalCount} (Thành công: ${successCount}, Lỗi: ${failCount})`,
-                    key: 'bulk-progress',
-                    duration: 0
-                });
+            // Update progress
+            message.loading({
+                content: `Đang xử lý ${Math.min((batchIndex + 1) * BATCH_SIZE, totalCount)}/${totalCount} (Thành công: ${successCount}, Lỗi: ${failCount})`,
+                key: 'bulk-progress',
+                duration: 0
+            });
 
-                // Wait 2 seconds before next request (except for the last one)
-                if (i < selectedRowKeys.length - 1) {
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                }
+            // Wait 2 seconds between batches (except the last one)
+            if (batchIndex < batches.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
@@ -551,6 +623,161 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         reader.readAsBinaryString(file);
     };
 
+    // Load CMS Cache from storage
+    const loadCMSCache = async () => {
+        try {
+            const result = await new Promise<any>((resolve) => {
+                chrome.storage.local.get(['checkCompleteCMSCache', 'checkCompleteCMSTimestamp'], resolve);
+            });
+
+            if (result.checkCompleteCMSCache) {
+                const loadedCache = new Map(Object.entries(result.checkCompleteCMSCache));
+                setCmsCache(loadedCache);
+                setLastCMSUpdate(result.checkCompleteCMSTimestamp || '');
+                console.log('✅ Loaded CMS cache from storage:', loadedCache.size, 'items');
+                return loadedCache;
+            } else {
+                console.log('ℹ️ No CMS cache in storage');
+                return new Map();
+            }
+        } catch (err) {
+            console.error("Error loading CMS cache:", err);
+            return new Map();
+        }
+    };
+
+    // Save CMS Cache to storage
+    const saveCMSCache = (newCache: Map<string, any>) => {
+        const cacheObj = Object.fromEntries(newCache);
+        const timestamp = new Date().toLocaleString('vi-VN');
+
+        chrome.storage.local.set({
+            checkCompleteCMSCache: cacheObj,
+            checkCompleteCMSTimestamp: timestamp
+        }, () => {
+            setCmsCache(newCache);
+            setLastCMSUpdate(timestamp);
+            console.log('✅ Saved CMS cache to storage:', newCache.size, 'items');
+        });
+    };
+
+    // Handle List CMS - Fetch ALL tracking numbers in batches of 50 - PARALLEL BATCHES
+    const handleListCMS = async () => {
+        if (!data || data.length === 0) {
+            message.warning("Không có dữ liệu để lấy thông tin CMS");
+            return;
+        }
+
+        setCmsLoading(true);
+
+        // Get ALL tracking numbers (no limit)
+        const allTrackingNumbers = data
+            .map(item => item.trackingNumber)
+            .filter(Boolean);
+
+        const totalCount = allTrackingNumbers.length;
+
+        message.loading({ content: `Đang xử lý 0/${totalCount}...`, key: 'cms-progress', duration: 0 });
+
+        // Load existing cache
+        const currentCache = await loadCMSCache();
+
+        // Split into batches of 50
+        const BATCH_SIZE = 50;
+        const batches: string[][] = [];
+        for (let i = 0; i < allTrackingNumbers.length; i += BATCH_SIZE) {
+            batches.push(allTrackingNumbers.slice(i, i + BATCH_SIZE));
+        }
+
+        console.log(`📦 Total: ${totalCount} mã, chia thành ${batches.length} batches (${BATCH_SIZE} mã/batch)`);
+
+        let processedCount = 0;
+        let successCount = 0;
+
+        // Process each batch sequentially, but fetch within batch in parallel
+        for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex];
+
+            console.log(`🚀 Batch ${batchIndex + 1}/${batches.length}: Processing ${batch.length} mã...`);
+
+            // Fetch all items in this batch in parallel
+            const fetchPromises = batch.map(async (trackingNumber) => {
+                // Fetch from API - ALWAYS fetch to get latest status (as requested)
+                try {
+                    const response = await new Promise<any>((resolve) => {
+                        chrome.runtime.sendMessage({
+                            event: 'CONTENTMY',
+                            type: 'FETCH_CMS_DATA',
+                            payload: { maVanDon: trackingNumber }
+                        }, (response) => {
+                            resolve(response);
+                        });
+                    });
+
+                    if (response && response.status === 'success' && response.data) {
+                        return { trackingNumber, fromCache: false, data: response.data };
+                    } else {
+                        return { trackingNumber, fromCache: false, data: { tickets: [] } };
+                    }
+
+                } catch (e) {
+                    console.error(`Error fetching CMS for ${trackingNumber}:`, e);
+                    return { trackingNumber, fromCache: false, data: { tickets: [] } };
+                }
+            });
+
+            // Wait for all fetches in this batch to complete
+            const results = await Promise.all(fetchPromises);
+
+            // Update cache with new data
+            results.forEach(result => {
+                currentCache.set(result.trackingNumber, result.data);
+                if (result.data.tickets && result.data.tickets.length > 0) {
+                    successCount++;
+                }
+                processedCount++;
+            });
+
+            // Update progress
+            message.loading({
+                content: `Đang xử lý ${processedCount}/${totalCount} (Thành công: ${successCount})`,
+                key: 'cms-progress',
+                duration: 0
+            });
+
+            console.log(`✅ Batch ${batchIndex + 1} done: ${processedCount}/${totalCount}`);
+        }
+
+        // Save cache
+        saveCMSCache(currentCache);
+
+        // Merge CMS data into current data
+        const updatedData = data.map(item => {
+            const cmsData = currentCache.get(item.trackingNumber);
+            if (cmsData && cmsData.tickets && cmsData.tickets.length > 0) {
+                // Get last ticket's last action
+                const lastTicket = cmsData.tickets[cmsData.tickets.length - 1];
+                const lastAction = lastTicket.actions && lastTicket.actions.length > 0
+                    ? lastTicket.actions[lastTicket.actions.length - 1]
+                    : null;
+
+                return {
+                    ...item,
+                    cmsLastActionDate: lastAction ? lastAction.date : '',
+                    cmsLastActionUnit: lastAction ? lastAction.unit : '',
+                    cmsLastContent: lastAction ? lastAction.content : ''
+                };
+            }
+            return item;
+        });
+
+        setData(updatedData);
+
+        message.destroy('cms-progress');
+        message.success(`Hoàn thành! Tổng: ${totalCount}, Thành công: ${successCount}`, 5);
+        setCmsLoading(false);
+    };
+
     // Render logic for tickets inside Modal - using CMSTicketItem component
     const renderTickets = () => {
         if (!currentCmsData || !currentCmsData.tickets || currentCmsData.tickets.length === 0) {
@@ -588,6 +815,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             title: 'Số hiệu',
             dataIndex: 'trackingNumber',
             key: 'trackingNumber',
+            width: 100,
             render: (text: string) => (
                 <a
                     onClick={(e) => {
@@ -605,13 +833,53 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             title: 'Nội dung',
             dataIndex: 'note',
             key: 'note',
+            width: 120,
             filters: getUniqueValues(data, 'note'),
             onFilter: (value: string, record: any) => record.note && record.note.indexOf(value) === 0,
             filterSearch: true
         },
-        { title: 'Ngày tạo', dataIndex: 'createDate', key: 'createDate' },
-        { title: 'Hạn xử lý', dataIndex: 'deadline', key: 'deadline' },
-        { title: 'Trạng thái CMS', dataIndex: 'statusText', key: 'statusText', render: (text: string) => <span style={{ color: 'green' }}>{text}</span> },
+        { title: 'Ngày tạo', dataIndex: 'createDate', key: 'createDate', width: 90 },
+        {
+            title: 'TG xử lý cuối',
+            dataIndex: 'cmsLastActionDate',
+            width: 90,
+            key: 'cmsLastActionDate',
+            render: (text: string, record: any) => text || record.deadline || '',
+            sorter: (a: any, b: any) => {
+                const dateA = parseVietnameseDate(a.cmsLastActionDate || a.deadline || '');
+                const dateB = parseVietnameseDate(b.cmsLastActionDate || b.deadline || '');
+                return dateA - dateB;
+            },
+            defaultSortOrder: 'ascend'
+        },
+        {
+            title: 'Trạng thái CMS',
+            dataIndex: 'cmsLastContent',
+            key: 'cmsLastContent',
+            render: (_text: string, record: any) => {
+                const unit = record.cmsLastActionUnit || '';
+                const content = record.cmsLastContent || record.statusText || '';
+
+                if (!content && !unit) return <span style={{ color: 'gray' }}>-</span>;
+
+                // Format: unit : content với màu sắc khác nhau
+                const fullText = unit ? `${unit} : ${content}` : content;
+
+                return (
+                    <span>
+                        {unit && (
+                            <>
+                                <span style={{ color: '#1890ff', fontWeight: '600' }}>{unit}</span>
+                                <span style={{ color: '#666' }}> : </span>
+                            </>
+                        )}
+                        <span style={{ color: '#52c41a' }}>
+                            {fullText.length > 80 ? (unit ? fullText.substring(unit.length + 3, 80) + '...' : content.substring(0, 80) + '...') : content}
+                        </span>
+                    </span>
+                );
+            }
+        },
         {
             title: 'Trạng thái đơn',
             dataIndex: 'excelStatus',
@@ -702,7 +970,19 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                                 📊 Đối soát Excel lần cuối: {lastExcelUpdate}
                             </div>
                         )}
+                        {lastCMSUpdate && (
+                            <div className="text-xs text-gray-500">
+                                💬 CMS lần cuối: {lastCMSUpdate}
+                            </div>
+                        )}
                         <div className="flex gap-2">
+                            <Button
+                                icon={<UnorderedListOutlined />}
+                                onClick={handleListCMS}
+                                loading={cmsLoading}
+                            >
+                                Liệt Kê CMS
+                            </Button>
                             <Button
                                 icon={<CopyOutlined />}
                                 onClick={handleCopyTraceLink}
