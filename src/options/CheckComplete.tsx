@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Button, Table, Card, Typography, message, Modal, Space } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined, CopyOutlined, FileTextOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, ReloadOutlined, FileTextOutlined, SyncOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
 import CMSTicketItem from './components/CMSTicketItem';
 
@@ -375,7 +375,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         onChange: onSelectChange,
     };
 
-    const handleCopyTraceLink = () => {
+    const handleCopyTraceLink = (onComplete?: () => void) => {
         if (!data || data.length === 0) {
             message.warning("Không có dữ liệu để tạo link");
             return;
@@ -508,7 +508,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                                 // @ts-ignore
                                 const jsonData = XLSX.utils.sheet_to_json(ws, { range: 1 });
 
-                                mergeExcelData(jsonData);
+                                mergeExcelData(jsonData, onComplete);
 
                             } else {
                                 message.error({ content: `Lỗi: ${result?.message || 'Không xác định'}`, key: 'bccp-process' });
@@ -527,7 +527,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         });
     };
 
-    const mergeExcelData = (jsonData: any[]) => {
+    const mergeExcelData = (jsonData: any[], onComplete?: () => void) => {
         // DEBUG: Log first row to see column names
         if (jsonData.length > 0) {
             console.log('Excel Column Names (Row 2):', Object.keys(jsonData[0] as any));
@@ -541,8 +541,8 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             cod: number;
         }
 
-        // QUAN TRỌNG: Tạo Map từ dữ liệu hiện có để gộp (Merge) thay vì ghi đè
-        const nextExcelMap = new Map<string, ExcelData>(excelData);
+        // QUAN TRỌNG: Tạo Map MỚI để ghi đè dữ liệu cũ
+        const nextExcelMap = new Map<string, ExcelData>();
 
         jsonData.forEach((row: any) => {
             // Based on log: __EMPTY_1 contains tracking number
@@ -596,6 +596,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
             setData(newData);
             message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
+            if (onComplete) onComplete();
         });
     };
 
@@ -776,6 +777,12 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         message.destroy('cms-progress');
         message.success(`Hoàn thành! Tổng: ${totalCount}, Thành công: ${successCount}`, 5);
         setCmsLoading(false);
+    };
+
+    const handleUpdateInfo = () => {
+        handleCopyTraceLink(() => {
+            handleListCMS();
+        });
     };
 
     // Render logic for tickets inside Modal - using CMSTicketItem component
@@ -960,7 +967,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                             Quay lại
                         </Button>
                         <Title level={4} style={{ margin: 0 }} className="text-blue-700">
-                            Check Complete List
+                            Danh Sách CMS
                         </Title>
                     </div>
 
@@ -977,17 +984,12 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                         )}
                         <div className="flex gap-2">
                             <Button
-                                icon={<UnorderedListOutlined />}
-                                onClick={handleListCMS}
+                                icon={<SyncOutlined />}
+                                onClick={handleUpdateInfo}
                                 loading={cmsLoading}
+                                type="primary"
                             >
-                                Liệt Kê CMS
-                            </Button>
-                            <Button
-                                icon={<CopyOutlined />}
-                                onClick={handleCopyTraceLink}
-                            >
-                                Copy Link Tra Cứu
+                                Cập Nhật Thông Tin
                             </Button>
 
                             <div style={{ position: 'relative', overflow: 'hidden', display: 'inline-block' }}>

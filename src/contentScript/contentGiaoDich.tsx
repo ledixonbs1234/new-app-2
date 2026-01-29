@@ -149,56 +149,6 @@ function displayGocData(gocContent: string) {
   }, 500);
 }
 
-function displayWarning(message: string) {
-  // Tìm element cha
-  const parentElement = document.querySelector(DIA_BAN_PARENT_SELECTOR) as HTMLElement;
-
-  if (!parentElement) {
-    console.warn("[GiaoTich] Không tìm thấy element cha Địa bàn để chèn GOC.");
-    return;
-  }
-
-  // Kiểm tra xem đã có element hiển thị GOC chưa
-  let gocElement = document.getElementById(CUSTOM_GOC_ID);
-
-  if (!gocElement) {
-    // Nếu chưa có, tạo mới
-    gocElement = document.createElement("div");
-    gocElement.id = CUSTOM_GOC_ID;
-
-    // Style cho đẹp
-    Object.assign(gocElement.style, {
-      width: "100%", // Xuống dòng
-      marginTop: "5px",
-      marginLeft: "10px", // Căn lề giống các input radio
-      padding: "5px 10px",
-      backgroundColor: "#f9f0ff", // Màu nền tím nhạt
-      border: "1px dashed #722ed1", // Viền tím
-      borderRadius: "4px",
-      color: "#531dab", // Màu chữ tím đậm
-      fontSize: "13px",
-      fontWeight: "500",
-      fontFamily: "monospace", // Font code để dễ nhìn
-      whiteSpace: "pre-wrap", // Giữ định dạng xuống dòng nếu có
-      display: "block"
-    });
-
-    // Chèn vào cuối parent
-    parentElement.appendChild(gocElement);
-
-    // Vì parent là MuiGrid (flex), để element này xuống dòng đẹp, ta có thể set parent flex-wrap
-    parentElement.style.flexWrap = "wrap";
-  }
-  gocElement.innerHTML = `<span style="color: red; font-weight: 900; font-size: 16px; text-transform: uppercase;">⚠️ ${message} ⚠️</span>`;
-  gocElement.style.backgroundColor = "#fff1f0"; // Nền đỏ nhạt
-  gocElement.style.border = "2px solid red";
-  gocElement.style.padding = "10px";
-  // Hiệu ứng nháy để báo hiệu cập nhật
-  gocElement.style.backgroundColor = "#d3adf7";
-  setTimeout(() => {
-    gocElement!.style.backgroundColor = "#f9f0ff";
-  }, 500);
-}
 function debounce(func: Function, delay: number): (...args: any[]) => void {
   let timer: NodeJS.Timeout;
   return function (this: any, ...args: any[]) {
