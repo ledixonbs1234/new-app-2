@@ -42,13 +42,13 @@ const getRegionScore = (address: string): number => {
   if (PROVINCE_GROUPS.RA.some(p => normAddr.includes(p))) return 1;
 
   // Check VO
-  if (PROVINCE_GROUPS.VO.some(p => normAddr.includes(p))) return 2;
+  if (PROVINCE_GROUPS.VO.some(p => normAddr.includes(p))) return 4;
 
   // Check QUANG NAM
-  if (PROVINCE_GROUPS.QUANG_NAM.some(p => normAddr.includes(p))) return 3;
+  if (PROVINCE_GROUPS.QUANG_NAM.some(p => normAddr.includes(p))) return 2;
 
   // Check QUANG NGAI
-  if (PROVINCE_GROUPS.QUANG_NGAI.some(p => normAddr.includes(p))) return 4;
+  if (PROVINCE_GROUPS.QUANG_NGAI.some(p => normAddr.includes(p))) return 3;
 
   return 5; // Không xác định
 };

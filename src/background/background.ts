@@ -2958,15 +2958,107 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
 };
 
 const handlePrintPageSort = async (data: any) => {
-  var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
-  console.log("handlePrintPageSort: res", res);
+  chrome.action.setBadgeText({ text: "In..." });
+  chrome.action.setBadgeBackgroundColor({ color: "#0000FF" });
 
+  try {
+     var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
+
+    // Parse incoming data to get order list
+    
+    // Extract idcheck (id) from nested itemDetails
   var maHieus = (res as NguoiGuiDetailProp[])
-    .map((m) => m.itemDetails.map((n) => n.ttNumber))
-    .flat();
-  //sap xep ma hieu
-  maHieus.sort(customSort);
-  await printMaHieus(maHieus);
+      .map((m) => m.itemDetails.map((n) => n.id))
+      .flat();
+    console.log("handlePrintPageSort: maHieus extracted", maHieus);
+
+    if (maHieus.length === 0) {
+      throw new Error("Không có mã hàng để in");
+    }
+
+    // Call Jasper API for print - returns PDF blob
+    const response = await fetch(
+      "https://api-pre-portalkhl.vnpost.vn/khl-api/khl/jasper/JasperVD",
+      {
+        headers: {
+          "accept": "application/json, text/plain, */*",
+          "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+          "authorization": `Bearer ${token}`,
+          "content-type": "application/json; charset=UTF-8",
+          "priority": "u=1, i",
+          "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"Windows\"",
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "same-site"
+        },
+        referrer: "https://portalkhl.vnpost.vn/",
+        body: JSON.stringify({
+          idcheck: maHieus,
+          listReport: ["BD1New"],
+          lienNumbers: ["1"],
+          hiddenPrice: false
+        }),
+        method: "POST",
+        mode: "cors",
+        credentials: "include"
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Jasper API lỗi: ${response.status} ${response.statusText}`);
+    }
+
+    // Get PDF blob from response
+    const pdfBlob = await response.blob();
+    console.log("handlePrintPageSort: PDF blob received", pdfBlob.size, "bytes");
+
+    if (pdfBlob.size === 0) {
+      throw new Error("PDF blob không có nội dung");
+    }
+
+    // Check if offscreen document exists
+    const existingContexts = await chrome.runtime.getContexts({
+      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
+    });
+
+    // Create if doesn't exist
+    if (existingContexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+        justification: "In PDF bằng DOM APIs",
+      });
+    }
+
+    // Convert blob to base64
+    const base64String = await pdfBlobTo64(pdfBlob);
+
+    // Send to offscreen document for printing
+    const printResponse = await chrome.runtime.sendMessage({
+      type: "PRINT_PDF",
+      base64Data: base64String,
+    });
+
+    if (printResponse && printResponse.success) {
+      console.log("handlePrintPageSort: In thành công");
+      chrome.action.setBadgeBackgroundColor({ color: "#00FF00" });
+      updateToPhone("message", "In thành công");
+    } else {
+      console.error("handlePrintPageSort: Lỗi in PDF:", printResponse?.error);
+      chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+      updateToPhone("message", `Lỗi in: ${printResponse?.error || "Unknown error"}`);
+    }
+  } catch (error) {
+    console.error("handlePrintPageSort: Error", error);
+    chrome.action.setBadgeBackgroundColor({ color: "#FF0000" });
+    updateToPhone("message", `Lỗi in: ${error instanceof Error ? error.message : "Lỗi không xác định"}`);
+  }
+
+  // Clear badge after 1s
+  await delay(1000);
+  chrome.action.setBadgeText({ text: "" });
 };
 
 const checkToken = async (): Promise<boolean> => {
