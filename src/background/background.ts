@@ -2138,10 +2138,12 @@ async function processPortalWithMaHieuList(codesData: {
     const processedPortals = new Set(processedPortalsSnapshot.val() || []);
 
     // Lấy dữ liệu portal từ API
-    let toDayText = formatDateRight(new Date());
+    let fromDate = formatDateRight(new Date());
+    let toDate = formatDateRight(new Date());
     let maHieus = "";
+    let recipientName = "";
 
-    const portalData: any = await getItemHdr(toDayText, maHieus);
+    const portalData: any = await getItemHdr(fromDate, toDate, maHieus, recipientName);
     if (portalData.status === 401) {
       updateToPhone("error", "Lỗi xác thực khi lấy dữ liệu portal");
       return;
@@ -3189,23 +3191,29 @@ const handleGetPortal = async (time: string = "") => {
   updateToPhone("message", " Đang lấy data từ Portal");
   handleGetDataFromPortal(time);
 };
-const handleGetDataFromPortal = async (time: string) => {
+const handleGetDataFromPortal = async (time: any) => {
   try {
-    let toDayText = formatDateRight(new Date());
-    let maHieus = ""; // Default empty string for ttNumber
+    let fromDate = formatDateRight(new Date());
+    let toDate = formatDateRight(new Date());
+    let maHieus = ""; // Default empty string for maHieus
+    let recipientName = ""; // Default empty string for recipientName
 
-    if (time != "") {
-      // Parse the time parameter to extract date and maHieus
-      // Format: "date|maHieus" where maHieus comes after the pipe separator
-      const parts = time.split("|");
-      if (parts[0].length != 0) toDayText = parts[0]; // Date part
-      if (parts.length > 1) {
-        maHieus = parts[1]; // maHieus part after the pipe
+    if (time) {
+      // Parse the time parameter as JSON object
+      // Format: {"maHieus":"...", "fromDate":"...", "toDate":"...", "recipientName":"..."}
+      try {
+        const timeObj = typeof time === "string" ? JSON.parse(time) : time;
+        fromDate = timeObj.fromDate || fromDate;
+        toDate = timeObj.toDate || toDate;
+        maHieus = timeObj.maHieus || "";
+        recipientName = timeObj.recipientName || "";
+        console.log("Parsed - fromDate:", fromDate, "toDate:", toDate, "maHieus:", maHieus, "recipientName:", recipientName);
+      } catch (parseError) {
+        console.error("Error parsing time parameter:", parseError);
       }
-      console.log("Parsed date:", toDayText, "maHieus:", maHieus);
     }
 
-    const data: any = await getItemHdr(toDayText, maHieus);
+    const data: any = await getItemHdr(fromDate, toDate, maHieus, recipientName);
     if (data.status === 401) {
       return;
     }
@@ -4250,41 +4258,49 @@ const getMaHieusFromPortalId = async (
   }
 };
 const getItemHdr = async (
-  toDayText: string,
+  fromDate: string = "",
+  toDate: string = "",
   maHieus: string = "",
+  recipientName: string = "",
 ): Promise<NguoiGuiProp[]> => {
   try {
-    // Build the base JSON object
-    const requestBody = {
-      orgCode: buuCuc,
-      tuNgay: toDayText,
-      denNgay: toDayText,
+    // Build the request body with the new structure
+    const requestBody: any = {
+      orgCode: "593200",
+      tuNgay: fromDate,
+      denNgay: toDate,
+      source: "'DWS','IP','DTL','HCL','IM'",
+      nation: "1",
       sourceSystem: "KHL",
       origin: "",
     };
 
-    // Only add ttNumber if maHieus has a value
+    // Add ttNumber only if maHieus is not empty
     if (maHieus && maHieus.trim() !== "") {
-      (requestBody as any).ttNumber = maHieus;
+      requestBody.ttNumber = maHieus;
+    }
+
+    // Add recName only if recipientName is not empty
+    if (recipientName && recipientName.trim() !== "") {
+      requestBody.recName = recipientName;
     }
 
     const res = await fetch(`${API_BASE_URL}/khl-api/khl/getItemHdr`, {
       headers: {
-        accept: "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9,vi;q=0.8",
-        authorization: `Bearer ${token}`,
-        capikey: "19001235",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+        "authorization": `Bearer ${token}`,
+        "capikey": "19001235",
         "content-type": "application/json; charset=UTF-8",
-        "sec-ch-ua":
-          '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+        "priority": "u=1, i",
+        "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
         "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"',
+        "sec-ch-ua-platform": "\"Windows\"",
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
       },
       referrer: "https://portalkhl.vnpost.vn/",
-      referrerPolicy: "strict-origin-when-cross-origin",
       body: JSON.stringify(requestBody),
       method: "POST",
       mode: "cors",
