@@ -1220,7 +1220,7 @@ const SidePanel: React.FC = () => {
                         />
                       </div>
 
-                      <div className="thumbnail-gallery-section" style={{ flex: '0 0 160px', overflowY: 'auto', background: '#fafafa' }}>
+                      <div className="thumbnail-gallery-section" style={{ flex: '0 0 180px', overflowY: 'auto', background: '#fafafa' }}>
                         <ThumbnailGallery
                           images={images}
                           selectedIndex={selectedIndex}

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { Card, Tooltip, Spin } from "antd";
 import { CheckCircleOutlined, ClockCircleOutlined, LoadingOutlined } from "@ant-design/icons";
 import { StoredImage } from "../../types/vnpost";
-import { createImageObjectURL, revokeImageObjectURL } from "../utils/imageDB";
+import { revokeImageObjectURL } from "../utils/imageDB";
 
 interface ThumbnailGalleryProps {
   images: StoredImage[];
@@ -22,58 +22,103 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
   const lastScrolledIndexRef = useRef<number>(-1);
   const previousImagesRef = useRef<Set<string>>(new Set());
 
-  // Create object URLs for thumbnails - OPTIMIZED with incremental updates
-  useEffect(() => {
-    const currentImageIds = new Set(images.map(img => img.imageId));
-    const previousImageIds = previousImagesRef.current;
+  // Hàm hỗ trợ tạo ảnh thu nhỏ từ Blob
+  const generateMinimalThumbnail = (blob: Blob): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const objUrl = URL.createObjectURL(blob);
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        const canvas = document.createElement("canvas");
+        const MAX_SIZE = 150;
+        let { width, height } = img;
 
-    // Only process NEW images (not re-create all URLs)
-    const newImages = images.filter(img => !previousImageIds.has(img.imageId));
-    const removedImageIds = Array.from(previousImageIds).filter(id => !currentImageIds.has(id));
-
-    if (newImages.length === 0 && removedImageIds.length === 0) {
-      // No changes, skip update
-      return;
-    }
-
-    setThumbnailUrls(prevUrls => {
-      const urlMap = new Map(prevUrls);
-
-      // Remove URLs for deleted images
-      removedImageIds.forEach(imageId => {
-        const url = urlMap.get(imageId);
-        if (url && url.startsWith("blob:")) {
-          revokeImageObjectURL(url);
-        }
-        urlMap.delete(imageId);
-      });
-
-      // Add URLs for new images only
-      newImages.forEach((image) => {
-        if (image.blob) {
-          const url = createImageObjectURL(image.blob);
-          urlMap.set(image.imageId, url);
-        } else if (image.thumbnailUrl) {
-          urlMap.set(image.imageId, image.thumbnailUrl);
-        }
-      });
-
-      return urlMap;
-    });
-
-    // Update reference
-    previousImagesRef.current = currentImageIds;
-
-    // Cleanup on unmount
-    return () => {
-      if (newImages.length > 0) {
-        newImages.forEach(image => {
-          const url = thumbnailUrls.get(image.imageId);
-          if (url && url.startsWith("blob:")) {
-            revokeImageObjectURL(url);
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height = Math.round((height * MAX_SIZE) / width);
+            width = Math.round(MAX_SIZE);
           }
+        } else {
+          if (height > MAX_SIZE) {
+            width = Math.round((width * MAX_SIZE) / height);
+            height = Math.round(MAX_SIZE);
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx?.drawImage(img, 0, 0, width, height);
+        // Xuất ra base64 jpeg dung lượng thấp
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        resolve("");
+      };
+      img.src = objUrl;
+    });
+  };
+
+  // Create object URLs / base64 for thumbnails - OPTIMIZED with incremental updates
+  useEffect(() => {
+    const processUpdates = async () => {
+      const currentImageIds = new Set(images.map(img => img.imageId));
+      const previousImageIds = previousImagesRef.current;
+
+      // Only process NEW images
+      const newImages = images.filter(img => !previousImageIds.has(img.imageId));
+      const removedImageIds = Array.from(previousImageIds).filter(id => !currentImageIds.has(id));
+
+      if (newImages.length === 0 && removedImageIds.length === 0) {
+        return;
+      }
+
+      // Xóa URL cũ (nếu có ObjectURL bị sót)
+      if (removedImageIds.length > 0) {
+        setThumbnailUrls(prevUrls => {
+          const urlMap = new Map(prevUrls);
+          removedImageIds.forEach(id => {
+            const url = urlMap.get(id);
+            if (url && url.startsWith("blob:")) {
+              revokeImageObjectURL(url);
+            }
+            urlMap.delete(id);
+          });
+          return urlMap;
         });
       }
+
+      // Xử lý tạo ảnh minimal cho các mảng ảnh mới
+      newImages.forEach(async (image) => {
+        let finalUrl = "";
+        if (image.blob) {
+          // Tạo bản thu nhỏ từ blob gốc
+          finalUrl = await generateMinimalThumbnail(image.blob);
+        }
+
+        if (finalUrl) {
+          setThumbnailUrls(prev => {
+            const up = new Map(prev);
+            up.set(image.imageId, finalUrl);
+            return up;
+          });
+        }
+      });
+
+      previousImagesRef.current = currentImageIds;
+    };
+
+    processUpdates();
+
+    return () => {
+      // Dọn dẹp object url khi unmount (nếu vẫn còn lưu blob: do version cũ)
+      setThumbnailUrls(prev => {
+        prev.forEach(url => {
+          if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+        });
+        return prev;
+      });
     };
   }, [images]);
 
@@ -122,9 +167,9 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
       style={{
         padding: "12px",
         display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+        gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))",
         gap: "12px",
-        alignContent: "start",
+        height: "max-content", // Thêm thuộc tính này để container kéo dài theo content
       }}
     >
       {images.map((image, index) => {
@@ -144,7 +189,7 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
             }
             placement="top"
           >
-            <div 
+            <div
               ref={(el) => {
                 if (el) {
                   thumbnailRefs.current.set(index, el);
@@ -169,96 +214,96 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
                     : "0 2px 8px rgba(0, 0, 0, 0.1)",
                 }}
               >
-                  {/* Thumbnail Image */}
-                  <div
-                    style={{
-                      width: "100%",
-                      height: "100px",
-                      background: thumbnailUrl ? "#f0f0f0" : "#fafafa",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      overflow: "hidden",
-                      position: "relative",
-                    }}
-                  >
-                    {thumbnailUrl ? (
-                      <img
-                        src={thumbnailUrl}
-                        alt={image.maHieu || `Image ${index + 1}`}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                      />
-                    ) : (
-                      <div style={{ 
-                        textAlign: "center",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "8px"
-                      }}>
-                        <Spin 
-                          indicator={<LoadingOutlined style={{ fontSize: 24, color: "#1890ff" }} spin />}
-                        />
-                        <div style={{ color: "#8c8c8c", fontSize: "11px" }}>
-                          Đang tải...
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Image Info */}
-                  <div
-                    style={{
-                      padding: "8px",
-                      background: isSelected ? "#e6f7ff" : "#fff",
-                      borderTop: "1px solid #f0f0f0",
-                    }}
-                  >
-                    <div
+                {/* Thumbnail Image */}
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100px",
+                    background: thumbnailUrl ? "#f0f0f0" : "#fafafa",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    position: "relative",
+                  }}
+                >
+                  {thumbnailUrl ? (
+                    <img
+                      src={thumbnailUrl}
+                      alt={image.maHieu || `Image ${index + 1}`}
                       style={{
-                        fontSize: "12px",
-                        fontWeight: 600,
-                        color: isSelected ? "#1890ff" : "#262626",
-                        marginBottom: "4px",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "cover",
                       }}
-                    >
-                      #{index + 1}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "11px",
-                        color: "#8c8c8c",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                      }}
-                    >
-                      {image.maHieu || "Chưa xử lý"}
-                    </div>
-                  </div>
-                </Card>
-                
-                {/* Badge icon positioned absolutely */}
-                <div style={{
-                  position: "absolute",
-                  top: "8px",
-                  right: "8px",
-                  fontSize: "18px",
-                  zIndex: 1
-                }}>
-                  {image.processed ? (
-                    <CheckCircleOutlined style={{ color: "#52c41a" }} />
+                    />
                   ) : (
-                    <ClockCircleOutlined style={{ color: "#faad14" }} />
+                    <div style={{
+                      textAlign: "center",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: "8px"
+                    }}>
+                      <Spin
+                        indicator={<LoadingOutlined style={{ fontSize: 24, color: "#1890ff" }} spin />}
+                      />
+                      <div style={{ color: "#8c8c8c", fontSize: "11px" }}>
+                        Đang tải...
+                      </div>
+                    </div>
                   )}
                 </div>
+
+                {/* Image Info */}
+                <div
+                  style={{
+                    padding: "8px",
+                    background: isSelected ? "#e6f7ff" : "#fff",
+                    borderTop: "1px solid #f0f0f0",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      fontWeight: 600,
+                      color: isSelected ? "#1890ff" : "#262626",
+                      marginBottom: "4px",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    #{index + 1}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: "11px",
+                      color: "#8c8c8c",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {image.maHieu || "Chưa xử lý"}
+                  </div>
+                </div>
+              </Card>
+
+              {/* Badge icon positioned absolutely */}
+              <div style={{
+                position: "absolute",
+                top: "8px",
+                right: "8px",
+                fontSize: "18px",
+                zIndex: 1
+              }}>
+                {image.processed ? (
+                  <CheckCircleOutlined style={{ color: "#52c41a" }} />
+                ) : (
+                  <ClockCircleOutlined style={{ color: "#faad14" }} />
+                )}
+              </div>
             </div>
           </Tooltip>
         );

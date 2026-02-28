@@ -2861,9 +2861,9 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
       });
     };
 
-    fillSet(provinceData.vo, voCodes);
     fillSet(provinceData.ra, raCodes);
     fillSet(provinceData.quangnam, quangNamCodes);
+    fillSet(provinceData.vo, voCodes);
     fillSet(provinceData.quangngai, quangNgaiCodes);
 
     // Bước 3: Lấy dữ liệu chi tiết các mã hiệu từ API
@@ -2882,10 +2882,10 @@ const handlePrintSortTinhVaNoiDung = async (data: any) => {
     // Bước 5: Định nghĩa mức độ ưu tiên sắp xếp
     // Nhỏ hơn xếp trước
     const PRIORITY = {
-      QUANG_NAM: 1,
+      QUANG_NAM: 4,
       QUANG_NGAI: 2,
       RA: 3,
-      VO: 4,     // Bao gồm cả Bình Định (55)
+      VO: 1,     // Bao gồm cả Bình Định (55)
       UNKNOWN: 5
     };
 
@@ -2964,12 +2964,12 @@ const handlePrintPageSort = async (data: any) => {
   chrome.action.setBadgeBackgroundColor({ color: "#0000FF" });
 
   try {
-     var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
+    var res = await getMaHieusFromPortalId(JSON.parse(data.DoiTuong), token);
 
     // Parse incoming data to get order list
-    
+
     // Extract idcheck (id) from nested itemDetails
-  var maHieus = (res as NguoiGuiDetailProp[])
+    var maHieus = (res as NguoiGuiDetailProp[])
       .map((m) => m.itemDetails.map((n) => n.id))
       .flat();
     console.log("handlePrintPageSort: maHieus extracted", maHieus);
