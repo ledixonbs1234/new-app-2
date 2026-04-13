@@ -3,6 +3,25 @@
 ## Project Overview
 This is a Chrome Manifest V3 extension that automates order processing workflows for VNPost (Vietnam Post) portal systems. It integrates with multiple VNPost domains (portalkhl.vnpost.vn, my.vnpost.vn, packnsend.vnpost.vn, cms.vnpost.vn) and uses Firebase Realtime Database for cross-device synchronization.
 
+## Assistant Guidance
+- Use this file as the primary workspace instruction set for AI assistance in this repository.
+- Prefer small, focused changes over broad rewrites, especially in large files like `src/background/background.ts`.
+- Preserve existing message contracts and Chrome extension patterns when modifying communication code.
+- When in doubt, ask for clarification rather than guessing VNPost domain behavior.
+- For new features, favor extraction into `src/background/modules/`, `src/features/`, or `src/popup/components/` instead of enlarging existing large files.
+- Use `npm run dev` for development builds and `npm run build` for production bundles.
+
+## Key Files
+- `src/background/background.ts`
+- `src/background/util.ts`
+- `src/contentScript/contentScript.tsx`
+- `src/contentScript/contentMy.tsx`
+- `src/contentScript/mainScript.tsx`
+- `src/popup/Popup.tsx`
+- `src/options/Options.tsx`
+- `src/static/manifest.json`
+- `webpack.dev.js`, `webpack.prod.js`
+
 ## Architecture
 
 ### Extension Components
