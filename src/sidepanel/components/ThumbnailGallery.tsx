@@ -20,7 +20,7 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
   const [thumbnailUrls, setThumbnailUrls] = useState<Map<string, string>>(new Map());
   const thumbnailRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const lastScrolledIndexRef = useRef<number>(-1);
-  const previousImagesRef = useRef<Set<string>>(new Set());
+  const previousImagesRef = useRef<Map<string, boolean>>(new Map());
 
   // Hàm hỗ trợ tạo ảnh thu nhỏ từ Blob
   const generateMinimalThumbnail = (blob: Blob): Promise<string> => {
@@ -63,12 +63,16 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
   // Create object URLs / base64 for thumbnails - OPTIMIZED with incremental updates
   useEffect(() => {
     const processUpdates = async () => {
-      const currentImageIds = new Set(images.map(img => img.imageId));
-      const previousImageIds = previousImagesRef.current;
+      const currentImageMap = new Map(images.map(img => [img.imageId, !!img.blob]));
+      const previousImageMap = previousImagesRef.current;
 
-      // Only process NEW images
-      const newImages = images.filter(img => !previousImageIds.has(img.imageId));
-      const removedImageIds = Array.from(previousImageIds).filter(id => !currentImageIds.has(id));
+      // Process NEW images AND images whose blob status changed (undefined → Blob)
+      const newImages = images.filter(img => {
+        const prevHadBlob = previousImageMap.get(img.imageId);
+        // New image OR blob just became available
+        return prevHadBlob === undefined || (!prevHadBlob && !!img.blob);
+      });
+      const removedImageIds = Array.from(previousImageMap.keys()).filter(id => !currentImageMap.has(id));
 
       if (newImages.length === 0 && removedImageIds.length === 0) {
         return;
@@ -106,7 +110,7 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
         }
       });
 
-      previousImagesRef.current = currentImageIds;
+      previousImagesRef.current = currentImageMap;
     };
 
     processUpdates();
@@ -314,11 +318,24 @@ const ThumbnailGallery: React.FC<ThumbnailGalleryProps> = ({
 
 // Memoize component to prevent unnecessary re-renders
 export default React.memo(ThumbnailGallery, (prevProps, nextProps) => {
-  // Only re-render if these props actually changed
-  return (
-    prevProps.selectedIndex === nextProps.selectedIndex &&
-    prevProps.shouldScrollToSelected === nextProps.shouldScrollToSelected &&
-    prevProps.images.length === nextProps.images.length &&
-    prevProps.onSelectImage === nextProps.onSelectImage
-  );
+  // Quick length check first
+  if (
+    prevProps.selectedIndex !== nextProps.selectedIndex ||
+    prevProps.shouldScrollToSelected !== nextProps.shouldScrollToSelected ||
+    prevProps.images.length !== nextProps.images.length ||
+    prevProps.onSelectImage !== nextProps.onSelectImage
+  ) {
+    return false; // Different → re-render
+  }
+
+  // Deep check: detect when blob becomes available for any image
+  for (let i = 0; i < prevProps.images.length; i++) {
+    const prevHasBlob = !!prevProps.images[i].blob;
+    const nextHasBlob = !!nextProps.images[i].blob;
+    if (prevHasBlob !== nextHasBlob) {
+      return false; // Blob status changed → re-render
+    }
+  }
+
+  return true; // No meaningful change → skip re-render
 });

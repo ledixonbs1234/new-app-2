@@ -22,6 +22,7 @@ import {
   saveImage,
   getAllImages,
   deleteImage,
+  getImage,
   initDB
 } from "../sidepanel/utils/imageDB";
 import { ImportedImage } from "../types/vnpost";
@@ -6543,28 +6544,44 @@ async function bgSyncImages() {
     const ids = Array.from(firebaseIds);
     let updatedCount = 0;
 
+    // 4.5. Thu thập danh sách ảnh thất bại (không có blob sau tất cả retries)
+    const failedIds: { id: string; meta: ImportedImage }[] = [];
+
     for (let i = 0; i < ids.length; i += CONCURRENCY) {
       const batch = ids.slice(i, i + CONCURRENCY);
 
       await Promise.all(
         batch.map(async (id) => {
           const meta = firebaseImages[id];
-
-          // Kiểm tra xem đã có trong DB chưa để tránh tải lại
-          // (Logic đơn giản: Nếu chưa có blob hoặc timestamp khác thì tải)
           const existing = localImages.find(l => l.imageId === id);
           const needDownload = !existing || existing.timestamp !== meta.timestamp || !existing.blob;
 
           if (needDownload) {
-            try {
-              console.log(`[BG-Sync] Đang tải: ${id}`);
-              const blob = await downloadImageBlob(meta.url);
-              await saveImage(id, meta, blob);
-              updatedCount++;
-            } catch (e) {
-              console.error(`[BG-Sync] Lỗi tải ${id}:`, e);
-              // Lưu metadata đễ vẫn hiện placeholder nếu tải lỗi
+            const MAX_RETRIES = 2;
+            let downloaded = false;
+
+            for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+              try {
+                if (attempt > 0) {
+                  console.log(`[BG-Sync] Retry ${attempt}/${MAX_RETRIES} cho: ${id}`);
+                  await new Promise(r => setTimeout(r, 1000));
+                } else {
+                  console.log(`[BG-Sync] Đang tải: ${id}`);
+                }
+                const blob = await downloadImageBlob(meta.url);
+                await saveImage(id, meta, blob);
+                updatedCount++;
+                downloaded = true;
+                break;
+              } catch (e) {
+                console.error(`[BG-Sync] Lỗi tải ${id} (attempt ${attempt + 1}):`, e);
+              }
+            }
+
+            if (!downloaded) {
+              console.warn(`[BG-Sync] Thất bại ${id} sau ${MAX_RETRIES + 1} lần thử, sẽ retry sau`);
               await saveImage(id, meta);
+              failedIds.push({ id, meta });
             }
           }
         })
@@ -6573,10 +6590,37 @@ async function bgSyncImages() {
 
     // 5. Báo cho Sidepanel biết đã xong
     if (updatedCount > 0 || ids.length > 0) {
-      console.log(`[BG-Sync] Hoàn tất. Cập nhật ${updatedCount} ảnh.`);
-      chrome.runtime.sendMessage({ type: "IMAGES_UPDATED" }).catch(() => {
-        // Bỏ qua lỗi nếu sidepanel không mở
-      });
+      console.log(`[BG-Sync] Hoàn tất lượt chính. Cập nhật ${updatedCount} ảnh, lỗi ${failedIds.length} ảnh.`);
+      chrome.runtime.sendMessage({ type: "IMAGES_UPDATED" }).catch(() => { });
+    }
+
+    // 6. Delayed retry round cho ảnh thất bại (chờ 5s rồi thử lại)
+    if (failedIds.length > 0) {
+      console.log(`[BG-Sync] ⏳ Lên lịch retry ${failedIds.length} ảnh sau 5 giây...`);
+
+      setTimeout(async () => {
+        let retryUpdated = 0;
+
+        for (const { id, meta } of failedIds) {
+          // Kiểm tra lại: nếu đã có blob (do listener khác đã tải) thì bỏ qua
+          const current = await getImage(id);
+          if (current?.blob) continue;
+
+          try {
+            console.log(`[BG-Sync] 🔄 Delayed retry: ${id}`);
+            const blob = await downloadImageBlob(meta.url);
+            await saveImage(id, meta, blob);
+            retryUpdated++;
+          } catch (e) {
+            console.error(`[BG-Sync] ❌ Delayed retry thất bại: ${id}`, e);
+          }
+        }
+
+        if (retryUpdated > 0) {
+          console.log(`[BG-Sync] ✅ Delayed retry thành công: ${retryUpdated}/${failedIds.length} ảnh`);
+          chrome.runtime.sendMessage({ type: "IMAGES_UPDATED" }).catch(() => { });
+        }
+      }, 5000);
     }
 
   } catch (err) {
