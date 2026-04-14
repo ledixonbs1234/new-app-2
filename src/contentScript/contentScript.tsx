@@ -1,6 +1,6 @@
 import { KhachLeProps } from "../states/states";
 import { handlePortalHCCPage, handlePortalPage } from "./handlePortalPage";
-import { delay, waitForElm, waitForNotElm } from "./utils";
+import { delay, waitForElm, waitForNotElm, waitForValueElm } from "./utils";
 
 // Bỏ sharedState.isRunning vì background sẽ quản lý luồng
 // export const sharedState = {
@@ -76,6 +76,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
           try {
             // Gọi hàm xử lý một item (có thể là hàm startSendCurrentCode đã sửa đổi)
             const result = await processSinglePortalItem(msg.current, msg.makh, msg.keyMessage, msg.options, msg.isDeletePhone);
+            console.log("Finished processing", msg.current.MaBuuGui, "Result:", result);
+            callback({ status: "success", maBG: msg.current.MaBuuGui }); // Báo thành công
+          } catch (error: any) {
+            console.error(`Error processing ${msg.current.MaBuuGui}:`, error);
+            // --- BÁO LỖI VỀ BACKGROUND ---
+            callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
+          }
+        }
+        else if (msg.message === "PROCESS_SINGLE_ITEM_KHOITAO") {
+          console.log("Processing single item:", msg.current.MaBuuGui);
+          try {
+            // Gọi hàm xử lý một item (có thể là hàm startSendCurrentCode đã sửa đổi)
+            const result = await processSinglePortalItem_khoitao(msg.current, msg.makh, msg.keyMessage, msg.options, msg.isDeletePhone);
             console.log("Finished processing", msg.current.MaBuuGui, "Result:", result);
             callback({ status: "success", maBG: msg.current.MaBuuGui }); // Báo thành công
           } catch (error: any) {
@@ -519,6 +532,335 @@ async function processSinglePortalItem(
     );
     if (!moneyInput) {
       // Có thể form chưa load xong hoặc cấu trúc trang thay đổi
+      throw new Error(`Không tìm thấy ô nhập tiền sau khi tìm mã ${buuGui.MaBuuGui}`);
+    }
+
+    if (maKH === "C002446626") {
+      const firstChar = buuGui.MaBuuGui[0].toUpperCase();
+      const dichVu = firstChar === "C" ? "CTN009" : firstChar === "E" ? "ETN037" : null;
+      if (dichVu) {
+        window.postMessage({ type: "CONTENT", message: "CHANGEDICHVU", dichvu: dichVu });
+        await delay(1000);
+      }
+    }
+
+    await delay(500);
+
+    //thực hiện việc xoá 4 số đầu điện thoại
+    if (isDeletePhone) {
+      const receiverPhoneInput = document.querySelector<HTMLInputElement>("#receiverPhone");
+      if (receiverPhoneInput) {
+        const currentPhone = receiverPhoneInput.value;
+        if (currentPhone.length >= 4) {
+          const newPhone = currentPhone.slice(4);
+          receiverPhoneInput.value = newPhone;
+          receiverPhoneInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+          receiverPhoneInput.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+          receiverPhoneInput.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+        }
+      }
+    }
+    const weightThucTe = document.querySelector<HTMLInputElement>("#weight");
+    const weightNotDot = weightThucTe?.value.replace(".", "")
+    if (weightThucTe) {
+      if (
+        buuGui.KhoiLuong.toString() !== weightNotDot && buuGui.KhoiLuong.toString() !== "0") {
+        var klTemp = buuGui.KhoiLuong.toString().replace(/(\d)(?=(\d{3})+$)/g, '$1.')
+        weightThucTe.value = klTemp; // Đặt giá trị trước
+        weightThucTe.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        weightThucTe.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        weightThucTe.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+
+        // window.postMessage({
+        //   type: "CONTENT",
+        //   message: "ADDWEIGHT",
+        //   data: buuGui.MaBuuGui,
+        //   kl: buuGui.KhoiLuong,
+        // });
+        // await delay(400);
+      }
+      else if (options) {
+        if (options.selectedOption === "changeKLFromTo") {
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDWEIGHT",
+            data: buuGui.MaBuuGui,
+            kl: options.changeKLFromTo,
+          });
+          await delay(1000);
+        } else if (options.selectedOption === "contentChange") {
+          debugger
+          const contentItem = document.querySelector<HTMLInputElement>("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(7) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > textarea")
+          if (contentItem) {
+            var changes = options.contentChanges;
+            //chuyen khong dau va viet thuong
+            var content = contentItem.value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+            var klHienTai = 0;
+            var klThem = 0;
+
+            for (let i = 0; i < changes.length; i++) {
+              if (content.indexOf(changes[i].content) !== -1) {
+                if (changes[i].content.startsWith("+")) {
+                  klThem += Number(changes[i].khoiLuong);
+                } else {
+                  klHienTai = Number(changes[i].khoiLuong);
+                }
+              }
+            }
+            var klAll = klHienTai + klThem;
+
+            if (klAll > 0) {
+              window.postMessage({
+                type: "CONTENT",
+                message: "ADDWEIGHT",
+                data: buuGui.MaBuuGui,
+                kl: klAll,
+              });
+              await delay(400);
+            }
+          }
+        }
+        else if (options.selectedOption === "increaseKL") {
+          window.postMessage({
+            type: "CONTENT",
+            message: "ADDWEIGHT",
+            data: buuGui.MaBuuGui,
+            kl: (Number(weightNotDot) + Number(options.increaseKL)).toString(),
+          });
+          await delay(400);
+
+
+
+        }
+      }
+    }
+
+    if (buuGui.ListDo) {
+      window.postMessage({
+        type: "CONTENT",
+        message: "ADDKICHTHUOC",
+        data: buuGui.MaBuuGui,
+        kt: buuGui.ListDo,
+      });
+      await delay(1000);
+    }
+    // Bấm nút "Lưu và tìm tiếp" hoặc tương đương
+    const findAndSearchBtn = await waitForElm(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > div > div:nth-child(1) > div > button",
+      20
+    );
+    if (!findAndSearchBtn) {
+      throw new Error("Không tìm thấy nút 'Lưu và tìm kiếm'");
+    }
+    await delay(300);
+
+    (findAndSearchBtn as HTMLElement).click();
+
+    // Chờ kết quả (ô tìm kiếm xuất hiện lại hoặc có alert lỗi)
+    await delay(700); // Chờ phản hồi từ server
+
+    const alertBoxAfterClick = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
+    if (alertBoxAfterClick?.innerText) {
+      const textShow = alertBoxAfterClick.innerText.split("\n").pop() ?? "";
+      if (textShow.includes("thành công")) {
+        console.log("Lưu thành công:", buuGui.MaBuuGui);
+        // Gửi xác nhận thành công (nếu cần)
+
+      } else if (textShow.includes("Nhập thông tin vào trường bắt buộc")) {
+        var button = document.querySelector<HTMLElement>("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div.MuiGrid-root.MuiGrid-container.MuiGrid-item.MuiGrid-grid-xs-8 > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(3)")
+        if (button) {
+          button.click()
+          await delay(500);
+          (findAndSearchBtn as HTMLElement).click();
+        }
+      }
+      else {
+        // Nếu có alert không phải thành công -> Lỗi
+        console.error("Lỗi sau khi bấm lưu:", buuGui.MaBuuGui, textShow);
+        throw new Error(`Lỗi Portal sau khi lưu: ${textShow}`);
+      }
+    }
+    // Nếu không có alert, kiểm tra xem ô tìm kiếm đã xuất hiện lại chưa
+
+    // Nếu ô tìm kiếm xuất hiện -> Thành công
+
+    if (!await waitForElm("#ttNumberSearch", 10)) {
+      // Nếu ô tìm kiếm không xuất hiện -> Có thể lỗi hoặc xử lý lâu
+      throw new Error(`Không thể xác nhận lưu thành công cho ${buuGui.MaBuuGui}`);
+    }
+
+    console.log("Lưu thành công (không có alert):", buuGui.MaBuuGui);
+    const moneyThuHo = document.querySelector<HTMLInputElement>(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input"
+    );
+
+    // Gửi dữ liệu lên popup hoặc Firebase
+    await chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "SEND_MH",
+      content: buuGui.MaBuuGui,
+      content1: moneyThuHo?.value ?? "ko biết",
+      keyMessage,
+    })
+
+    // Hàm kết thúc thành công
+    console.log(`Successfully processed ${buuGui.MaBuuGui}`);
+
+    // === NOTIFY GIAO TICH SCRIPT: STOP PROCESSING ===
+    chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "PROCESS_STATUS",
+      isProcessing: false,
+    }).catch(() => { });
+
+  } catch (error: any) {
+    console.error(`Error in processSinglePortalItem for ${buuGui?.MaBuuGui}:`, error);
+
+    // === NOTIFY GIAO TICH SCRIPT: STOP PROCESSING (ON ERROR) ===
+    chrome.runtime.sendMessage({
+      event: "CONTENT",
+      message: "PROCESS_STATUS",
+      isProcessing: false,
+    }).catch(() => { });
+
+    // **Quan trọng**: Ném lại lỗi để listener message bắt được và báo về background
+    throw error;
+  }
+}
+
+async function processByNumberSearch(buuGui: BuuGuiProps, numberSearch: HTMLInputElement): Promise<void> {
+  numberSearch.value = buuGui.MaBuuGui;
+  numberSearch.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  numberSearch.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+  numberSearch.dispatchEvent(new Event("blur", { bubbles: true, cancelable: true }));
+
+  const searchButton: HTMLElement | null = document.querySelector(
+    "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+  );
+  if (searchButton) {
+    searchButton.click();
+  }
+
+  await delay(700);
+
+  const alertBoxEarly = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
+  if (alertBoxEarly?.innerText) {
+    const textShow = alertBoxEarly.innerText.split("\n").pop() ?? "";
+    console.log("Alert early:", textShow);
+    if (textShow.includes("tồn tại") || textShow.includes("xử lý") || textShow.includes("không đúng")) {
+      throw new Error(`Lỗi Portal sớm: ${textShow}`);
+    }
+  }
+
+  const notNumberSearch = await waitForNotElm("#ttNumberSearch", 30);
+  if (notNumberSearch !== "ok") {
+    const alertBoxAfterTimeout = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
+    const alertText = alertBoxAfterTimeout?.innerText.split("\n").pop() ?? "Không tìm thấy hoặc timeout";
+    console.log("Lỗi tìm kiếm hoặc timeout:", buuGui.MaBuuGui);
+    throw new Error(`Lỗi tìm kiếm mã ${buuGui.MaBuuGui}: ${alertText}`);
+  }
+}
+
+async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInputElement): Promise<void> {
+  console.log("Xử lý theo mã khách hàng với giá trị:", customerCode.value);
+  await delay(1000);
+
+  // Chờ #customerCode có dữ liệu
+  await waitForValueElm("#customerCode", 30);
+  await delay(300);
+
+  // Nhấn nút "Lưu và tìm kiếm"
+  const saveBtn: HTMLElement | null = document.querySelector(
+    "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
+  );
+  if (saveBtn) {
+    saveBtn.click();
+  }
+}
+
+async function processByEmptyCustomerCode(buuGui: BuuGuiProps): Promise<void> {
+  console.log("khoiTaoPortalNew: maHieu", buuGui.MaBuuGui);
+  const input = document.getElementById("searchDetailBox") as HTMLInputElement;
+  if (input) {
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+    if (nativeInputValueSetter) {
+      nativeInputValueSetter.call(input, buuGui.MaBuuGui);
+    } else {
+      input.value = buuGui.MaBuuGui;
+    }
+
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const options = { bubbles: true, cancelable: true, keyCode: 13, which: 13, key: "Enter", code: "Enter" };
+    input.dispatchEvent(new KeyboardEvent("keydown", options));
+    input.dispatchEvent(new KeyboardEvent("keypress", options));
+    input.dispatchEvent(new KeyboardEvent("keyup", options));
+  }
+  await delay(1000);
+
+  // Chờ #customerCode có dữ liệu
+  await waitForValueElm("#customerCode", 30);
+  await delay(300);
+
+  // Nhấn nút "Lưu và tìm kiếm"
+  const saveBtn: HTMLElement | null = document.querySelector(
+    "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
+  );
+  if (saveBtn) {
+    saveBtn.click();
+  }
+}
+
+async function processSinglePortalItem_khoitao(
+  buuGui: BuuGuiProps,
+  maKH: any,
+  keyMessage: string, // keyMessage có thể không cần ở content script nữa
+  options: any,
+  isDeletePhone: boolean
+): Promise<void> { // Trả về Promise để background biết khi nào xong, throw error nếu lỗi
+  console.log("Processing Portal item:", buuGui.MaBuuGui);
+
+  // === NOTIFY GIAO TICH SCRIPT: START PROCESSING ===
+  chrome.runtime.sendMessage({
+    event: "CONTENT",
+    message: "PROCESS_STATUS",
+    isProcessing: true,
+  }).catch(() => { });
+
+  try {
+    // const selector = await waitForElm("body > div.MuiDialog-root", 15);
+    // if (!selector) {
+    //   throw new Error("Không tìm thấy dialog Portal.");
+    // }
+
+    const numberSearch = document.querySelector<HTMLInputElement>("#ttNumberSearch");
+    const customerCode = document.querySelector<HTMLInputElement>("#customerCode");
+
+    if (numberSearch) {
+      console.log('Is Number Search')
+      await processByNumberSearch(buuGui, numberSearch);
+    } else if (customerCode && customerCode.value.trim() !== "") {
+      console.log("Customer Value")
+      await processByCustomerCode(buuGui, customerCode);
+    } else if (customerCode && customerCode.value.trim() === "") {
+      console.log("Customeer not Value")
+      await processByEmptyCustomerCode(buuGui);
+    } else {
+      throw new Error("Không tìm thấy #ttNumberSearch hoặc #customerCode.");
+    }
+
+    if (isFirstRun) {
+      isFirstRun = false;
+      console.log("Pre-check money...");
+      await delay(1000);
+    }
+
+    const moneyInput = await waitForElm(
+      "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input",
+      10 // Timeout ngắn hơn vì form đã load
+    );
+    if (!moneyInput) {
       throw new Error(`Không tìm thấy ô nhập tiền sau khi tìm mã ${buuGui.MaBuuGui}`);
     }
 

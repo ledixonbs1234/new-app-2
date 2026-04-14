@@ -216,7 +216,6 @@ export function setupDailyAlarm(): void {
  */
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM_NAME) {
-        console.log('[Auto Reminder] Alarm triggered, checking...');
         checkAndRunAutoReminder();
     }
 });

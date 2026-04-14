@@ -38,3 +38,24 @@ export function waitForNotElm(selector: any, timeout: number = 5) {
     checkElement();
   });
 }
+
+export function waitForValueElm(selector: string, timeout: number = 5): Promise<HTMLInputElement | null> {
+  return new Promise((resolve, reject) => {
+    const startTime = Date.now();
+
+    const checkElement = () => {
+      const element: HTMLInputElement | null = document.querySelector(selector);
+      if (element && element.value.trim() !== "") {
+        return resolve(element);
+      }
+
+      if (Date.now() - startTime >= timeout * 1000) {
+        return reject(new Error(`Timeout exceeded waiting for value (${timeout} seconds)`));
+      }
+
+      setTimeout(checkElement, 100);
+    };
+
+    checkElement();
+  });
+}

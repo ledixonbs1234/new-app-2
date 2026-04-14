@@ -27,7 +27,6 @@ async function addLog(message: string): Promise<void> {
             const trimmedLogs = logs.slice(0, 50);
 
             chrome.storage.local.set({ autoReminderLogs: trimmedLogs }, () => {
-                console.log(logEntry);
                 resolve();
             });
         });
@@ -58,7 +57,6 @@ async function getPortalTokenFromTab(): Promise<string | null> {
         const tabs = await chrome.tabs.query({ url: "*://my.vnpost.vn/*" });
 
         if (tabs.length === 0 || !tabs[0].id) {
-            console.log('[Auto Reminder] Không tìm thấy tab my.vnpost.vn nào đang mở.');
             return null;
         }
 
@@ -73,7 +71,6 @@ async function getPortalTokenFromTab(): Promise<string | null> {
         // 3. Xử lý kết quả
         if (results && results[0] && results[0].result) {
             const token = results[0].result;
-            // console.log('[Auto Reminder] Đã lấy được token từ tab đang mở.');
             return token;
         }
 
@@ -175,7 +172,7 @@ async function fetchDeliveryOrders(
         // Reverse to match logic in useOrderData
         orders.reverse();
 
-        console.log(`Fetched ${orders.length} delivery orders using searchAllByParamV2`);
+        
 
         return orders.map((order: any) => ({
             ...order,
@@ -252,7 +249,6 @@ function checkOrderHistory(order: ExtendedOrder): boolean {
  */
 async function fetchCMSDataForOrder(itemCode: string): Promise<any> {
     try {
-        console.log(`[Auto Reminder] Fetching CMS data directly for ${itemCode}...`);
 
         // 1. Tìm kiếm ticket theo mã vận đơn
         const searchUrl = `https://cms.vnpost.vn/api/admin/complaints/loaddatasearch?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&listRelationOrg=&relationOrg=&searchInfoCode=${itemCode}&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&managedOrg=&managedUsr=&ttkCodeRef=&ttkContactNumber=&ttkContactEmail=&managedOrgComplaint=&createdOrgComplaint=&ttkSource=0&pageIndex=1&pageSize=20&column=ttkId&desending=1`;
@@ -272,7 +268,6 @@ async function fetchCMSDataForOrder(itemCode: string): Promise<any> {
 
         // Kiểm tra xem có phải trang login không (theo yêu cầu user: check id checkbox-signup)
         if (searchHtml.includes('checkbox-signup')) {
-            console.warn(`[Auto Reminder] Phát hiện trang Login CMS (checkbox-signup) khi check ${itemCode}. Dừng xử lý.`);
             return null;
         }
 
@@ -515,9 +510,7 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
 
                 const forwardResult = await forwardRes.json();
                 if (forwardResult.result === true) {
-                    console.log(`[Auto Reminder] ➡️ Đã chuyển tiếp ticket ${ticketCode} đến ${orgInfo.orgCode}`);
                 } else {
-                    console.warn(`[Auto Reminder] ⚠️ Tạo thành công nhưng chuyển tiếp thất bại cho ${order.itemCode}`);
                 }
             }
             return true;
@@ -527,7 +520,6 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
         return true; // Trả về true vì ít nhất bước tạo đã thành công
 
     } catch (error) {
-        console.error(`[Auto Reminder] Lỗi nghiêm trọng khi xử lý CMS cho ${order.itemCode}:`, error);
         return false;
     }
 }
@@ -536,7 +528,7 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
  * Main processing function
  */
 export async function processAutoReminder(orgCode: string): Promise<ProcessResult> {
-    console.log(`[Auto Reminder] Starting process for orgCode: ${orgCode}`);
+    
 
     // 1. Check if already completed today
     const alreadyCompleted = await isCompletedToday(orgCode);
@@ -558,7 +550,6 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
 
     try {
         // 3. Check login status
-        console.log('[Auto Reminder] Checking login status...');
         const loginStatus = await checkLoginStatus();
 
         if (!loginStatus.cms) {
@@ -590,7 +581,6 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
         }
 
         // 5. Fetch delivery orders
-        console.log('[Auto Reminder] Fetching delivery orders...');
         const orders = await fetchDeliveryOrders(token, orgCode);
 
         // Fetch CMS Auto Configs from Firebase (Sync across devices)
@@ -614,11 +604,9 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
             };
         }
 
-        console.log(`[Auto Reminder] Found ${orders.length} delivery orders`);
         await addLog(`🔎 Tìm thấy ${orders.length} đơn hàng đang phát (Status 11,12,13)`);
 
         // 6. Fetch CMS data and history for all orders
-        console.log('[Auto Reminder] Fetching CMS data and history...');
 
         // --- CACHE & PROBE LOGIC START ---
 
