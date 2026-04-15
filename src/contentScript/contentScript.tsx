@@ -50,7 +50,7 @@ type BuuGuiProps = {
   TimeTrangThai: string;
 };
 window.onload = () => {
-  console.log("CONTENT SCRIPT");
+  console.log("CONTENT SCRIPT PORTAL");
 
   if (window.location.href.startsWith("https://portalkhl.vnpost.vn/itemhdr/?id=")) {
     handlePortalPage();
@@ -742,6 +742,11 @@ async function processByNumberSearch(buuGui: BuuGuiProps, numberSearch: HTMLInpu
   }
 
   await delay(700);
+  const customerCode = document.querySelector<HTMLInputElement>("#customerCode");
+  if(customerCode){
+    await processByCustomerCode(buuGui, customerCode);
+  }
+
 
   const alertBoxEarly = document.querySelector<HTMLElement>("#root > div.s-alert-wrapper");
   if (alertBoxEarly?.innerText) {

@@ -1130,6 +1130,7 @@ async function findPortalTabIdForKhoiTao(
   await delay(300);
   console.log("findPortalTabIdForKhoiTao: Bắt đầu kiểm tra tab Portal...");
 
+  let foundAcceptApiTabId: number | undefined;
   let foundReadyTabId: number | undefined;
 
   try {
@@ -1139,9 +1140,15 @@ async function findPortalTabIdForKhoiTao(
     });
     console.log(`findPortalTabIdForKhoiTao: Tìm thấy ${portalTabs.length} tab Portal.`);
 
-    // 2. Kiểm tra các tab đã mở
+    // 2. Kiểm tra các tab - ưu tiên accept-api, rồi kiểm tra sẵn sàng
     for (const tab of portalTabs) {
       if (!tab.id) continue;
+
+      // Ưu tiên tìm tab accept-api
+      if (tab.url?.includes("accept-api")) {
+        foundAcceptApiTabId = tab.id;
+      }
+
       try {
         const injectionResults = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
@@ -1166,25 +1173,47 @@ async function findPortalTabIdForKhoiTao(
       return { tabId: foundReadyTabId };
     }
 
-    // 4. Không tìm thấy tab → Tạo tab mới
-    console.log("findPortalTabIdForKhoiTao: Không tìm thấy tab sẵn sàng. Tạo tab mới...");
+    // 4. Nếu có portalTabs và có tab accept-api → navigate và activate
+    if (foundAcceptApiTabId) {
+      console.log(`findPortalTabIdForKhoiTao: Tìm thấy tab accept-api. TabID=${foundAcceptApiTabId}`);
+      updateToPhone("message", "Đang mở Portal...", keyMessage);
+      await chrome.tabs.update(foundAcceptApiTabId, { active: true });
+      await chrome.tabs.update(foundAcceptApiTabId, { url: "https://portalkhl.vnpost.vn/accept-api" });
+      await waitForTabToLoad(foundAcceptApiTabId);
+      await delay(500);
+      return { tabId: foundAcceptApiTabId };
+    }
+
+    // 5. Nếu có portalTabs nhưng URL khác → navigate đến accept-api
+    if (portalTabs.length > 0 && portalTabs[0].id) {
+      console.log(`findPortalTabIdForKhoiTao: Navigate tab có sẵn đến accept-api. TabID=${portalTabs[0].id}`);
+      updateToPhone("message", "Đang mở Portal...", keyMessage);
+      await chrome.tabs.update(portalTabs[0].id, { active: true });
+      await chrome.tabs.update(portalTabs[0].id, { url: "https://portalkhl.vnpost.vn/accept-api" });
+      await waitForTabToLoad(portalTabs[0].id);
+      await delay(500);
+      return { tabId: portalTabs[0].id };
+    }
+
+    // 6. Không có portalTab → Tạo tab mới
+    console.log("findPortalTabIdForKhoiTao: Không tìm thấy tab Portal. Tạo tab mới...");
     updateToPhone("message", "Đang mở Portal...", keyMessage);
 
     const targetUrl = "https://portalkhl.vnpost.vn/accept-api";
-
     const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
-
+    
 
     if (!newTab.id) {
       throw new Error("Không thể tạo tab mới");
     }
 
-
     // Đợi tab load xong
     await ensurePortalLogin(newTab.id);
 
     console.log(`findPortalTabIdForKhoiTao: Đã tạo tab mới. TabID=${newTab.id}`);
+    await delay(3000);
     return { tabId: newTab.id };
+
 
   } catch (error: any) {
     console.error("findPortalTabIdForKhoiTao: Lỗi:", error);
@@ -1192,6 +1221,9 @@ async function findPortalTabIdForKhoiTao(
     return {};
   }
 }
+
+
+
 
 async function handleSendAutoKhoiTao(commandData: any): Promise<void> {
   const logPrefix = "BG: handleSendAutoKhoiTao(Loop) -";
@@ -2430,9 +2462,15 @@ async function processPortalListLoopKhoiTao(
         throw new Error("Mất kết nối với tab Portal.");
       }
 
+      // Lấy thông tin tab để log
+      const targetTab = await chrome.tabs.get(targetTabId!);
+      console.log(`[Tab Info] Tab ID: ${targetTabId}, URL: ${targetTab?.url || 'unknown'}`);
+      
+
       // Gửi message xử lý đến content script
       await new Promise<void>((resolve, reject) => {
-        console.log("Đang chuyển dữ liệu sang contentscript với mã hiệu ",currentItem.MaBuuGui)
+        console.log("Đang chuyển dữ liệu sang contentscript với mã hiệu ", currentItem.MaBuuGui)
+
         chrome.tabs.sendMessage(targetTabId!, {
           message: "PROCESS_SINGLE_ITEM_KHOITAO",
           current: currentItem,
