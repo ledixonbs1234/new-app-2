@@ -743,7 +743,7 @@ async function processByNumberSearch(buuGui: BuuGuiProps, numberSearch: HTMLInpu
 
   await delay(700);
   const customerCode = document.querySelector<HTMLInputElement>("#customerCode");
-  if(customerCode){
+  if (customerCode) {
     await processByCustomerCode(buuGui, customerCode);
   }
 
@@ -771,7 +771,22 @@ async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInpu
   await delay(1000);
 
   // Chờ #customerCode có dữ liệu
-  await waitForValueElm("#customerCode", 30);
+    var customer = await waitForValueElm("#customerCode");
+  if (customer?.value == "C006230404") {
+    var checker: HTMLInputElement | null = document.querySelector(
+      `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(2) > div > div:nth-child(1) > div > input`
+    );
+    if (checker !== null) {
+      (checker as HTMLInputElement)?.click();
+      (
+        document.querySelector(
+          "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+        ) as HTMLButtonElement
+      )?.click();
+
+      await delay(500);
+    }
+  }
   await delay(300);
 
   // Nhấn nút "Lưu và tìm kiếm"
@@ -805,7 +820,25 @@ async function processByEmptyCustomerCode(buuGui: BuuGuiProps): Promise<void> {
   await delay(1000);
 
   // Chờ #customerCode có dữ liệu
-  await waitForValueElm("#customerCode", 30);
+  var customer = await waitForValueElm("#customerCode");
+  if (customer?.value == "C006230404") {
+    var checker: HTMLInputElement | null = document.querySelector(
+      `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(2) > div > div:nth-child(1) > div > input`
+    );
+    if (checker !== null) {
+      (checker as HTMLInputElement)?.click();
+      (
+        document.querySelector(
+          "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+        ) as HTMLButtonElement
+      )?.click();
+
+      await delay(500);
+    }
+  }
+
+
+
   await delay(300);
 
   // Nhấn nút "Lưu và tìm kiếm"

@@ -1173,7 +1173,6 @@ async function findPortalTabIdForKhoiTao(
       return { tabId: foundReadyTabId };
     }
 
-    // 4. Nếu có portalTabs và có tab accept-api → navigate và activate
     if (foundAcceptApiTabId) {
       console.log(`findPortalTabIdForKhoiTao: Tìm thấy tab accept-api. TabID=${foundAcceptApiTabId}`);
       updateToPhone("message", "Đang mở Portal...", keyMessage);
@@ -1181,9 +1180,10 @@ async function findPortalTabIdForKhoiTao(
       await chrome.tabs.update(foundAcceptApiTabId, { url: "https://portalkhl.vnpost.vn/accept-api" });
       await waitForTabToLoad(foundAcceptApiTabId);
       await delay(500);
+      await ensurePortalLogin(foundAcceptApiTabId);
+      await delay(3000);
       return { tabId: foundAcceptApiTabId };
     }
-
     // 5. Nếu có portalTabs nhưng URL khác → navigate đến accept-api
     if (portalTabs.length > 0 && portalTabs[0].id) {
       console.log(`findPortalTabIdForKhoiTao: Navigate tab có sẵn đến accept-api. TabID=${portalTabs[0].id}`);
@@ -1192,6 +1192,8 @@ async function findPortalTabIdForKhoiTao(
       await chrome.tabs.update(portalTabs[0].id, { url: "https://portalkhl.vnpost.vn/accept-api" });
       await waitForTabToLoad(portalTabs[0].id);
       await delay(500);
+      await ensurePortalLogin(portalTabs[0].id);
+      await delay(3000);
       return { tabId: portalTabs[0].id };
     }
 
@@ -1201,7 +1203,7 @@ async function findPortalTabIdForKhoiTao(
 
     const targetUrl = "https://portalkhl.vnpost.vn/accept-api";
     const newTab = await chrome.tabs.create({ url: targetUrl, active: true });
-    
+
 
     if (!newTab.id) {
       throw new Error("Không thể tạo tab mới");
@@ -1213,7 +1215,6 @@ async function findPortalTabIdForKhoiTao(
     console.log(`findPortalTabIdForKhoiTao: Đã tạo tab mới. TabID=${newTab.id}`);
     await delay(3000);
     return { tabId: newTab.id };
-
 
   } catch (error: any) {
     console.error("findPortalTabIdForKhoiTao: Lỗi:", error);
@@ -2465,7 +2466,7 @@ async function processPortalListLoopKhoiTao(
       // Lấy thông tin tab để log
       const targetTab = await chrome.tabs.get(targetTabId!);
       console.log(`[Tab Info] Tab ID: ${targetTabId}, URL: ${targetTab?.url || 'unknown'}`);
-      
+
 
       // Gửi message xử lý đến content script
       await new Promise<void>((resolve, reject) => {
