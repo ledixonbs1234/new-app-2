@@ -51,6 +51,7 @@
                 "xlsx.full.min.js",
                 "tinhthanh.json",
                 "data.json",
+                "tree_data.json",
                 "sidepanel.html",
                 "sidepanel.css",
                 "sidepanel.js"

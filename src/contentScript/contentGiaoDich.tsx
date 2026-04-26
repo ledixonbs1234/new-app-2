@@ -1406,7 +1406,54 @@ function findSuggestions(inputText: string): void {
   }
 
   if (!receiverInput || !ghost) return;
+  // ========================================================================
+  // BẮT TÍN HIỆU GÕ TẮT & XỬ LÝ NHIỀU KẾT QUẢ TRÙNG LẶP
+  // ========================================================================
+  const quickTypeMatch = inputText.match(/^(.*?)\s{2,}([a-zA-Z\s]+)$/);
+  
+  if (quickTypeMatch) {
+      const prefix = quickTypeMatch[1]; 
+      const query = quickTypeMatch[2].trim().toLowerCase(); 
+      const queryWords = query.split(' ');
+      
+      if ((queryWords.length === 2 || queryWords.length === 3) && abbreviationDict[query]) {
+          const matches = abbreviationDict[query];
 
+          // Trích xuất phần text đứng trước từ viết tắt để hiển thị mờ cho khớp vị trí
+          multiMatchGhostPrefix = inputText.substring(0, inputText.lastIndexOf(quickTypeMatch[2]));
+          multiMatchRealPrefix = prefix;
+
+          if (matches.length === 1) {
+              // TRƯỜNG HỢP 1 KẾT QUẢ: Hiển thị như bình thường
+              multiMatchSuggestions = []; 
+              const suggestionSuffix = matches[0]; 
+              
+              ghost.value = multiMatchGhostPrefix + suggestionSuffix;
+              currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+              return; 
+          } 
+          else if (matches.length > 1) {
+              // TRƯỜNG HỢP NHIỀU KẾT QUẢ: Hiển thị kết quả đầu tiên + Hint báo hiệu có thể cuộn
+              multiMatchSuggestions = matches;
+              multiMatchIndex = 0; // Bắt đầu ở vị trí 0
+
+              const suggestionSuffix = matches[0];
+              
+              // Thêm dòng hint nhỏ "[1/6 ↕]" vào cuối thanh mờ để user biết mà bấm nút Lên/Xuống
+              ghost.value = multiMatchGhostPrefix + suggestionSuffix + `[1/${matches.length} ↕]`;
+              
+              // Chuỗi thực tế khi bấm Tab (KHÔNG chứa phần hint)
+              currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+              return; 
+          }
+      }
+  }
+  
+  // NẾU KHÔNG KHỚP QUICK TYPE -> Reset các biến cuộn
+  multiMatchSuggestions =[];
+  // ========================================================================
+  // KẾT THÚC LOGIC GÕ TẮT
+  // ========================================================================
   const trimmedInput = inputText.trim();
   const normalizedInput = normalizeText(trimmedInput);
 
@@ -1773,15 +1820,15 @@ async function initialize(): Promise<void> {
   });
 
   try {
-    const response = await fetch(chrome.runtime.getURL("/data.json"));
+    const response = await fetch(chrome.runtime.getURL("/tree_data.json"));
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
     const data = await response.json();
 
-    if (data && typeof data === "object" && Array.isArray(data.QuocGia)) {
-      addressData = data.QuocGia;
-      console.log("[GiaoTich] Dữ liệu địa chỉ đã load:", addressData.length, "items");
+    if (data && data.QuocGiaTree) {
+      // Gọi hàm giải nén và tạo từ điển
+      processTreeData(data.QuocGiaTree);
     } else {
-      console.error("[GiaoTich] Invalid address data format.");
+      console.error("[GiaoTich] Invalid tree data format.");
     }
   } catch (error) {
     console.error("[GiaoTich] Lỗi khi tải data.json:", error);
@@ -1930,6 +1977,34 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
 
   const keydownHandler = (event: KeyboardEvent): void => {
     const currentGhost = document.getElementById(ELEMENT_IDS.GHOST_INPUT) as HTMLInputElement;
+
+    // ========================================================================
+    // 1. XỬ LÝ PHÍM LÊN/XUỐNG CHO DANH SÁCH GỢI Ý TRÙNG LẶP
+    // ========================================================================
+    if (multiMatchSuggestions.length > 1 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault(); // Ngăn con trỏ nhảy về đầu/cuối của ô input
+
+        // Tính toán vị trí mới
+        if (event.key === "ArrowDown") {
+            multiMatchIndex = (multiMatchIndex + 1) % multiMatchSuggestions.length;
+        } else if (event.key === "ArrowUp") {
+            multiMatchIndex = (multiMatchIndex - 1 + multiMatchSuggestions.length) % multiMatchSuggestions.length;
+        }
+
+        const suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
+        
+        // Cập nhật lại ô chữ mờ (Cập nhật cả con số ví dụ:[2/6 ↕])
+        currentGhost.value = multiMatchGhostPrefix + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
+        
+        // Cập nhật lại kết quả chuẩn để chốt khi bấm Tab
+        currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+        
+        return; // Dừng tại đây, không xử lý các phím khác
+    }
+
+    // ========================================================================
+    // 2. XỬ LÝ PHÍM TAB HOẶC ARROW RIGHT ĐỂ CHỐT GỢI Ý
+    // ========================================================================
     if (
       currentSuggestion &&
       currentGhost &&
@@ -1945,10 +2020,16 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
 
       currentGhost.value = "";
       currentSuggestion = null;
+      multiMatchSuggestions =[]; // Chốt xong thì xóa danh sách cuộn
       isTabed = true;
-    } else if (["ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Backspace", "Delete"].includes(event.key)) {
+    } 
+    // ========================================================================
+    // 3. XÓA GỢI Ý MỜ NẾU BẤM CÁC PHÍM ĐIỀU HƯỚNG KHÁC HOẶC XÓA CHỮ
+    // ========================================================================
+    else if (["ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Backspace", "Delete"].includes(event.key)) {
       if (currentGhost) currentGhost.value = "";
       currentSuggestion = null;
+      multiMatchSuggestions =[]; // Thoát ra thì xóa danh sách cuộn
     }
   };
   receiverAddressInput.addEventListener("keydown", keydownHandler);
@@ -2079,4 +2160,67 @@ if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", initialize);
 } else {
   initialize();
+}
+
+// ==========================================================================
+// CÁC BIẾN HỖ TRỢ CUỘN NHIỀU GỢI Ý KHI BỊ TRÙNG LẶP (ARROW UP / DOWN)
+// ==========================================================================
+let multiMatchSuggestions: string[] =[];
+let multiMatchIndex: number = -1;
+let multiMatchGhostPrefix: string = ""; // VD: "12 nguyễn văn trỗi  " (chứa dấu cách để hiển thị mờ đè lên chữ)
+let multiMatchRealPrefix: string = "";  // VD: "12 nguyễn văn trỗi" (để gán vào value thật khi ấn Tab)
+
+
+// ==========================================================================
+// TÍNH NĂNG GÕ TẮT & GIẢI NÉN TREE DATA
+// ==========================================================================
+let abbreviationDict: Record<string, string[]> = {};
+
+function processTreeData(treeData: any) {
+  abbreviationDict = {};
+  addressData = [];
+
+  for (const ttpName in treeData) {
+    const ttpData = treeData[ttpName];
+
+    for (const qhName in ttpData.Districts) {
+      const qhData = ttpData.Districts[qhName];
+
+      for (const ward of qhData.Wards) {
+
+        // 1. Tạo chuỗi địa chỉ đầy đủ
+        const fullAddress = `${ward.Name}, ${qhName}, ${ttpName}`;
+
+        // 2. Tạo CÁC combo gõ tắt
+        // Combo 2 từ: Xã + Tỉnh (VD: "tb hn") -> Dành cho những xã có tên độc lạ
+        const combo2 = `${ward.Init} ${ttpData.Init}`;
+
+        // Combo 3 từ: Xã + Huyện + Tỉnh (VD: "tb bd hn") -> Độ chính xác 99.9%
+        const combo3 = `${ward.Init} ${qhData.Init} ${ttpData.Init}`;
+
+        // Lưu vào từ điển
+        if (!abbreviationDict[combo2]) abbreviationDict[combo2] = [];
+        if (!abbreviationDict[combo2].includes(fullAddress)) abbreviationDict[combo2].push(fullAddress);
+
+        if (!abbreviationDict[combo3]) abbreviationDict[combo3] = [];
+        if (!abbreviationDict[combo3].includes(fullAddress)) abbreviationDict[combo3].push(fullAddress);
+
+        // 3. Tái tạo mảng `addressData` gốc cho logic tìm kiếm cũ
+        addressData.push({
+          NameTTP: ttpName,
+          NameTTPN: ttpData.N,
+          NameTTPKD: ttpData.KD,
+
+          NameQH: qhName,
+          NameQHN: qhData.N,
+          NameQHKD: qhData.KD,
+
+          NameXP: ward.Name,
+          NameXPN: ward.N,
+          NameXPKD: ward.KD,
+        });
+      }
+    }
+  }
+  console.log(`[GiaoTich] Đã nạp ${addressData.length} xã/phường.`);
 }
