@@ -1428,7 +1428,8 @@ function findSuggestions(inputText: string): void {
               multiMatchSuggestions = []; 
               const suggestionSuffix = matches[0]; 
               
-              ghost.value = multiMatchGhostPrefix + suggestionSuffix;
+              // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
+              ghost.value = inputText + " ➔ " + suggestionSuffix;
               currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
               return; 
           } 
@@ -1439,8 +1440,8 @@ function findSuggestions(inputText: string): void {
 
               const suggestionSuffix = matches[0];
               
-              // Thêm dòng hint nhỏ "[1/6 ↕]" vào cuối thanh mờ để user biết mà bấm nút Lên/Xuống
-              ghost.value = multiMatchGhostPrefix + suggestionSuffix + `[1/${matches.length} ↕]`;
+              // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
+              ghost.value = inputText + " ➔ " + suggestionSuffix + ` [1/${matches.length} ↕]`;
               
               // Chuỗi thực tế khi bấm Tab (KHÔNG chứa phần hint)
               currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
@@ -1909,7 +1910,7 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
     ghostInput.style.zIndex = "1";
     ghostInput.id = ELEMENT_IDS.GHOST_INPUT;
     ghostInput.style.position = "absolute";
-    ghostInput.style.setProperty("color", "lightgrey", "important");
+    ghostInput.style.setProperty("color", "#999", "important"); 
 
     (parentContainer as HTMLElement).style.position = "relative";
     (parentContainer as HTMLElement).insertBefore(ghostInput, receiverAddressInput);
@@ -1965,7 +1966,7 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
     (window as any)._inputResizeObserversGiaoTich.set(receiverAddressInput, resizeObserver);
   }
 
-  const debouncedFindSuggestions = debounce(findSuggestions, 100);
+  const debouncedFindSuggestions = debounce(findSuggestions, 200);
   const inputHandler = (event: Event): void => {
     const currentGhost = document.getElementById(ELEMENT_IDS.GHOST_INPUT) as HTMLInputElement;
     if (!currentGhost || (currentGhost.previousSibling !== receiverAddressInput && currentGhost.previousElementSibling !== receiverAddressInput)) {
@@ -1993,8 +1994,8 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
 
         const suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
         
-        // Cập nhật lại ô chữ mờ (Cập nhật cả con số ví dụ:[2/6 ↕])
-        currentGhost.value = multiMatchGhostPrefix + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
+        // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Dùng receiverAddressInput.value nối với mũi tên
+        currentGhost.value = receiverAddressInput.value + " ➔ " + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
         
         // Cập nhật lại kết quả chuẩn để chốt khi bấm Tab
         currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
