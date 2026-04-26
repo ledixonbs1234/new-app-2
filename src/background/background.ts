@@ -583,6 +583,8 @@ async function handleScannedItemsUpdate(
     TimeStampScannedItems = data.TimeStamp!;
   }
   var arrayData = JSON.parse(data.DoiTuong);
+  accountPortal = data.username;
+  passwordPortal = data.password;
   const newScannedItems: BuuGuiProps[] = Array.isArray(arrayData)
     ? arrayData.filter((item) => item && typeof item.MaBuuGui === "string") // Lọc bỏ phần tử không hợp lệ
     : [];
@@ -821,13 +823,13 @@ async function processNextItemInBackground(): Promise<void> {
     }
 
     // Cần cơ chế lấy maKH và options phù hợp. Ví dụ lấy từ storage
-    const maKH = await chromeStorageGet("currentMaKH"); // Ví dụ
+    // const maKH = await chromeStorageGet("currentMaKH"); // Ví dụ
     const options = await chromeStorageGet("currentOptions"); // Ví dụ
     // Lấy thêm isDeletePhone nếu có lưu trong options/storage
     const isDeletePhone = await chromeStorageGet("currentIsDeletePhone") || false;
-    if (!maKH) {
-      throw new Error(`Chưa chọn khách hàng (maKH)`);
-    }
+    // if (!maKH) {
+    //   throw new Error(`Chưa chọn khách hàng (maKH)`);
+    // }
 
     // Gửi message đến Content Script
     const result = await findPortalTabIdForKhoiTao();
@@ -842,7 +844,7 @@ async function processNextItemInBackground(): Promise<void> {
       {
         message: "PROCESS_SINGLE_ITEM_KHOITAO", // Lệnh mới
         current: currentBuuGui,
-        makh: maKH,
+        // makh: maKH,
         keyMessage: keyMessage,
         options: options,
         isDeletePhone: isDeletePhone // Truyền thêm cấu hình xóa SĐT
@@ -3274,13 +3276,15 @@ const handlePrintPageSort = async (data: any) => {
       throw new Error(`Jasper API lỗi: ${response.status} ${response.statusText}`);
     }
 
-    // Get PDF blob from response
-    const pdfBlob = await response.blob();
-    console.log("handlePrintPageSort: PDF blob received", pdfBlob.size, "bytes");
-
-    if (pdfBlob.size === 0) {
-      throw new Error("PDF blob không có nội dung");
+    const responseData = await response.json(); 
+    
+    // Kiểm tra xem dữ liệu trả về có hợp lệ không
+    if (!Array.isArray(responseData) || responseData.length === 0 || !responseData[0]) {
+      throw new Error("API không trả về dữ liệu PDF hoặc sai định dạng");
     }
+
+    // 2. Lấy trực tiếp chuỗi Base64 từ mảng trả về (ví dụ: "JVBERi0xLjU...")
+    const base64String = responseData[0]; 
 
     // Check if offscreen document exists
     const existingContexts = await chrome.runtime.getContexts({
@@ -3295,9 +3299,6 @@ const handlePrintPageSort = async (data: any) => {
         justification: "In PDF bằng DOM APIs",
       });
     }
-
-    // Convert blob to base64
-    const base64String = await pdfBlobTo64(pdfBlob);
 
     // Send to offscreen document for printing
     const printResponse = await chrome.runtime.sendMessage({
