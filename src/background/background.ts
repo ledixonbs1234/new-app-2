@@ -823,26 +823,29 @@ async function processNextItemInBackground(): Promise<void> {
     // Cần cơ chế lấy maKH và options phù hợp. Ví dụ lấy từ storage
     const maKH = await chromeStorageGet("currentMaKH"); // Ví dụ
     const options = await chromeStorageGet("currentOptions"); // Ví dụ
-
+    // Lấy thêm isDeletePhone nếu có lưu trong options/storage
+    const isDeletePhone = await chromeStorageGet("currentIsDeletePhone") || false;
     if (!maKH) {
       throw new Error(`Chưa chọn khách hàng (maKH)`);
     }
 
     // Gửi message đến Content Script
-    const tabId = await findPortalTabId(); // Hàm tìm tab Portal
+    const result = await findPortalTabIdForKhoiTao();
+    const targetTabId = result?.tabId;
 
-    if (!tabId) {
-      throw new Error("Không tìm thấy tab Portal đang hoạt động.");
+    if (!targetTabId) {
+      throw new Error("Mất kết nối với tab Portal hoặc không thể khởi tạo Portal.");
     }
 
     chrome.tabs.sendMessage(
-      tabId,
+      targetTabId,
       {
-        message: "PROCESS_SINGLE_ITEM", // Lệnh mới
+        message: "PROCESS_SINGLE_ITEM_KHOITAO", // Lệnh mới
         current: currentBuuGui,
         makh: maKH,
         keyMessage: keyMessage,
         options: options,
+        isDeletePhone: isDeletePhone // Truyền thêm cấu hình xóa SĐT
       },
       async (response) => {
         const processedMaBG = currentItemBeingProcessed; // Lưu lại mã vừa xử lý
@@ -887,9 +890,12 @@ async function processNextItemInBackground(): Promise<void> {
             `Successful items since last refresh: ${successfulProcessCount}`,
           );
 
+          const REFRESH_THRESHOLD = options?.refreshThreshold ? parseInt(options.refreshThreshold) : 40;
+
+
           if (successfulProcessCount >= REFRESH_THRESHOLD) {
             console.log(
-              `Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${tabId}...`,
+              `Reached threshold (${REFRESH_THRESHOLD}). Refreshing tab ${targetTabId}...`,
             );
             updateToPhone(
               "message",
@@ -897,16 +903,11 @@ async function processNextItemInBackground(): Promise<void> {
             );
             await delay(1000);
 
-            const refreshedTab = await hardRefreshSpecificTab(tabId);
+            const refreshedTab = await hardRefreshSpecificTab(targetTabId);
 
             if (!refreshedTab) {
-              console.error(
-                `Tab ${tabId} could not be refreshed or was closed. Stopping process.`,
-              );
-              updateToPhone(
-                "message",
-                `Lỗi: Không thể làm mới tab ${tabId}. Dừng xử lý.`,
-              );
+              console.error(`Tab ${targetTabId} bị đóng hoặc lỗi khi F5.`);
+              updateToPhone("message", `Lỗi: Không thể làm mới tab Portal. Đã dừng xử lý.`);
               isStoppedOnError = true;
               processingQueue = [];
               successfulProcessCount = 0;
@@ -915,13 +916,11 @@ async function processNextItemInBackground(): Promise<void> {
               return; // Thoát khỏi IIFE
             }
 
-            console.log(
-              `Tab ${tabId} refreshed successfully. Resetting counter.`,
-            );
+            console.log(`Tab đã refresh. Đang phục hồi kết nối Portal...`);
             updateToPhone("message", `Làm mới trang xong. Tiếp tục xử lý...`);
+            await findPortalTabIdForKhoiTao();
             successfulProcessCount = 0;
-
-            await delay(2500); // Chờ ổn định
+            await delay(2000); // Chờ ổn định
           }
         } else {
           // --- Dừng lại khi có lỗi từ content script ---
@@ -2442,7 +2441,8 @@ async function processPortalListLoopKhoiTao(
 ) {
   let shouldStopLoop = false;
   let successfulProcessCount = 0;
-  const REFRESH_THRESHOLD = 40;
+  // NÂNG CẤP 1: Cho phép tùy chỉnh Threshold từ options, nếu không có thì mặc định 40
+  const REFRESH_THRESHOLD = options?.refreshThreshold ? parseInt(options.refreshThreshold) : 40;
   let targetTabId: number | undefined;
 
   updateToPhone("message", `Bắt đầu xử lý ${bgs.length - startIndex} mục...`, keyMessage);
@@ -2491,8 +2491,10 @@ async function processPortalListLoopKhoiTao(
             // Refresh tab sau mỗi 40 items
             if (successfulProcessCount >= REFRESH_THRESHOLD) {
               await hardRefreshSpecificTab(targetTabId!);
-              successfulProcessCount = 0;
-              await delay(500);
+              await findPortalTabIdForKhoiTao();
+
+              successfulProcessCount = 0; // Reset bộ đếm
+              await delay(1500); // Nghỉ thêm 1.5s cho React hydrate xong các event
             }
             resolve();
           } else {
