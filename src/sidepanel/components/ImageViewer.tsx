@@ -29,7 +29,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
   const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
+
   // Cờ để chặn callback onTransformChange khi đang apply preset bằng code
   // Tránh việc vừa apply xong lại trigger lưu đè lại
   const isApplyingPresetRef = useRef<boolean>(false);
@@ -62,7 +62,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
       setZoom(preset.zoom);
       setPan(preset.pan);
       setRotation(preset.rotation);
-      
+
       // Tắt cờ chặn sau 1 khoảng thời gian ngắn
       setTimeout(() => {
         isApplyingPresetRef.current = false;
@@ -96,18 +96,24 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
       setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
   };
-
+  // Thêm ref cho img
+  const imgRef = useRef<HTMLImageElement>(null);
+  const panRef = useRef({ x: 0, y: 0 });
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging && zoom > 1) {
-      e.preventDefault();
-      setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
-    }
-  };
+  if (isDragging && zoom > 1 && imgRef.current) {
+    e.preventDefault();
+    const newX = e.clientX - dragStart.x;
+    const newY = e.clientY - dragStart.y;
+    panRef.current = { x: newX, y: newY };
+    // Bypass React render cycle, update DOM directly for 60fps
+    imgRef.current.style.transform = `scale(${zoom}) rotate(${rotation}deg) translate(${newX / zoom}px, ${newY / zoom}px)`;
+  }
+};
 
-  const handleMouseUp = () => setIsDragging(false);
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    setPan(panRef.current); // Sync lại state 1 lần duy nhất khi nhả chuột
+};
   const handleMouseLeave = () => setIsDragging(false);
   const handleDragStart = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
 

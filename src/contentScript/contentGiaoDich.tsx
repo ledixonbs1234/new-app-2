@@ -1410,48 +1410,48 @@ function findSuggestions(inputText: string): void {
   // BẮT TÍN HIỆU GÕ TẮT & XỬ LÝ NHIỀU KẾT QUẢ TRÙNG LẶP
   // ========================================================================
   const quickTypeMatch = inputText.match(/^(.*?)\s{2,}([a-zA-Z\s]+)$/);
-  
+
   if (quickTypeMatch) {
-      const prefix = quickTypeMatch[1]; 
-      const query = quickTypeMatch[2].trim().toLowerCase(); 
-      const queryWords = query.split(' ');
-      
-      if ((queryWords.length === 2 || queryWords.length === 3) && abbreviationDict[query]) {
-          const matches = abbreviationDict[query];
+    const prefix = quickTypeMatch[1];
+    const query = quickTypeMatch[2].trim().toLowerCase();
+    const queryWords = query.split(' ');
 
-          // Trích xuất phần text đứng trước từ viết tắt để hiển thị mờ cho khớp vị trí
-          multiMatchGhostPrefix = inputText.substring(0, inputText.lastIndexOf(quickTypeMatch[2]));
-          multiMatchRealPrefix = prefix;
+    if ((queryWords.length === 2 || queryWords.length === 3) && abbreviationDict[query]) {
+      const matches = abbreviationDict[query];
 
-          if (matches.length === 1) {
-              // TRƯỜNG HỢP 1 KẾT QUẢ: Hiển thị như bình thường
-              multiMatchSuggestions = []; 
-              const suggestionSuffix = matches[0]; 
-              
-              // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
-              ghost.value = inputText + " ➔ " + suggestionSuffix;
-              currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
-              return; 
-          } 
-          else if (matches.length > 1) {
-              // TRƯỜNG HỢP NHIỀU KẾT QUẢ: Hiển thị kết quả đầu tiên + Hint báo hiệu có thể cuộn
-              multiMatchSuggestions = matches;
-              multiMatchIndex = 0; // Bắt đầu ở vị trí 0
+      // Trích xuất phần text đứng trước từ viết tắt để hiển thị mờ cho khớp vị trí
+      multiMatchGhostPrefix = inputText.substring(0, inputText.lastIndexOf(quickTypeMatch[2]));
+      multiMatchRealPrefix = prefix;
 
-              const suggestionSuffix = matches[0];
-              
-              // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
-              ghost.value = inputText + " ➔ " + suggestionSuffix + ` [1/${matches.length} ↕]`;
-              
-              // Chuỗi thực tế khi bấm Tab (KHÔNG chứa phần hint)
-              currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
-              return; 
-          }
+      if (matches.length === 1) {
+        // TRƯỜNG HỢP 1 KẾT QUẢ: Hiển thị như bình thường
+        multiMatchSuggestions = [];
+        const suggestionSuffix = matches[0];
+
+        // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
+        ghost.value = inputText + " ➔ " + suggestionSuffix;
+        currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+        return;
       }
+      else if (matches.length > 1) {
+        // TRƯỜNG HỢP NHIỀU KẾT QUẢ: Hiển thị kết quả đầu tiên + Hint báo hiệu có thể cuộn
+        multiMatchSuggestions = matches;
+        multiMatchIndex = 0; // Bắt đầu ở vị trí 0
+
+        const suggestionSuffix = matches[0];
+
+        // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
+        ghost.value = inputText + " ➔ " + suggestionSuffix + ` [1/${matches.length} ↕]`;
+
+        // Chuỗi thực tế khi bấm Tab (KHÔNG chứa phần hint)
+        currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+        return;
+      }
+    }
   }
-  
+
   // NẾU KHÔNG KHỚP QUICK TYPE -> Reset các biến cuộn
-  multiMatchSuggestions =[];
+  multiMatchSuggestions = [];
   // ========================================================================
   // KẾT THÚC LOGIC GÕ TẮT
   // ========================================================================
@@ -1463,41 +1463,14 @@ function findSuggestions(inputText: string): void {
   let highestScore = -1;
   let matchedOriginalString = "";
 
-  for (const item of addressData) {
-    const searchFields: any[] = [];
+ // VÒNG LẶP ĐÃ ĐƯỢC TỐI ƯU
+  for (let i = 0; i < addressData.length; i++) {
+    const item = addressData[i];
+    const searchFields = item.precomputedSearchFields; // Lấy mảng đã tính sẵn
 
-    if (item.ThonKhuPho) {
-      for (const thon of item.ThonKhuPho) {
-        searchFields.push({
-          name: thon.Name,
-          normalized: thon.NameKD,
-          weight: 4,
-          level: "Thon",
-          originalThonName: thon.Name,
-        });
-      }
-    }
-
-    searchFields.push({
-      name: item.NameXP || item.NameXPN,
-      normalized: normalizeText(item.NameXPKD || item.NameXPN),
-      weight: 3,
-      level: "XP",
-    });
-    searchFields.push({
-      name: item.NameQH || item.NameQHN,
-      normalized: normalizeText(item.NameQHKD || item.NameQHN),
-      weight: 2,
-      level: "QH",
-    });
-    searchFields.push({
-      name: item.NameTTP || item.NameTTPN,
-      normalized: normalizeText(item.NameTTPKD || item.NameTTPN),
-      weight: 1,
-      level: "TTP",
-    });
-
-    for (const field of searchFields) {
+    for (let j = 0; j < searchFields.length; j++) {
+      const field = searchFields[j];
+      
       if (field.normalized) {
         const currentNormalizedField = field.normalized;
         let currentScore = 0;
@@ -1521,15 +1494,18 @@ function findSuggestions(inputText: string): void {
           if (indexAfterMatch < inputText.length) {
             remainingInput = inputText.substring(indexAfterMatch);
           }
-          const normalizedRemainingInput = normalizeText(remainingInput.trim().replace(/^,?\s*/, ""));
-
-          if (normalizedRemainingInput) {
+          
+          // Tránh gọi normalizeText nhiều lần, kiểm tra trước
+          const cleanRemaining = remainingInput.trim().replace(/^,?\s*/, "");
+          if (cleanRemaining) {
+            const normalizedRemainingInput = normalizeText(cleanRemaining);
+            
             let nextLevelNormalized = "";
-            if (field.level === "Thon") nextLevelNormalized = normalizeText(item.NameXPKD || item.NameXPN);
-            else if (field.level === "XP") nextLevelNormalized = normalizeText(item.NameQHKD || item.NameQHN);
-            else if (field.level === "QH") nextLevelNormalized = normalizeText(item.NameTTPKD || item.NameTTPN);
+            if (field.level === "Thon") nextLevelNormalized = item.NameXPKD; // Đã chuẩn hóa
+            else if (field.level === "XP") nextLevelNormalized = item.NameQHKD;
+            else if (field.level === "QH") nextLevelNormalized = item.NameTTPKD;
 
-            if (nextLevelNormalized && nextLevelNormalized.startsWith(normalizedRemainingInput)) {
+            if (nextLevelNormalized && normalizeText(nextLevelNormalized).startsWith(normalizedRemainingInput)) {
               currentScore += 1000;
             }
           }
@@ -1910,7 +1886,7 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
     ghostInput.style.zIndex = "1";
     ghostInput.id = ELEMENT_IDS.GHOST_INPUT;
     ghostInput.style.position = "absolute";
-    ghostInput.style.setProperty("color", "#999", "important"); 
+    ghostInput.style.setProperty("color", "#999", "important");
 
     (parentContainer as HTMLElement).style.position = "relative";
     (parentContainer as HTMLElement).insertBefore(ghostInput, receiverAddressInput);
@@ -1983,24 +1959,24 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
     // 1. XỬ LÝ PHÍM LÊN/XUỐNG CHO DANH SÁCH GỢI Ý TRÙNG LẶP
     // ========================================================================
     if (multiMatchSuggestions.length > 1 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-        event.preventDefault(); // Ngăn con trỏ nhảy về đầu/cuối của ô input
+      event.preventDefault(); // Ngăn con trỏ nhảy về đầu/cuối của ô input
 
-        // Tính toán vị trí mới
-        if (event.key === "ArrowDown") {
-            multiMatchIndex = (multiMatchIndex + 1) % multiMatchSuggestions.length;
-        } else if (event.key === "ArrowUp") {
-            multiMatchIndex = (multiMatchIndex - 1 + multiMatchSuggestions.length) % multiMatchSuggestions.length;
-        }
+      // Tính toán vị trí mới
+      if (event.key === "ArrowDown") {
+        multiMatchIndex = (multiMatchIndex + 1) % multiMatchSuggestions.length;
+      } else if (event.key === "ArrowUp") {
+        multiMatchIndex = (multiMatchIndex - 1 + multiMatchSuggestions.length) % multiMatchSuggestions.length;
+      }
 
-        const suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
-        
-        // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Dùng receiverAddressInput.value nối với mũi tên
-        currentGhost.value = receiverAddressInput.value + " ➔ " + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
-        
-        // Cập nhật lại kết quả chuẩn để chốt khi bấm Tab
-        currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
-        
-        return; // Dừng tại đây, không xử lý các phím khác
+      const suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
+
+      // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Dùng receiverAddressInput.value nối với mũi tên
+      currentGhost.value = receiverAddressInput.value + " ➔ " + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
+
+      // Cập nhật lại kết quả chuẩn để chốt khi bấm Tab
+      currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
+
+      return; // Dừng tại đây, không xử lý các phím khác
     }
 
     // ========================================================================
@@ -2021,16 +1997,16 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
 
       currentGhost.value = "";
       currentSuggestion = null;
-      multiMatchSuggestions =[]; // Chốt xong thì xóa danh sách cuộn
+      multiMatchSuggestions = []; // Chốt xong thì xóa danh sách cuộn
       isTabed = true;
-    } 
+    }
     // ========================================================================
     // 3. XÓA GỢI Ý MỜ NẾU BẤM CÁC PHÍM ĐIỀU HƯỚNG KHÁC HOẶC XÓA CHỮ
     // ========================================================================
     else if (["ArrowLeft", "ArrowUp", "ArrowDown", "Home", "End", "Backspace", "Delete"].includes(event.key)) {
       if (currentGhost) currentGhost.value = "";
       currentSuggestion = null;
-      multiMatchSuggestions =[]; // Thoát ra thì xóa danh sách cuộn
+      multiMatchSuggestions = []; // Thoát ra thì xóa danh sách cuộn
     }
   };
   receiverAddressInput.addEventListener("keydown", keydownHandler);
@@ -2166,7 +2142,7 @@ if (document.readyState === "loading") {
 // ==========================================================================
 // CÁC BIẾN HỖ TRỢ CUỘN NHIỀU GỢI Ý KHI BỊ TRÙNG LẶP (ARROW UP / DOWN)
 // ==========================================================================
-let multiMatchSuggestions: string[] =[];
+let multiMatchSuggestions: string[] = [];
 let multiMatchIndex: number = -1;
 let multiMatchGhostPrefix: string = ""; // VD: "12 nguyễn văn trỗi  " (chứa dấu cách để hiển thị mờ đè lên chữ)
 let multiMatchRealPrefix: string = "";  // VD: "12 nguyễn văn trỗi" (để gán vào value thật khi ấn Tab)
@@ -2205,8 +2181,40 @@ function processTreeData(treeData: any) {
 
         if (!abbreviationDict[combo3]) abbreviationDict[combo3] = [];
         if (!abbreviationDict[combo3].includes(fullAddress)) abbreviationDict[combo3].push(fullAddress);
+        // TÍNH TOÁN SẴN SEARCH FIELDS TẠI ĐÂY
+        const searchFields: any[] = [];
+        if (ward.ThonKhuPho) { // Lưu ý: File JSON của bạn phải có mảng này
+          for (const thon of ward.ThonKhuPho) {
+            searchFields.push({
+              name: thon.Name,
+              normalized: normalizeText(thon.NameKD || thon.Name),
+              weight: 4,
+              level: "Thon",
+              originalThonName: thon.Name,
+            });
+          }
+        }
 
-        // 3. Tái tạo mảng `addressData` gốc cho logic tìm kiếm cũ
+        searchFields.push({
+          name: ward.N,
+          normalized: normalizeText(ward.KD || ward.N),
+          weight: 3,
+          level: "XP",
+        });
+        searchFields.push({
+          name: qhData.N,
+          normalized: normalizeText(qhData.KD || qhData.N),
+          weight: 2,
+          level: "QH",
+        });
+        searchFields.push({
+          name: ttpData.N,
+          normalized: normalizeText(ttpData.KD || ttpData.N),
+          weight: 1,
+          level: "TTP",
+        });
+
+        // 3. Đẩy vào addressData kèm searchFields đã được compile
         addressData.push({
           NameTTP: ttpName,
           NameTTPN: ttpData.N,
@@ -2219,6 +2227,8 @@ function processTreeData(treeData: any) {
           NameXP: ward.Name,
           NameXPN: ward.N,
           NameXPKD: ward.KD,
+          
+          precomputedSearchFields: searchFields // LƯU LẠI ĐỂ DÙNG TRONG findSuggestions
         });
       }
     }
