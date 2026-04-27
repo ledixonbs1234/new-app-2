@@ -150,7 +150,7 @@ function displayGocData(gocContent: string) {
 }
 
 function debounce(func: Function, delay: number): (...args: any[]) => void {
-  let timer: NodeJS.Timeout;
+  let timer: ReturnType<typeof setTimeout>;
   return function (this: any, ...args: any[]) {
     clearTimeout(timer);
     timer = setTimeout(() => {
@@ -1463,14 +1463,14 @@ function findSuggestions(inputText: string): void {
   let highestScore = -1;
   let matchedOriginalString = "";
 
- // VÒNG LẶP ĐÃ ĐƯỢC TỐI ƯU
+  // VÒNG LẶP ĐÃ ĐƯỢC TỐI ƯU
   for (let i = 0; i < addressData.length; i++) {
     const item = addressData[i];
     const searchFields = item.precomputedSearchFields; // Lấy mảng đã tính sẵn
 
     for (let j = 0; j < searchFields.length; j++) {
       const field = searchFields[j];
-      
+
       if (field.normalized) {
         const currentNormalizedField = field.normalized;
         let currentScore = 0;
@@ -1494,12 +1494,12 @@ function findSuggestions(inputText: string): void {
           if (indexAfterMatch < inputText.length) {
             remainingInput = inputText.substring(indexAfterMatch);
           }
-          
+
           // Tránh gọi normalizeText nhiều lần, kiểm tra trước
           const cleanRemaining = remainingInput.trim().replace(/^,?\s*/, "");
           if (cleanRemaining) {
             const normalizedRemainingInput = normalizeText(cleanRemaining);
-            
+
             let nextLevelNormalized = "";
             if (field.level === "Thon") nextLevelNormalized = item.NameXPKD; // Đã chuẩn hóa
             else if (field.level === "XP") nextLevelNormalized = item.NameQHKD;
@@ -1796,6 +1796,24 @@ async function initialize(): Promise<void> {
     isSaveKhoiLuong = result[STORAGE_KEYS.KHOI_LUONG] === "yes" ? "yes" : "no";
   });
 
+  // =================================================================
+  // LẮNG NGHE SỰ KIỆN KHI NGƯỜI DÙNG NHẬP TIỀN VÀO #PROP0018
+  // Dùng Focusout (khi click ra ngoài) và Change
+  // =================================================================
+  document.body.addEventListener('focusout', (e) => {
+    const target = e.target as HTMLInputElement;
+    if (target && target.id === 'PROP0018') {
+      saveRecentCodValue(target.value);
+    }
+  });
+
+  document.body.addEventListener('change', (e) => {
+    const target = e.target as HTMLInputElement;
+    if (target && target.id === 'PROP0018') {
+      saveRecentCodValue(target.value);
+    }
+  });
+
   try {
     const response = await fetch(chrome.runtime.getURL("/tree_data.json"));
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -2090,6 +2108,8 @@ function observeDOMForAddressInput(): void {
                 injectAIButton();
               }
             }
+
+            injectRecentCodUI();
           }
         });
 
@@ -2113,6 +2133,7 @@ function observeDOMForAddressInput(): void {
         });
       }
     }
+    
   };
 
 
@@ -2127,6 +2148,7 @@ function observeDOMForAddressInput(): void {
     attachListenersToInput(existingInput);
     injectAIButton();
   }
+  injectRecentCodUI();
 }
 
 // ==========================================================================
@@ -2227,11 +2249,263 @@ function processTreeData(treeData: any) {
           NameXP: ward.Name,
           NameXPN: ward.N,
           NameXPKD: ward.KD,
-          
+
           precomputedSearchFields: searchFields // LƯU LẠI ĐỂ DÙNG TRONG findSuggestions
         });
       }
     }
   }
   console.log(`[GiaoTich] Đã nạp ${addressData.length} xã/phường.`);
+}
+// ==========================================================================
+// State cho tính năng nút COD gần đây
+// ==========================================================================
+const STORAGE_KEY_RECENT_COD = "vnpost_recent_cod_values";
+const STORAGE_KEY_SHOW_COD = "vnpost_show_cod_btns";
+
+// Lấy danh sách từ localStorage (nếu có)
+let recentCodValues: string[] = JSON.parse(localStorage.getItem(STORAGE_KEY_RECENT_COD) || "[]");
+let isShowRecentCodButtons: boolean = localStorage.getItem(STORAGE_KEY_SHOW_COD) === "true";
+/**
+ * Lưu giá trị COD mới vào mảng và LocalStorage
+ */
+function saveRecentCodValue(value: string) {
+  const valStr = value.replace(/\./g, "").trim(); // Loại bỏ dấu chấm ngàn nếu có
+  if (!valStr || valStr === "0") return;
+
+  // Nếu đã tồn tại thì xóa cái cũ đi để đưa lên đầu
+  const index = recentCodValues.indexOf(valStr);
+  if (index > -1) {
+    recentCodValues.splice(index, 1);
+  }
+
+  recentCodValues.unshift(valStr); // Thêm vào đầu
+  if (recentCodValues.length > 4) {
+    recentCodValues.pop(); // Giữ tối đa 4 phần tử
+  }
+
+  localStorage.setItem(STORAGE_KEY_RECENT_COD, JSON.stringify(recentCodValues));
+  renderCodButtons(); // Cập nhật lại UI
+}
+/**
+ * Điền giá trị vào #PROP0018 thông qua việc mở modal GTG021 và click OK
+ */
+async function fillCodAndSubmit(value: string) {
+  // 1. Mở popup GTG021 (COD)
+  let clicked = false;
+  const buttons = document.querySelectorAll('.rt-tbody button.btn-link');
+  
+  for (const button of Array.from(buttons)) {
+    if (button.textContent?.trim() === 'GTG021') {
+      const row = button.closest('.rt-tr-group');
+      if (row) {
+        const checkbox = row.querySelector('input[type="checkbox"]') as HTMLInputElement;
+        if (checkbox && !checkbox.disabled) {
+          if (!checkbox.checked) {
+            checkbox.click();
+            console.log('[GiaoTich] Đã tự động check dịch vụ GTG021 (COD)');
+            clicked = true;
+          } else {
+            console.log('[GiaoTich] Checkbox GTG021 đã checked, sẽ uncheck và check lại để refresh');
+            checkbox.click();
+            console.log('[GiaoTich] Đã uncheck GTG021');
+            
+            await delay(300); // Tạm dừng 300ms chờ DOM update
+            
+            const buttonsRefresh = document.querySelectorAll('.rt-tbody button.btn-link');
+            for (const btn of Array.from(buttonsRefresh)) {
+              if (btn.textContent?.trim() === 'GTG021') {
+                const rowRefresh = btn.closest('.rt-tr-group');
+                if (rowRefresh) {
+                  const checkboxRefresh = rowRefresh.querySelector('input[type="checkbox"]') as HTMLInputElement;
+                  if (checkboxRefresh && !checkboxRefresh.disabled && !checkboxRefresh.checked) {
+                    checkboxRefresh.click();
+                    console.log('[GiaoTich] ✅ Đã check lại GTG021 sau khi refresh');
+                  }
+                }
+              }
+            }
+            clicked = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (!clicked) {
+    console.warn("[GiaoTich] Không tìm thấy checkbox GTG021.");
+    return;
+  }
+
+  // 2. Chờ popup xuất hiện (có chứa ô #PROP0018)
+  let codInput: HTMLInputElement | null = null;
+  for (let i = 0; i < 20; i++) { // Chờ tối đa 2 giây (20 * 100ms)
+    await delay(100);
+    codInput = document.getElementById('PROP0018') as HTMLInputElement;
+    if (codInput) break; // Nếu tìm thấy ô input thì thoát vòng lặp chờ
+  }
+
+  if (!codInput) {
+    console.warn("[GiaoTich] Không tìm thấy ô #PROP0018 sau khi check GTG021.");
+    return;
+  }
+
+  // 3. Format lại và Điền số tiền
+  const formattedValue = value.replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+  
+  if (nativeInputValueSetter) {
+    nativeInputValueSetter.call(codInput, formattedValue);
+  } else {
+    codInput.value = formattedValue;
+  }
+
+  // Kích hoạt sự kiện để React nhận diện sự thay đổi
+  codInput.dispatchEvent(new Event('input', { bubbles: true }));
+  codInput.dispatchEvent(new Event('change', { bubbles: true }));
+
+  // 4. Giả lập Enter (để validate dữ liệu nếu có)
+  const enterEvent = new KeyboardEvent('keydown', {
+    bubbles: true, cancelable: true, keyCode: 13, key: 'Enter', code: 'Enter'
+  });
+  codInput.dispatchEvent(enterEvent);
+
+  // 5. Bấm nút OK theo logic của bạn
+  await delay(150); // Chờ 150ms để React cập nhật DOM an toàn sau sự kiện Enter
+  
+  const okButton = document.querySelector(ELEMENT_IDS.POPUP_VAS_OK_BUTTON_SELECTOR) as HTMLElement | null;
+  if (okButton) {
+    okButton.click();
+    console.log(`[GiaoTich] Đã tự động điền ${formattedValue} và ấn OK.`);
+  } else {
+    console.warn("[GiaoTich] Không tìm thấy nút OK của popup.");
+  }
+}
+/**
+ * Render 4 nút COD vào giao diện (Đã fix layout đều và đẹp)
+ */
+function renderCodButtons() {
+  const buttonsArea = document.getElementById('recent-cod-buttons-area');
+  if (!buttonsArea) return;
+
+  buttonsArea.innerHTML = '';
+  recentCodValues.forEach(val => {
+    const formattedVal = val.replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
+
+    const btn = document.createElement('button');
+    btn.type = "button";
+    btn.className = "modern-cod-btn";
+
+    // Style hiện đại, fix bố cục chiều rộng 100%
+    Object.assign(btn.style, {
+      width: "100%",                // Chiều rộng tràn hết container để các nút bằng nhau
+      boxSizing: "border-box",      // Không bị tràn lề khi có padding
+      fontSize: "13px",
+      fontWeight: "600",
+      padding: "6px 8px",           // Thu gọn padding ngang một chút
+      margin: "0",                  // BỎ MARGIN (đã dùng gap ở parent)
+      borderRadius: "6px",
+      backgroundColor: "#F0F8FF",
+      border: "1px solid #BFE0FF",
+      color: "#0056B3",
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+      boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+      fontFamily: "inherit",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",     // Căn giữa chữ
+      whiteSpace: "nowrap"          // Không bị xuống dòng chữ
+    });
+
+    // Hover effect: Sáng lên và nhô lên nhẹ
+    btn.onmouseover = () => {
+      btn.style.backgroundColor = "#D9EFFF";
+      btn.style.borderColor = "#80C4FF";
+      btn.style.transform = "translateY(-1px)";
+      btn.style.boxShadow = "0 3px 6px rgba(0,0,0,0.08)";
+    };
+
+    // Bỏ Hover: Trở về ban đầu
+    btn.onmouseout = () => {
+      btn.style.backgroundColor = "#F0F8FF";
+      btn.style.borderColor = "#BFE0FF";
+      btn.style.transform = "translateY(0)";
+      btn.style.boxShadow = "0 1px 2px rgba(0,0,0,0.05)";
+    };
+
+    // Active effect: Hiệu ứng lún xuống khi click
+    btn.onmousedown = () => {
+      btn.style.transform = "scale(0.96)";
+    };
+    btn.onmouseup = () => {
+      btn.style.transform = "translateY(-1px)";
+    };
+
+    btn.innerText = formattedVal + ' ₫';
+
+    // Hành động khi click
+    btn.onclick = (e) => {
+      e.preventDefault();
+      fillCodAndSubmit(val);
+    };
+
+    buttonsArea.appendChild(btn);
+  });
+}
+/**
+ * Chèn UI vào cạnh Textarea "Nội dung BG" (Đã fix Flexbox)
+ */
+function injectRecentCodUI() {
+  const contentNoteTextarea = document.querySelector('textarea[name="contentNote"]') as HTMLTextAreaElement;
+  if (!contentNoteTextarea || document.getElementById('recent-cod-container')) return;
+
+  const parentContainer = contentNoteTextarea.parentElement;
+  if (!parentContainer) return;
+
+  // Biến cha thành flexbox để xếp ngang
+  parentContainer.style.display = "flex";
+  parentContainer.style.gap = "12px"; // Tăng khoảng cách giữa input text và cột nút COD cho thoáng
+  parentContainer.style.alignItems = "flex-start";
+  contentNoteTextarea.style.flex = "1"; // Để textarea chiếm phần không gian còn lại
+
+  // Tạo Container chứa UI
+  const container = document.createElement('div');
+  container.id = 'recent-cod-container';
+  container.style.display = "flex";
+  container.style.flexDirection = "column";
+  container.style.gap = "0px"; // Khoảng cách giữa Text Checkbox và Cột Nút
+  container.style.width = "400px"; // Cố định chiều rộng cột
+  container.style.flexShrink = "0"; // QUAN TRỌNG: Ngăn không cho cột này bị ép nhỏ lại
+
+  // Render Checkbox
+  const checkboxWrapper = document.createElement('div');
+  checkboxWrapper.innerHTML = `
+    <label style="font-size: 11.5px; display: flex; align-items: center; gap: 0px; cursor: pointer; color: #d48806; font-weight: bold; user-select: none;">
+      <input type="checkbox" id="toggle-recent-cod" ${isShowRecentCodButtons ? 'checked' : ''} style="cursor: pointer;" />
+      Lịch sử tiền COD
+    </label>
+  `;
+  container.appendChild(checkboxWrapper);
+
+  // Render khu vực chứa Buttons
+  const buttonsArea = document.createElement('div');
+  buttonsArea.id = 'recent-cod-buttons-area';
+  buttonsArea.style.display = isShowRecentCodButtons ? "flex" : "none";
+  buttonsArea.style.flexDirection = "row"; // QUAN TRỌNG: Ép các nút xếp dọc 
+  buttonsArea.style.gap = "6px"; // Khoảng cách đều đặn 6px giữa các nút
+  container.appendChild(buttonsArea);
+
+  // Gắn sự kiện cho Checkbox
+  const checkbox = checkboxWrapper.querySelector('#toggle-recent-cod') as HTMLInputElement;
+  checkbox.addEventListener('change', (e) => {
+    isShowRecentCodButtons = (e.target as HTMLInputElement).checked;
+    localStorage.setItem(STORAGE_KEY_SHOW_COD, isShowRecentCodButtons.toString());
+    buttonsArea.style.display = isShowRecentCodButtons ? "flex" : "none";
+  });
+
+  parentContainer.appendChild(container);
+
+  // Render các nút ban đầu
+  renderCodButtons();
 }
