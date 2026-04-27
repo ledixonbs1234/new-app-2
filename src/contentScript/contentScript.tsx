@@ -248,21 +248,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
           else if (msg.message === "KHOITAOPORTAL") {
             console.log("Content Đang chạy KHOITAOPORTAL ", msg);
 
-            //kiêmr tra xem có form không
-            var form = await waitForElm(
-              "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form"
-            );
-            if (form == null) {
-              callback({ data: "Không tìm thấy ô tìm kiếm" });
+            var customerCode = await waitForElm("input[name='customerCode'], #customerCode") as HTMLInputElement | null;
+            if (customerCode == null) {
+              callback({ data: "Không tìm thấy ô mã khách hàng" });
               return;
             }
-            // forcus vào ô tìm kiếm
-            // const searchDetailBox = document.querySelector(
-            //   "#searchDetailBox"
-            // ) as HTMLInputElement;
-            // searchDetailBox?.focus();
-            var customerCode: HTMLInputElement | null =
-              document.querySelector("#customerCode");
             if (customerCode) {
               customerCode.value = msg.MaKH; // Đặt giá trị trước
               customerCode.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
@@ -273,7 +263,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
             }
             var address: HTMLInputElement | null =
-              document.querySelector("#customerAddress");
+              document.querySelector("input[name='customerAddress'], #customerAddress");
 
             // gán giá trị cho ô tìm kiếm
             // customerCode?.focus();
@@ -336,7 +326,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             }
 
             var maHopDong: HTMLInputElement | null = document.querySelector(
-              "#customerContractNumber"
+              "input[name='customerContractNumber'], #customerContractNumber"
             );
             //thucw hien lay hop dong va send tin nhan
             chrome.runtime.sendMessage({

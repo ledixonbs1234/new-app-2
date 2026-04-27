@@ -17,6 +17,7 @@ export default function CustomerTab() {
   const [sttHopDong, setSttHopDong] = useState(0);
   const [address, setAddress] = useState("");
   const [showAddress, setShowAddress] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
 
   // Editing state
@@ -36,7 +37,15 @@ export default function CustomerTab() {
             STTHopDong: data[key].STTHopDong || 0,
             Address: data[key].Address || "",
           });
+          list.sort((a, b) => {
+            const aHasName = a.TenKH && a.TenKH.trim() !== "";
+            const bHasName = b.TenKH && b.TenKH.trim() !== "";
+            if (aHasName && !bHasName) return -1;
+            if (!aHasName && bHasName) return 1;
+            return a.TenKH.localeCompare(b.TenKH);
+          });
         }
+
         setCustomers(list);
       } else {
         setCustomers([]);
@@ -50,7 +59,7 @@ export default function CustomerTab() {
       message.error("Vui lòng nhập mã khách hàng!");
       return;
     }
-    
+
     const customerData: Customer = {
       MaKH: maKH.trim(),
       TenKH: tenKH.trim(),
@@ -107,11 +116,25 @@ export default function CustomerTab() {
         }
       }
     );
+    // Ẩn (đóng) popup đi sau khi chọn
+    setTimeout(() => {
+      window.close();
+    }, 150);
   };
 
   return (
-    <Card title="Quản lý khách hàng">
+    <Card 
+      title="Quản lý khách hàng"
+      extra={
+        <Button size="small" type="dashed" onClick={() => setShowAddForm(!showAddForm)}>
+          {showAddForm ? "Đóng form" : "Thêm mới"}
+        </Button>
+      }
+    >
       <Space direction="vertical" style={{ width: "100%" }}>
+        {showAddForm && (
+          <div style={{ paddingBottom: 15, borderBottom: '1px solid #f0f0f0', marginBottom: 10 }}>
+
         <div>
           <label style={{ fontWeight: "bold" }}>Mã Khách Hàng:</label>
           <Input
@@ -176,6 +199,8 @@ export default function CustomerTab() {
         <Button type="primary" onClick={handleSave} block style={{ marginTop: 10 }}>
           Thêm Khách Hàng
         </Button>
+          </div>
+        )}
 
         <h3 style={{ marginTop: 20 }}>Danh sách Khách hàng</h3>
         <List
