@@ -351,6 +351,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             var btnLuuVaTim: HTMLInputElement | null = document.querySelector(
               "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
             );
+
+            if (msg.btnLuuVaTim === false) {
+              console.log("btnLuuVaTim is false, skipping save & search.");
+              callback({ data: "ok_no_save" });
+              return true;
+            }
+
             if (btnLuuVaTim) {
               console.log("Clicking Save & Search...");
 

@@ -3999,6 +3999,88 @@ const waitForContentScriptReady = async (
   return false;
 };
 
+// --- HÀM MỚI: Khởi tạo Portal tại /itemhdr ---
+const khoiTaoPortalItemHdr = async (
+  data: any,
+): Promise<{ hdrId: string; tabId: number } | null> => {
+  try {
+    console.log("Bắt đầu khởi tạo Portal (ItemHdr)...", data);
+
+    let loginSuccess = false;
+    let loadedTab: chrome.tabs.Tab | undefined = undefined;
+
+    const tabs = await chrome.tabs.query({ url: "https://portalkhl.vnpost.vn/*" });
+    const existingTab = tabs.find(t => t.url && t.url.includes("/itemhdr"));
+
+    let shouldReload = true;
+    if (existingTab) {
+      console.log("Đã ở trang itemhdr, không cần reload lại.");
+      shouldReload = false;
+    }
+
+    var initialTab = await createOrActiveTab(
+      "https://portalkhl.vnpost.vn/itemhdr",
+      "portalkhl.vnpost.vn",
+      true,
+      shouldReload
+    );
+
+    if (!initialTab || !initialTab.id) {
+      console.error("Lỗi: Không thể mở hoặc kích hoạt tab Portal (itemhdr).");
+      updateToPhone("message", "Lỗi: Không thể mở tab Portal.");
+      return null;
+    }
+    const tabId = initialTab.id;
+
+    const loginResult = await ensurePortalLogin(tabId);
+    loginSuccess = loginResult.success;
+    loadedTab = loginResult.loadedTab;
+
+    if (loginSuccess && loadedTab?.id) {
+      console.log(`khoiTaoPortalItemHdr: Đăng nhập OK. Chuẩn bị gửi lệnh...`);
+      updateToPhone("message", "Đang khởi tạo hợp đồng...");
+
+      console.log("Waiting for Portal to stabilize...");
+      await delay(2500);
+
+      const isReady = await waitForContentScriptReady(loadedTab.id);
+      if (!isReady) console.warn("Content script có thể chưa sẵn sàng...");
+
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(loadedTab.id, {
+          message: "KHOITAOPORTAL",
+          ...data,
+          btnLuuVaTim: false, // Thêm cờ không lưu
+        });
+      } catch (sendError: any) {
+        console.warn("Lỗi khi gửi KHOITAOPORTAL:", sendError);
+        if (sendError.message && (sendError.message.includes("connection") || sendError.message.includes("closed"))) {
+          response = { data: "ok_no_save" };
+        }
+      }
+
+      console.log("Phản hồi từ content (itemhdr):", response);
+
+      if (response && (response.data === "ok_no_save" || response.data === "ok_reloading" || response.data === "ok")) {
+        console.log("Content script đã điền xong.");
+        updateToPhone("message", "Đã điền thông tin khách hàng thành công.");
+        return { hdrId: "success", tabId: loadedTab.id };
+      } else {
+        updateToPhone("message", `Lỗi khởi tạo: ${response?.data || "Unknown"}`);
+        return null;
+      }
+    } else if (!loginSuccess) {
+      return null;
+    }
+  } catch (error: any) {
+    console.error("Lỗi nghiêm trọng khoiTaoPortalItemHdr:", error);
+    updateToPhone("message", `Lỗi hệ thống: ${error.message}`);
+    return null;
+  }
+  return null;
+};
+
 const khoiTaoPortal = async (
   data: any,
 ): Promise<{ hdrId: string; tabId: number } | null> => {
@@ -5349,6 +5431,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "SAVE_ORDERS") {
     save_order(msg, sendResponse);
     return true; // Giữ kênh message mở cho response bất đồng bộ
+  }
+  if (msg.type === "POPUP_KHOITAO_PORTAL") {
+    (async () => {
+      try {
+        const { maKH } = msg.payload;
+        if (!db) {
+           sendResponse({ status: "error", error: "Database not initialized" });
+           return;
+        }
+        const snapshot = await db.ref("PORTAL/HopDongs/" + maKH).get();
+        const hopDong = snapshot.val();
+        const result = await khoiTaoPortalItemHdr(hopDong);
+        sendResponse({ status: result ? "success" : "error", result });
+      } catch (error: any) {
+        sendResponse({ status: "error", error: error.message });
+      }
+    })();
+    return true; // Giữ channel mở
   }
 
   if (msg.type === "GET_INITIAL_DATA" || msg.type === "GET_STATUS") {

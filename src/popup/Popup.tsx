@@ -7,7 +7,7 @@ import { setOrders, setCurrentIndex } from "./popup.slice";
 import { useDispatch } from "react-redux";
 import TextArea from "antd/es/input/TextArea";
 import BatchAddTab from "./components/BatchAddTab";
-import GoogleFormTab from "./components/GoogleFormTab";
+import CustomerTab from "./components/CustomerTab";
 import InfoTab from "./components/InfoTab"; // Import mới
 export default function Popup() {
   const dispatch = useDispatch();
@@ -192,8 +192,8 @@ và đây là kết quả của tôi
     },
     {
       key: '1',
-      label: 'Google Form',
-      children: <GoogleFormTab />,
+      label: 'Tạo khách hàng',
+      children: <CustomerTab />,
     },
     {
       key: '2',
