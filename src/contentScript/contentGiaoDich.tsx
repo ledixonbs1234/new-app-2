@@ -11,7 +11,7 @@ import { delay } from "./utils";
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
 // ==========================================================================
-let requestNextImageTimer: NodeJS.Timeout | null = null;
+let requestNextImageTimer: ReturnType<typeof setTimeout> | null = null;
 let addressData: any[] = []; // Lưu trữ dữ liệu địa chỉ chính
 let isSaveKhoiLuong = "";
 let IsChooseSusget = false;
