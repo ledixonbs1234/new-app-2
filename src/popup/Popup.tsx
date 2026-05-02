@@ -9,6 +9,8 @@ import TextArea from "antd/es/input/TextArea";
 import BatchAddTab from "./components/BatchAddTab";
 import CustomerTab from "./components/CustomerTab";
 import InfoTab from "./components/InfoTab"; // Import mới
+import ReportTab from "./components/ReportTab";
+
 export default function Popup() {
   const dispatch = useDispatch();
 
@@ -228,11 +230,16 @@ và đây là kết quả của tôi
       label: 'Thêm danh sách',
       children: <BatchAddTab />,
     },
+    {
+      key: "5",
+      label: "Báo Cáo",
+      children: <ReportTab />,
+    },
   ];
 
   return (
     <div style={{ width: "auto", margin: "auto", marginTop: "10px", padding: "0 10px" }}>
-      <Card style={{ width: "500px" }} bodyStyle={{ padding: '10px' }}>
+      <Card style={{ width: "600px" }} bodyStyle={{ padding: '10px' }}>
         <Tabs defaultActiveKey="0" items={items} />
       </Card>
     </div>
