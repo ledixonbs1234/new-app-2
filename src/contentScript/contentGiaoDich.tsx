@@ -1530,7 +1530,7 @@ function findSuggestions(inputText: string): void {
       remainingInput = inputText.substring(indexAfterMatch);
     }
 
-    const useFormatted = inputContainsTypeKeyword(inputText);
+    const useFormatted = false; // Luôn dùng tên rút gọn (không có Xã/Huyện...) cho gợi ý gõ bình thường
 
     const getPartString = (item: any, level: string, useFmt: boolean): string => {
       let name;
