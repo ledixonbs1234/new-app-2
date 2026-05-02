@@ -130,7 +130,7 @@ const SidePanel: React.FC = () => {
   const currentFocusedFieldRef = useRef<FieldGroup>("NONE");
 
   // Ref cho Timer Debounce (chờ user dừng thao tác mới lưu)
-  const saveDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const saveDebounceTimerRef = useRef<number | null>(null);
 
   // =================================================================
   // LOGIC SẮP XẾP DATA (Dùng chung cho Render và Navigation)
@@ -1212,10 +1212,10 @@ const SidePanel: React.FC = () => {
                   ) : (
                     /* GIAO DIỆN HÌNH ẢNH CHÍNH */
                     <>
-                      <div className="image-viewer-section" style={{ flex: '1 1 60%', position: 'relative', borderBottom: '1px solid #ddd' }}>
+                      <div className="image-viewer-section" style={{ flex: 1, position: 'relative', borderBottom: '1px solid #ddd', minHeight: 0 }}>
                         <ImageViewer
                           ref={imageViewerRef}
-                          image={images[selectedIndex]} // Lưu ý: dùng images[selectedIndex] thay vì biến selectedImage để an toàn
+                          image={images[selectedIndex]}
                           onTransformChange={handleTransformChange}
                         />
                       </div>

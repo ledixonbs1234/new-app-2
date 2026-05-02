@@ -124,3 +124,16 @@ body {
   color: #8c8c8c;
   font-size: 12px;
 }
+/* Fix Antd Tabs full height để đẩy Thumbnail xuống đáy */
+.ant-tabs-content-holder,
+.ant-tabs-content,
+.ant-tabs-tabpane {
+  height: 100% !important;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.ant-tabs-tabpane-hidden {
+  display: none !important;
+}

@@ -208,6 +208,7 @@ const ImageViewer = forwardRef<ImageViewerHandle, ImageViewerProps>(({ image, on
         onDragStart={handleDragStart}
       >
         <img
+          ref={imgRef}
           src={imageUrl}
           alt={image.maHieu || "Image"}
           style={{
