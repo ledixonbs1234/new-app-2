@@ -1409,13 +1409,15 @@ function findSuggestions(inputText: string): void {
   // ========================================================================
   // BẮT TÍN HIỆU GÕ TẮT & XỬ LÝ NHIỀU KẾT QUẢ TRÙNG LẶP
   // ========================================================================
-  const quickTypeMatch = inputText.match(/^(.*?)\s{2,}([a-zA-Z\s]+)$/);
+  const quickTypeMatch = inputText.match(/^(.*?)\s+([a-zA-Z\s]+)$/);
 
   if (quickTypeMatch) {
     const prefix = quickTypeMatch[1];
-    const query = quickTypeMatch[2].trim().toLowerCase();
+    const queryRaw = quickTypeMatch[2];
+    const query = queryRaw.trim().toLowerCase();
     const queryWords = query.split(' ');
 
+    // Kích hoạt khi query nằm trong từ điển gõ tắt (ưu tiên hiệu suất cao)
     if ((queryWords.length === 2 || queryWords.length === 3) && abbreviationDict[query]) {
       const matches = abbreviationDict[query];
 
@@ -1423,10 +1425,14 @@ function findSuggestions(inputText: string): void {
       multiMatchGhostPrefix = inputText.substring(0, inputText.lastIndexOf(quickTypeMatch[2]));
       multiMatchRealPrefix = prefix;
 
+      // Xử lý viết hoa gợi ý nếu input đang viết hoa
+      const isUpperCaseInput = inputText === inputText.toUpperCase();
+
       if (matches.length === 1) {
         // TRƯỜNG HỢP 1 KẾT QUẢ: Hiển thị như bình thường
         multiMatchSuggestions = [];
-        const suggestionSuffix = matches[0];
+        let suggestionSuffix = matches[0];
+        if (isUpperCaseInput) suggestionSuffix = suggestionSuffix.toUpperCase();
 
         // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
         ghost.value = inputText + " ➔ " + suggestionSuffix;
@@ -1438,7 +1444,8 @@ function findSuggestions(inputText: string): void {
         multiMatchSuggestions = matches;
         multiMatchIndex = 0; // Bắt đầu ở vị trí 0
 
-        const suggestionSuffix = matches[0];
+        let suggestionSuffix = matches[0];
+        if (isUpperCaseInput) suggestionSuffix = suggestionSuffix.toUpperCase();
 
         // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Nối chuỗi gợi ý bằng mũi tên " ➔ "
         ghost.value = inputText + " ➔ " + suggestionSuffix + ` [1/${matches.length} ↕]`;
@@ -1986,10 +1993,13 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
         multiMatchIndex = (multiMatchIndex - 1 + multiMatchSuggestions.length) % multiMatchSuggestions.length;
       }
 
-      const suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
+      let suggestionSuffix = multiMatchSuggestions[multiMatchIndex];
+      if (receiverAddressInput.value === receiverAddressInput.value.toUpperCase()) {
+        suggestionSuffix = suggestionSuffix.toUpperCase();
+      }
 
       // SỬA LỖI ĐÈ CHỮ Ở ĐÂY: Dùng receiverAddressInput.value nối với mũi tên
-      currentGhost.value = receiverAddressInput.value + " ➔ " + suggestionSuffix + `[${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
+      currentGhost.value = receiverAddressInput.value + " ➔ " + suggestionSuffix + ` [${multiMatchIndex + 1}/${multiMatchSuggestions.length} ↕]`;
 
       // Cập nhật lại kết quả chuẩn để chốt khi bấm Tab
       currentSuggestion = multiMatchRealPrefix + " " + suggestionSuffix;
