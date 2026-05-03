@@ -1409,7 +1409,7 @@ function findSuggestions(inputText: string): void {
   // ========================================================================
   // BẮT TÍN HIỆU GÕ TẮT & XỬ LÝ NHIỀU KẾT QUẢ TRÙNG LẶP
   // ========================================================================
-  const quickTypeMatch = inputText.match(/^(.*?)\s+([a-zA-Z\s]+)$/);
+  const quickTypeMatch = inputText.match(/^(.*?)\s{2,}([a-zA-Z\s]+)$/);
 
   if (quickTypeMatch) {
     const prefix = quickTypeMatch[1];
@@ -2143,7 +2143,7 @@ function observeDOMForAddressInput(): void {
         });
       }
     }
-    
+
   };
 
 
@@ -2304,7 +2304,7 @@ async function fillCodAndSubmit(value: string) {
   // 1. Mở popup GTG021 (COD)
   let clicked = false;
   const buttons = document.querySelectorAll('.rt-tbody button.btn-link');
-  
+
   for (const button of Array.from(buttons)) {
     if (button.textContent?.trim() === 'GTG021') {
       const row = button.closest('.rt-tr-group');
@@ -2319,9 +2319,9 @@ async function fillCodAndSubmit(value: string) {
             console.log('[GiaoTich] Checkbox GTG021 đã checked, sẽ uncheck và check lại để refresh');
             checkbox.click();
             console.log('[GiaoTich] Đã uncheck GTG021');
-            
+
             await delay(300); // Tạm dừng 300ms chờ DOM update
-            
+
             const buttonsRefresh = document.querySelectorAll('.rt-tbody button.btn-link');
             for (const btn of Array.from(buttonsRefresh)) {
               if (btn.textContent?.trim() === 'GTG021') {
@@ -2363,7 +2363,7 @@ async function fillCodAndSubmit(value: string) {
   // 3. Format lại và Điền số tiền
   const formattedValue = value.replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
   const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-  
+
   if (nativeInputValueSetter) {
     nativeInputValueSetter.call(codInput, formattedValue);
   } else {
@@ -2382,7 +2382,7 @@ async function fillCodAndSubmit(value: string) {
 
   // 5. Bấm nút OK theo logic của bạn
   await delay(150); // Chờ 150ms để React cập nhật DOM an toàn sau sự kiện Enter
-  
+
   const okButton = document.querySelector(ELEMENT_IDS.POPUP_VAS_OK_BUTTON_SELECTOR) as HTMLElement | null;
   if (okButton) {
     okButton.click();
