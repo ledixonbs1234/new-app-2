@@ -59,6 +59,10 @@ const FIELD_GROUPS: Record<string, FieldGroup> = {
 };
 const DIA_BAN_PARENT_SELECTOR = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(4)";
 const CUSTOM_GOC_ID = "custom-goc-display-text";
+// Selector cho tính năng hiển thị giá tiền
+const PRICE_DISPLAY_TARGET_SELECTOR = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(4) > div:nth-child(3)";
+const PRICE_VALUE_SOURCE_SELECTOR = "#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(3) > div > div > div:nth-child(10) > div:nth-child(3) > div > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-7 > input";
+const PRICE_LABEL_ID = "custom-price-display-label";
 // Key codes
 const KEY_CODES = {
   TAB: 9,
@@ -1863,6 +1867,9 @@ async function initialize(): Promise<void> {
   } catch (e) {
     console.error("[GiaoTich] Lỗi auto-reopen sidepanel:", e);
   }
+
+  // Khởi tạo label giá tiền
+  updatePriceDisplayLabel();
 }
 
 /**
@@ -2120,6 +2127,7 @@ function observeDOMForAddressInput(): void {
             }
 
             injectRecentCodUI();
+            updatePriceDisplayLabel();
           }
         });
 
@@ -2159,6 +2167,7 @@ function observeDOMForAddressInput(): void {
     injectAIButton();
   }
   injectRecentCodUI();
+  updatePriceDisplayLabel();
 }
 
 // ==========================================================================
@@ -2518,4 +2527,55 @@ function injectRecentCodUI() {
 
   // Render các nút ban đầu
   renderCodButtons();
+}
+
+/**
+ * Hàm hiển thị giá tiền lấy từ input nguồn và chèn vào cạnh nút đích
+ */
+function updatePriceDisplayLabel() {
+  const sourceInput = document.querySelector(PRICE_VALUE_SOURCE_SELECTOR) as HTMLInputElement;
+  const targetBtn = document.querySelector(PRICE_DISPLAY_TARGET_SELECTOR) as HTMLElement;
+
+  if (!targetBtn) return;
+
+  let label = document.getElementById(PRICE_LABEL_ID);
+  if (!label) {
+    label = document.createElement("span");
+    label.id = PRICE_LABEL_ID;
+    Object.assign(label.style, {
+      marginLeft: "10px",
+      padding: "4px 10px",
+      backgroundColor: "#f6ffed", // Màu xanh lá nhạt
+      border: "1px solid #b7eb8f",
+      borderRadius: "4px",
+      color: "#389e0d",
+      fontSize: "14px",
+      fontWeight: "bold",
+      display: "inline-flex",
+      alignItems: "center",
+      boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+      verticalAlign: "middle",
+      whiteSpace: "nowrap", // Ngăn xuống dòng
+      gap: "6px",           // Khoảng cách giữa icon và chữ
+      flexShrink: "0"       // Không cho phép co lại
+    });
+    // Chèn vào sau nút
+    targetBtn.parentNode?.insertBefore(label, targetBtn.nextSibling);
+  }
+
+  const update = () => {
+    if (sourceInput) {
+      const val = sourceInput.value || "0";
+      label!.textContent = `💰 ${val} ₫`;
+    }
+  };
+
+  // Nếu input nguồn tồn tại, lắng nghe sự kiện để cập nhật label
+  if (sourceInput && !(sourceInput as any)._priceLabelListenerAttached) {
+    sourceInput.addEventListener("input", update);
+    sourceInput.addEventListener("change", update);
+    (sourceInput as any)._priceLabelListenerAttached = true;
+  }
+
+  update(); // Cập nhật lần đầu
 }
