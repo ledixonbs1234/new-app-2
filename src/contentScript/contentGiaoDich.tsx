@@ -647,20 +647,32 @@ function monitorParcelIndex(): void {
   console.log(`[GiaoTich] Initial parcelIndex value: ${lastParcelIndexValue}`);
 
   // Hàm xử lý logic kiểm tra thay đổi
-  const handleChange = (source: string) => {
-    const currentValue = parseInt(parcelIndexInput.value) || 0;
+const handleChange = (source: string) => {
+  const currentValue = parseInt(parcelIndexInput.value) || 0;
 
-    // Chỉ xử lý khi giá trị TĂNG lên (đơn hàng mới)
-    if (currentValue > lastParcelIndexValue) {
-      console.log(`[GiaoTich] 📈 parcelIndex increased (${source}): ${lastParcelIndexValue} → ${currentValue}`);
-      lastParcelIndexValue = currentValue; // Cập nhật ngay lập tức để chặn các event trùng lặp tiếp theo
-      requestNextImage();
-    } else if (currentValue !== lastParcelIndexValue) {
-      // Cập nhật giá trị mới nếu nó khác (vd: reset về 0) nhưng không trigger next
-      // console.log(`[GiaoTich] parcelIndex changed but not increased: ${lastParcelIndexValue} → ${currentValue}`);
-      lastParcelIndexValue = currentValue;
-    }
-  };
+  // Chỉ xử lý khi giá trị TĂNG lên (đơn hàng mới)
+  if (currentValue > lastParcelIndexValue) {
+    console.log(`[GiaoTich] 📈 parcelIndex increased (${source}): ${lastParcelIndexValue} → ${currentValue}`);
+    lastParcelIndexValue = currentValue; // Cập nhật ngay lập tức để chặn các event trùng lặp tiếp theo
+    requestNextImage();
+
+    // Focus vào receiverName và bôi đen toàn bộ text để sẵn sàng nhập mới
+    setTimeout(() => {
+      const receiverNameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
+      if (receiverNameInput) {
+        receiverNameInput.focus();
+        receiverNameInput.select(); // Bôi đen toàn bộ text
+        console.log("[GiaoTich] ✅ Focused and selected receiverName for next item");
+      } else {
+        console.warn("[GiaoTich] ❌ receiverName input not found");
+      }
+    }, 1000);
+  } else if (currentValue !== lastParcelIndexValue) {
+    // Cập nhật giá trị mới nếu nó khác (vd: reset về 0) nhưng không trigger next
+    // console.log(`[GiaoTich] parcelIndex changed but not increased: ${lastParcelIndexValue} → ${currentValue}`);
+    lastParcelIndexValue = currentValue;
+  }
+};
 
   // Observer để theo dõi thay đổi value attribute
   const observer = new MutationObserver(() => handleChange('MutationObserver'));
