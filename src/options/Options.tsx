@@ -52,7 +52,7 @@ const Options: React.FC = () => {
     const [cmsAutoConfigs, setCmsAutoConfigs] = useState<CMSAutoConfig[]>([]);
     const [isAutoProcessing, setIsAutoProcessing] = useState(false);
     const [singleSearchLoading, setSingleSearchLoading] = useState<boolean>(false);
-    const searchDebounceRef = useRef<NodeJS.Timeout | null>(null);
+    const searchDebounceRef = useRef<number | null>(null);
     const [currentPage, setCurrentPage] = useState<number>(1);
     const pageSize = 30;
     const [filterNoCMS, setFilterNoCMS] = useState<boolean>(false);

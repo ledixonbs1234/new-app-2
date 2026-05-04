@@ -375,7 +375,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         onChange: onSelectChange,
     };
 
-    const handleCopyTraceLink = (onComplete?: () => void) => {
+    const handleCopyTraceLink = (onComplete?: (newData: any[]) => void) => {
         if (!data || data.length === 0) {
             message.warning("Không có dữ liệu để tạo link");
             return;
@@ -527,7 +527,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         });
     };
 
-    const mergeExcelData = (jsonData: any[], onComplete?: () => void) => {
+    const mergeExcelData = (jsonData: any[], onComplete?: (newData: any[]) => void) => {
         // DEBUG: Log first row to see column names
         if (jsonData.length > 0) {
             console.log('Excel Column Names (Row 2):', Object.keys(jsonData[0] as any));
@@ -596,7 +596,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
             setData(newData);
             message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
-            if (onComplete) onComplete();
+            if (onComplete) onComplete(newData);
         });
     };
 
@@ -663,8 +663,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     };
 
     // Handle List CMS - Fetch ALL tracking numbers in batches of 50 - PARALLEL BATCHES
-    const handleListCMS = async () => {
-        if (!data || data.length === 0) {
+    const handleListCMS = async (baseData?: any[]) => {
+        const dataSource = baseData || data;
+        if (!dataSource || dataSource.length === 0) {
             message.warning("Không có dữ liệu để lấy thông tin CMS");
             return;
         }
@@ -672,7 +673,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         setCmsLoading(true);
 
         // Get ALL tracking numbers (no limit)
-        const allTrackingNumbers = data
+        const allTrackingNumbers = dataSource
             .map(item => item.trackingNumber)
             .filter(Boolean);
 
@@ -753,7 +754,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         saveCMSCache(currentCache);
 
         // Merge CMS data into current data
-        const updatedData = data.map(item => {
+        const updatedData = dataSource.map(item => {
             const cmsData = currentCache.get(item.trackingNumber);
             if (cmsData && cmsData.tickets && cmsData.tickets.length > 0) {
                 // Get last ticket's last action
@@ -780,8 +781,8 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     };
 
     const handleUpdateInfo = () => {
-        handleCopyTraceLink(() => {
-            handleListCMS();
+        handleCopyTraceLink((newData) => {
+            handleListCMS(newData);
         });
     };
 
