@@ -72,6 +72,15 @@
         },
         {
             "matches": [
+                "https://bccp.vnpost.vn/BCCP.aspx?act=Trace*"
+            ],
+            "js": [
+                "contentBCCP.js"
+            ],
+            "run_at": "document_idle"
+        },
+        {
+            "matches": [
                 "https://portalkhl.vnpost.vn/*",
                 "https://example.com/"
             ],

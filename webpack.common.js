@@ -13,6 +13,7 @@ module.exports = {
         contentLoginPortal:path.resolve('./src/contentScript/contentLoginPortal.tsx'),
         contentGiaoDich:path.resolve('./src/contentScript/contentGiaoDich.tsx'),
         contentCms:path.resolve('./src/contentScript/contentCms.tsx'),
+        contentBCCP:path.resolve('./src/contentScript/contentBCCP.tsx'),
         contentMy:path.resolve('./src/contentScript/contentMy.tsx'),
         contentGoogleForm:path.resolve('./src/contentScript/contentGoogleForm.tsx'),
         offscreen:path.resolve('./src/offscreen/offscreen.ts'),
