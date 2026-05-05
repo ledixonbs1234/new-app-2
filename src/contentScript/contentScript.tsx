@@ -97,6 +97,141 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
           }
         }
+        else if (msg.message === "FILL_CHINH_COD") {
+          console.log("[Content] Received FILL_CHINH_COD with barcode:", msg.barcode);
+          try {
+            // Wait for the input field to be available
+            const inputSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div:nth-child(1) > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div:nth-child(1) > div:nth-child(2) > input";
+            const inputEl = await waitForElm(inputSelector, 30) as HTMLInputElement;
+            if (!inputEl) throw new Error("Không tìm thấy ô nhập barcode");
+
+            // Fill barcode
+            inputEl.value = msg.barcode;
+            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+            inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+            inputEl.dispatchEvent(new Event('blur'));
+
+            await delay(500);
+
+            // Wait for the "Kiểm tra điều kiện" button
+            const btnSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div:nth-child(1) > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div.MuiGrid-root.MuiGrid-container.MuiGrid-justify-content-xs-center > div > button";
+            const btnEl = await waitForElm(btnSelector, 10) as HTMLButtonElement;
+            if (!btnEl) throw new Error("Không tìm thấy nút 'Kiểm tra điều kiện'");
+
+            btnEl.click();
+            await delay(500);
+
+            // Chọn Loại yêu cầu -> "Điều chỉnh số tiền COD"
+            const wrapperSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div.content-box.item-detail-list > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div:nth-child(2) > div:nth-child(2)";
+            let wrapper = document.querySelector(wrapperSelector);
+
+            // Fallback: Tìm theo text nếu selector bị sai lệch
+            if (!wrapper) {
+              const divs = Array.from(document.querySelectorAll('div')).filter(el =>
+                el.textContent === 'Chọn loại sự vụ' || el.textContent === 'Loại yêu cầu'
+              );
+              if (divs.length > 0) {
+                wrapper = divs[0].closest('.MuiGrid-item') || divs[0].parentElement;
+              }
+            }
+
+            if (wrapper) {
+              const typeInput = wrapper.querySelector('input[id^="react-select-"]') || wrapper.querySelector('input');
+              if (typeInput) {
+                const typeEl = typeInput as HTMLInputElement;
+
+                // 1. Focus input
+                typeEl.focus();
+
+                // 2. Mở dropdown bằng cách click vào vùng control
+                const controlBox = wrapper.querySelector('.css-1vlitpt') || typeEl.parentElement?.parentElement?.parentElement;
+                if (controlBox) {
+                  controlBox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                }
+
+                // 3. Backup mở bằng phím
+                typeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true }));
+                await delay(300);
+
+                // 4. Gõ từ khoá
+                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                const keyword = "Điều chỉnh số tiền COD";
+
+                if (nativeInputValueSetter) {
+                  nativeInputValueSetter.call(typeEl, keyword);
+                  typeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                  typeEl.value = keyword;
+                  typeEl.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+
+                await delay(500);
+
+                // 5. Tìm listbox và click trực tiếp vào thẻ chứa nội dung
+                const listboxes = Array.from(document.querySelectorAll('div[id$="-listbox"], div[class*="-menu"]'));
+                let optionClicked = false;
+
+                for (const box of listboxes) {
+                  // Lấy tất cả các thẻ div bên trong listbox
+                  const options = Array.from(box.querySelectorAll('div'));
+                  // Lọc ra thẻ có nội dung khớp chính xác (hoặc chứa) từ khoá
+                  const targetOption = options.find(opt => opt.textContent?.trim() === keyword || opt.textContent?.trim().includes(keyword));
+
+                  if (targetOption) {
+                    // Cần mousedown trước rồi mới click cho react-select
+                    targetOption.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    targetOption.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+                    targetOption.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+
+                    optionClicked = true;
+                    console.log("[Content] Đã click chọn option:", targetOption.textContent);
+                    break;
+                  }
+                }
+
+                // 6. Fallback nếu không tìm thấy DOM option: Dùng phím Enter
+                if (!optionClicked) {
+                  typeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', keyCode: 40, bubbles: true }));
+                  await delay(100);
+                  typeEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+                }
+
+                await delay(200);
+                typeEl.dispatchEvent(new Event('blur'));
+
+                // 7. Chờ bảng tải dữ liệu và click checkbox đầu tiên, sau đó bấm Tạo sự vụ
+                await delay(1000); // Thêm delay nhỏ để React xử lý sự kiện filter
+
+                const firstCheckboxSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div.content-box.item-detail-list > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div.ReactTable > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(1) > div > input";
+                const firstCheckbox = await waitForElm(firstCheckboxSelector, 5000); // Chờ tối đa 5s để data load
+
+                if (firstCheckbox) {
+                  (firstCheckbox as HTMLElement).click();
+                  console.log("[Content] Đã check vào ô đầu tiên của bảng.");
+
+                  await delay(300); // Đợi trạng thái checkbox cập nhật
+
+                  const submitBtnSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div.content-box.item-detail-list > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div:nth-child(2) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-3 > button";
+                  const submitBtn = document.querySelector(submitBtnSelector);
+
+                  if (submitBtn) {
+                    (submitBtn as HTMLElement).click();
+                    console.log("[Content] Đã nhấn nút Tạo sự vụ.");
+                  } else {
+                    console.warn("[Content] Không tìm thấy nút Tạo sự vụ.");
+                  }
+                } else {
+                  console.warn("[Content] Không tìm thấy dòng dữ liệu nào trong bảng (timeout 5s).");
+                }
+              }
+            }
+
+            callback({ status: "success", message: "Đã điền form Chỉnh COD thành công" });
+          } catch (error: any) {
+            console.error("[Content] Error filling Chỉnh COD form:", error);
+            callback({ status: "error", message: error.message || "Lỗi khi điền thông tin Chỉnh COD" });
+          }
+        }
         else if (msg.message === "FILL_PORTAL_DATA_FROM_AI") {
           console.log("Received AI extracted data:", msg.extractedData);
           try {
@@ -768,7 +903,7 @@ async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInpu
   await delay(1000);
 
   // Chờ #customerCode có dữ liệu
-    var customer = await waitForValueElm("#customerCode");
+  var customer = await waitForValueElm("#customerCode");
   if (customer?.value == "C006230404") {
     var checker: HTMLInputElement | null = document.querySelector(
       `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(2) > div > div:nth-child(1) > div > input`

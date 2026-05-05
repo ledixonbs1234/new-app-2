@@ -1758,6 +1758,13 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         handleCreateCMSTicketV2(request.payload, sendResponse);
         return true; // Async response
       }
+
+      if (request.type === "CHINH_COD") {
+        handleChinhCod(request.payload).catch(error => {
+          console.error('[BG] Error in CHINH_COD:', error);
+        });
+        return;
+      }
     } else if (request.event === "BADGE") {
       chrome.action.setBadgeText({ text: request.content.toString() });
       sendResponse({ status: "badge_updated" });
@@ -6275,6 +6282,57 @@ async function handleFetchCMSData(
 /**
  * Hàm chính xử lý quy trình khiếu nại
  */
+async function handleChinhCod(payload: { barcode: string }) {
+  console.log(`[BG] Bắt đầu quá trình Chỉnh COD cho mã: ${payload.barcode}`);
+  const modifyUrl = "https://portalkhl.vnpost.vn/create-modification";
+  const portalUrlHost = "https://portalkhl.vnpost.vn";
+
+  try {
+    let portalTabs = await chrome.tabs.query({ url: `${portalUrlHost}/*` });
+    let portalTab;
+
+    if (portalTabs.length > 0) {
+      console.log("[BG] Tìm thấy tab Portal. Đang điều hướng...");
+      const currentTab = portalTabs[0];
+      portalTab = await chrome.tabs.update(currentTab.id!, {
+        active: true,
+        url: modifyUrl,
+      });
+      await waitForTabToLoad(portalTab.id!);
+    } else {
+      console.log("[BG] Chưa có tab Portal, tạo mới...");
+      portalTab = await chrome.tabs.create({ url: modifyUrl });
+      await waitForTabToLoad(portalTab.id!);
+    }
+
+    // Đảm bảo login
+    console.log("[BG] Đang kiểm tra trạng thái đăng nhập Portal...");
+    await ensurePortalLogin(portalTab.id!);
+    console.log("[BG] Xác nhận đăng nhập Portal thành công.");
+
+    // Kiểm tra URL hiện tại sau khi có thể đã trải qua luồng đăng nhập
+    let finalTab = await chrome.tabs.get(portalTab.id!);
+    if (finalTab.url && !finalTab.url.includes("create-modification")) {
+      console.log("[BG] Điều hướng lại trang Chỉnh COD sau khi login...");
+      finalTab = await chrome.tabs.update(portalTab.id!, { url: modifyUrl });
+      await waitForTabToLoad(finalTab.id!);
+    }
+
+    // Chờ Portal reload (hoặc React render xong giao diện)
+    await delay(2000);
+
+    // Gửi message tới content script để điền thông tin Chỉnh COD
+    console.log("[BG] Đang gửi message FILL_CHINH_COD tới content script...");
+    chrome.tabs.sendMessage(portalTab.id!, {
+      message: "FILL_CHINH_COD",
+      barcode: payload.barcode
+    });
+
+  } catch (err: any) {
+    console.error("[BG] Lỗi trong quá trình Chỉnh COD:", err);
+  }
+}
+
 async function handleCreateComplaint(
   payload: { itemCode: string; token: string | null; type: string },
 ) {

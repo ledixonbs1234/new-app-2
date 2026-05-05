@@ -242,7 +242,15 @@ function injectCMSButton() {
         }
     }
 
-    const orgCodeCell = targetRow.querySelectorAll('td')[4]; // Column 5 (index 4): Tại bưu cục
+    let orgCodeCell = targetRow.querySelectorAll('td')[4]; // Column 5 (index 4): Tại bưu cục
+
+    // Nếu orgCodeCell trống, tiếp tục tìm lên các dòng trên
+    while (targetRowIndex > 0 && (!orgCodeCell || !orgCodeCell.textContent?.trim())) {
+        targetRowIndex--;
+        targetRow = dataRows[targetRowIndex];
+        orgCodeCell = targetRow.querySelectorAll('td')[4];
+    }
+
     if (!orgCodeCell) return;
 
     // Extract barcode & serviceCode
@@ -307,14 +315,80 @@ function injectCMSButton() {
     orgCodeCell.appendChild(btnContainer);
 }
 
+function injectChinhCodButton() {
+    const vasDetailTr = document.getElementById('ctl00_MainContent_ctl00_tr_VAS_Detail');
+    if (!vasDetailTr) return;
+
+    // Tránh inject nhiều lần
+    if (document.getElementById('bccp-chinh-cod-btn')) return;
+
+    const td = vasDetailTr.querySelector('td');
+    if (!td) return;
+
+    // Extract barcode
+    const barcodeLabel = document.getElementById('ctl00_MainContent_ctl00_lblBarcode');
+    let barcode = '';
+    if (barcodeLabel) {
+        const text = barcodeLabel.textContent || '';
+        const matchBarcode = text.match(/^([A-Z0-9]+VN)/);
+        if (matchBarcode) barcode = matchBarcode[1];
+    }
+
+    if (!barcode) return;
+
+    const btnContainer = document.createElement('div');
+    btnContainer.id = 'bccp-chinh-cod-btn';
+    btnContainer.style.marginTop = '4px';
+
+    const btn = document.createElement('button');
+    btn.innerText = 'Chỉnh COD';
+    btn.style.padding = '4px 8px';
+    btn.style.backgroundColor = '#faad14'; // Warning color for COD action
+    btn.style.color = '#ffffff';
+    btn.style.border = 'none';
+    btn.style.borderRadius = '4px';
+    btn.style.cursor = 'pointer';
+    btn.style.fontWeight = 'bold';
+    btn.style.fontSize = '12px';
+    btn.style.boxShadow = '0 2px 0 rgba(0,0,0,0.045)';
+    
+    // Đặt nút kế bên text
+    btn.style.marginLeft = '10px';
+
+    btn.onmouseover = () => {
+        btn.style.backgroundColor = '#ffc53d';
+    };
+    btn.onmouseout = () => {
+        btn.style.backgroundColor = '#faad14';
+    };
+
+    btn.onclick = (e) => {
+        e.preventDefault();
+        chrome.runtime.sendMessage({
+            event: "CONTENTMY",
+            type: "CHINH_COD",
+            payload: { barcode }
+        });
+        showToast('Đang mở trang Chỉnh COD trên PortalKHL...', 'success');
+    };
+
+    btnContainer.appendChild(btn);
+    // Append nút vào bên phải text
+    td.appendChild(btnContainer);
+}
+
 // Observe DOM for dynamic loads
 const observer = new MutationObserver(() => {
     injectCMSButton();
+    injectChinhCodButton();
 });
 
 // Start observing
 observer.observe(document.body, { childList: true, subtree: true });
 
 // Initial check
-setTimeout(injectCMSButton, 1000);
+setTimeout(() => {
+    injectCMSButton();
+    injectChinhCodButton();
+}, 1000);
 
