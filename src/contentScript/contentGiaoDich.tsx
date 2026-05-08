@@ -1894,7 +1894,6 @@ function attachSmartZoomListenersToAllFields(): void {
       const input = document.getElementById(fieldId);
       if (input) {
         attachSmartZoomListener(input, fieldId);
-        console.log(`[GiaoTich] Attached smart zoom listener to #${fieldId}`);
       }
     });
   };
@@ -1912,11 +1911,9 @@ function attachSmartZoomListenersToAllFields(): void {
 
 function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
   if ((receiverAddressInput as any)._listenersAttached) {
-    console.log("[GiaoTich] Listeners đã được gắn cho element này.");
     return;
   }
 
-  console.log("[GiaoTich] Gắn listener cho:", receiverAddressInput.id);
 
   const parentContainer = receiverAddressInput.parentNode;
   let ghostInput = document.getElementById(ELEMENT_IDS.GHOST_INPUT) as HTMLInputElement;
@@ -1935,7 +1932,6 @@ function attachListenersToInput(receiverAddressInput: HTMLInputElement): void {
     (parentContainer as HTMLElement).style.position = "relative";
     (parentContainer as HTMLElement).insertBefore(ghostInput, receiverAddressInput);
   } else if (!parentContainer) {
-    console.error("[GiaoTich] Cannot find parent container for receiverAddressInput");
     return;
   }
 

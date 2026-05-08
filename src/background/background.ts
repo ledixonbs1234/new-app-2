@@ -1511,6 +1511,55 @@ async function handleDataChange(
     edithanghoa: async (data: any) => handleEditHangHoa(data),
     updatekl: async (data: any) => await handleEditKL(data),
 
+    taodon: async (data: any) => {
+      try {
+        const parsedData = JSON.parse(data.DoiTuong);
+        const maKH = parsedData.maKH;
+        
+        if (!maKH) {
+          updateToPhone("error", "Thiếu mã khách hàng (maKH)");
+          return;
+        }
+
+        // Cập nhật account/password nếu có
+        if (data.username && data.password) {
+          accountPortal = data.username;
+          passwordPortal = data.password;
+        }
+
+        // Gọi trực tiếp hàm xử lý thay vì gửi message
+        updateToPhone("message", `Đang khởi tạo Portal cho ${maKH}...`);
+        
+        if (!db) {
+          updateToPhone("error", "Database not initialized");
+          return;
+        }
+        
+        const snapshot = await db.ref("PORTAL/HopDongs/" + maKH).get();
+        const hopDong = snapshot.val();
+        
+        if (!hopDong) {
+          updateToPhone("error", `Không tìm thấy dữ liệu hợp đồng cho ${maKH}`);
+          return;
+        }
+        
+        // Gọi khoiTaoPortalItemHdr với tuSinhSoHieu = true và btnLuuVaTim = true
+        const result = await khoiTaoPortalItemHdr(hopDong, true, true);
+        
+        if (result && result.hdrId) {
+          console.log(`[BG] Khởi tạo thành công cho ${maKH}. hdrId: ${result.hdrId}`);
+          await updateToPhone("message", `Khởi tạo thành công cho ${maKH}`);
+          // Gửi hdrId về điện thoại
+          await updateToPhone("sendhdr", JSON.stringify({ hdrId: result.hdrId, maKH }));
+        } else {
+          updateToPhone("error", `Khởi tạo Portal thất bại cho ${maKH}`);
+        }
+      } catch (error: any) {
+        console.error("[BG] Lỗi xử lý taodon:", error);
+        updateToPhone("error", `Lỗi: ${error.message}`);
+      }
+    },
+
     getpns: async (data: any) => {
       let dayLast;
       try {
@@ -4009,9 +4058,11 @@ const waitForContentScriptReady = async (
 // --- HÀM MỚI: Khởi tạo Portal tại /itemhdr ---
 const khoiTaoPortalItemHdr = async (
   data: any,
+  tuSinhSoHieu: boolean = true,
+  btnLuuVaTim: boolean = false,
 ): Promise<{ hdrId: string; tabId: number } | null> => {
   try {
-    console.log("Bắt đầu khởi tạo Portal (ItemHdr)...", data);
+    console.log("Bắt đầu khởi tạo Portal (ItemHdr)...", data, "tuSinhSoHieu:", tuSinhSoHieu, "btnLuuVaTim:", btnLuuVaTim);
 
     let loginSuccess = false;
     let loadedTab: chrome.tabs.Tab | undefined = undefined;
@@ -4058,7 +4109,8 @@ const khoiTaoPortalItemHdr = async (
         response = await chrome.tabs.sendMessage(loadedTab.id, {
           message: "KHOITAOPORTAL",
           ...data,
-          btnLuuVaTim: false, // Thêm cờ không lưu
+          btnLuuVaTim: btnLuuVaTim, // Sử dụng tham số truyền vào
+          tuSinhSoHieu: tuSinhSoHieu, // Truyền tham số tự sinh số hiệu
         });
       } catch (sendError: any) {
         console.warn("Lỗi khi gửi KHOITAOPORTAL:", sendError);
@@ -5442,14 +5494,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === "POPUP_KHOITAO_PORTAL") {
     (async () => {
       try {
-        const { maKH } = msg.payload;
+        const { maKH, tuSinhSoHieu = true } = msg.payload;
         if (!db) {
            sendResponse({ status: "error", error: "Database not initialized" });
            return;
         }
         const snapshot = await db.ref("PORTAL/HopDongs/" + maKH).get();
         const hopDong = snapshot.val();
-        const result = await khoiTaoPortalItemHdr(hopDong);
+        const result = await khoiTaoPortalItemHdr(hopDong, tuSinhSoHieu);
         sendResponse({ status: result ? "success" : "error", result });
       } catch (error: any) {
         sendResponse({ status: "error", error: error.message });

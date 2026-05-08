@@ -115,8 +115,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
 
             // Wait for the "Kiểm tra điều kiện" button
             const btnSelector = "#content > div > div > div.sub-content.multiple-item-no-footer > div:nth-child(1) > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div.MuiGrid-root.MuiGrid-container.MuiGrid-justify-content-xs-center > div > button";
-            const btnEl = await waitForElm(btnSelector, 10) as HTMLButtonElement;
-            if (!btnEl) throw new Error("Không tìm thấy nút 'Kiểm tra điều kiện'");
+            const btnEl = await waitForElm(btnSelector, 10) as HTMLElement | null;
+            if (!btnEl || !(btnEl instanceof HTMLButtonElement)) throw new Error("Không tìm thấy nút 'Kiểm tra điều kiện'");
 
             btnEl.click();
             await delay(500);
@@ -472,117 +472,137 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             });
 
             await delay(200);
-            // callback({ data: "callback khoi tao ok" });
-            var btnLuuVaTim: HTMLInputElement | null = document.querySelector(
-              "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
-            );
+          
 
-            if (msg.btnLuuVaTim === false) {
-              console.log("btnLuuVaTim is false, skipping save & search.");
-              callback({ data: "ok_no_save" });
-              return true;
-            }
+        // Xử lý tự sinh số hiệu nếu tuSinhSoHieu = true
+        if (msg.tuSinhSoHieu !== false) {
+          const tuSinhInput =document.querySelector('input[name="autoGenerateBG"]') as HTMLInputElement;
 
-            if (btnLuuVaTim) {
-              console.log("Clicking Save & Search...");
-
-              // 1. Gửi phản hồi NGAY LẬP TỨC để giữ kết nối không bị báo lỗi
-              // Báo hiệu cho Background biết là nút đã được bấm và trang sắp reload
-              callback({ data: "ok_reloading" });
-
-              // 2. Thực hiện click sau một khoảng delay cực ngắn để đảm bảo message đã đi
-              setTimeout(() => {
-                btnLuuVaTim?.click();
-              }, 100);
-
-              return true; // Kết thúc xử lý tại đây
-            } else {
-              callback({ data: "Lỗi không tìm thấy nút lưu và tìm" });
-            }
-
-            return true;
-          } else if (msg.message === "KHOITAOPNS") {
-            //thuc hien lay capchar
-            var c = document.createElement("canvas");
-            var ctx = c.getContext("2d");
-            var img: any = document.getElementById("CaptchaImage");
-            if (img) {
-              ctx?.drawImage(img, 0, 0, 200, 70);
-              //send message to popup
-              await chrome.runtime.sendMessage({
-                event: "CONTENT",
-                message: "SEND_CAPCHAR",
-                content: c.toDataURL(),
-                keyMessage: msg.keyMessage,
-              });
-            }
-            await delay(1000);
-            callback({ data: "ok" });
-          } else if (msg.message === "SENDCAPCHAR") {
-            var capchar: HTMLInputElement | null =
-              document.querySelector("#CaptchaText");
-            if (capchar) {
-              capchar.value = msg.content;
-              var isGD = msg.gd;
-              console.log("isGD", isGD);
-              (document.getElementById("userid") as HTMLInputElement).value =
-                !isGD ? "593280_phuhv" : "59A652";
-              (document.getElementById("password") as HTMLInputElement).value =
-                "Phu2026@";
-
-              var btnLogin = document.querySelector(
-                "body > div.content > div.row > div > div > div > form > fieldset > div:nth-child(4) > div:nth-child(4) > div.form-group > button"
-              ) as HTMLButtonElement;
-              btnLogin.click();
-            }
-          } else if (msg.message === "GETIDKH") {
-            window.postMessage({
-              type: "CONTENT",
-              message: "GETIDKH",
-            });
-          } else if (msg.message === "PRINTBLOB") {
-            // var blob = new Blob([msg.content], { type: "application/pdf" });
-            chrome.storage.local.get("blobs", (result) => {
-              let blob = base64ToBlob(result.blobs, "application/pdf");
-              const url = URL.createObjectURL(blob!);
-
-              var printWindow = window.open(url);
-              if (printWindow == null) return;
-              printWindow.onload = function () {
-                if (printWindow == null) return;
-                printWindow.print();
-              };
-            });
-          } else if (msg.message === "EXPORTEXCEL") {
-            console.log("Export Excel");
-            chrome.storage.local.get("excel", (result) => {
-              console.log("result", result);
-              const byteCharacters = atob(result.excel);
-              const byteNumbers = new Array(byteCharacters.length);
-              for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-              }
-              const byteArray = new Uint8Array(byteNumbers);
-              const blob = new Blob([byteArray], { type: 'application/vnd.ms-excel.sheet.macroEnabled.12' });
-              const url = URL.createObjectURL(blob!);
-              console.log("url", url);
-              const a = document.createElement("a");
-              a.href = url;
-              a.download = msg.ten + ".xlsx";
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-            });
+          if (tuSinhInput && !tuSinhInput.checked) {
+            tuSinhInput.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+          } else {
+            console.warn("Không tìm thấy checkbox tự sinh số hiệu");
           }
+
+          await delay(300);
+        } else {
+          console.warn("Bỏ qua checkbox tự sinh số hiệu (tuSinhSoHieu = false)");
+        }
+
+
+
+        // callback({ data: "callback khoi tao ok" });
+        var btnLuuVaTim: HTMLInputElement | null = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button")
+
+        if (msg.btnLuuVaTim === false) {
+          console.log("btnLuuVaTim is false, skipping save & search.");
+          callback({ data: "ok_no_save" });
+          return true;
+        }
+
+        if (btnLuuVaTim) {
+          console.log("Clicking Save & Search...");
+
+          // 1. Gửi phản hồi NGAY LẬP TỨC để giữ kết nối không bị báo lỗi
+          // Báo hiệu cho Background biết là nút đã được bấm và trang sắp reload
+          callback({ data: "ok_reloading" });
+
+          // 2. Thực hiện click sau một khoảng delay cực ngắn để đảm bảo message đã đi
+          setTimeout(() => {
+            btnLuuVaTim?.click();
+          }, 100);
+
+          return true; // Kết thúc xử lý tại đây
+        } else {
+          callback({ data: "Lỗi không tìm thấy nút lưu và tìm" });
+        }
+
+
+        return true;
+      } else if (msg.message === "KHOITAOPNS") {
+        //thuc hien lay capchar
+        var c = document.createElement("canvas");
+        var ctx = c.getContext("2d");
+        var img: any = document.getElementById("CaptchaImage");
+        if (img) {
+          ctx?.drawImage(img, 0, 0, 200, 70);
+          //send message to popup
+          await chrome.runtime.sendMessage({
+            event: "CONTENT",
+            message: "SEND_CAPCHAR",
+            content: c.toDataURL(),
+            keyMessage: msg.keyMessage,
+          });
+        }
+        await delay(1000);
+        callback({ data: "ok" });
+      } else if (msg.message === "SENDCAPCHAR") {
+        var capchar: HTMLInputElement | null =
+          document.querySelector("#CaptchaText");
+        if (capchar) {
+          capchar.value = msg.content;
+          var isGD = msg.gd;
+          console.log("isGD", isGD);
+          (document.getElementById("userid") as HTMLInputElement).value =
+            !isGD ? "593280_phuhv" : "59A652";
+          (document.getElementById("password") as HTMLInputElement).value =
+            "Phu2026@";
+
+          var btnLogin = document.querySelector(
+            "body > div.content > div.row > div > div > div > form > fieldset > div:nth-child(4) > div:nth-child(4) > div.form-group > button"
+          ) as HTMLButtonElement;
+          btnLogin.click();
+        }
+      } else if (msg.message === "GETIDKH") {
+        window.postMessage({
+          type: "CONTENT",
+          message: "GETIDKH",
+        });
+      } else if (msg.message === "PRINTBLOB") {
+        // var blob = new Blob([msg.content], { type: "application/pdf" });
+        chrome.storage.local.get("blobs", (result) => {
+          let blob = base64ToBlob(result.blobs, "application/pdf");
+          const url = URL.createObjectURL(blob!);
+
+          var printWindow = window.open(url);
+          if (printWindow == null) return;
+          printWindow.onload = function () {
+            if (printWindow == null) return;
+            printWindow.print();
+          };
+        });
+      } else if (msg.message === "EXPORTEXCEL") {
+        console.log("Export Excel");
+        chrome.storage.local.get("excel", (result) => {
+          console.log("result", result);
+          const byteCharacters = atob(result.excel);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: 'application/vnd.ms-excel.sheet.macroEnabled.12' });
+          const url = URL.createObjectURL(blob!);
+          console.log("url", url);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = msg.ten + ".xlsx";
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        });
       }
-      return true;
-    } catch (e) {
-      console.log(e);
-      callback({ data: "Lỗi không xác định" });
     }
-  })();
-  return true;
-});
+return true;
+  } catch (e) {
+    console.log(e);
+    callback({ data: "Lỗi không xác định" });
+  }
+})();
+return true;
+})
+
+
 
 let isFirstRun = true;
 
