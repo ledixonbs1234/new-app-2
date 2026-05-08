@@ -6,7 +6,7 @@
  * Nếu đang chạy, script này sẽ tạm dừng hoạt động
  */
 
-import { delay } from "./utils";
+import { delay, waitForElm } from "./utils";
 
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
@@ -1200,6 +1200,38 @@ async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: stri
         }
       }
       e.preventDefault();
+
+      if (receiverName) {
+        const tenKhongDau = removeAccents(receiverName).toLowerCase();
+        if (tenKhongDau.concat("vanda")) {
+          const contentBtn = document.querySelector("#contentNoteBtn") as HTMLElement;
+          if (contentBtn) {
+            contentBtn.click();
+            const modal = await waitForElm("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper", 10);
+            if (modal) {
+              await delay(500);
+              const nameInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(2) > input") as HTMLInputElement;
+              const qtyInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(3) > input") as HTMLInputElement;
+              if (nameInput) {
+                nameInput.value = "HOA LAN";
+                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              if (qtyInput) {
+                qtyInput.value = "1";
+                qtyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              await delay(200);
+              const okBtn = document.querySelector("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)") as HTMLElement;
+              if (okBtn) {
+                okBtn.click();
+              }
+            }
+          }
+        }
+      }
+
       break;
 
     case ELEMENT_IDS.RECEIVER_PHONE:
