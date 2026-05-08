@@ -1387,6 +1387,7 @@ const commandsNoTokenRequired = [
   "khoitao",
   "loginpns",
   "loginpnsgd",
+  "getaddress",
 ];
 
 async function handleDataChange(
@@ -1515,7 +1516,7 @@ async function handleDataChange(
       try {
         const parsedData = JSON.parse(data.DoiTuong);
         const maKH = parsedData.maKH;
-        
+
         if (!maKH) {
           updateToPhone("error", "Thiếu mã khách hàng (maKH)");
           return;
@@ -1529,30 +1530,45 @@ async function handleDataChange(
 
         // Gọi trực tiếp hàm xử lý thay vì gửi message
         updateToPhone("message", `Đang khởi tạo Portal cho ${maKH}...`);
-        
+
         if (!db) {
           updateToPhone("error", "Database not initialized");
           return;
         }
-        
+
         const snapshot = await db.ref("PORTAL/HopDongs/" + maKH).get();
         const hopDong = snapshot.val();
-        
+
         if (!hopDong) {
           updateToPhone("error", `Không tìm thấy dữ liệu hợp đồng cho ${maKH}`);
           return;
         }
-        
+
         // Gọi khoiTaoPortalItemHdr với tuSinhSoHieu = true và btnLuuVaTim = true
         const result = await khoiTaoPortalItemHdr(hopDong, true, true);
-        
-        if (result && result.hdrId) {
-          console.log(`[BG] Khởi tạo thành công cho ${maKH}. hdrId: ${result.hdrId}`);
-          await updateToPhone("message", `Khởi tạo thành công cho ${maKH}`);
-          // Gửi hdrId về điện thoại
-          await updateToPhone("sendhdr", JSON.stringify({ hdrId: result.hdrId, maKH }));
-        } else {
-          updateToPhone("error", `Khởi tạo Portal thất bại cho ${maKH}`);
+        try {
+          const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true, currentWindow: true });
+          if (tabs.length === 0 || !tabs[0].url) {
+            await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+            return;
+          }
+          const url = new URL(tabs[0].url);
+          if (url.origin + url.pathname === "https://portalkhl.vnpost.vn/itemdetail/") {
+            const hdrId = url.searchParams.get("hdrId") || "0";
+            if (hdrId != "0") {
+              var infoKhachHang = await getMaHieusFromPortalId([hdrId], token) as NguoiGuiDetailProp[];
+              await updateToPhone("checktaodonok", JSON.stringify({ hdrId, customerCode: infoKhachHang[0].customerCode, customerName: infoKhachHang[0].customerName, contractServiceCode: infoKhachHang[0].contractServiceCode }));
+
+            } else {
+              await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+            }
+
+          } else {
+            await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+          }
+        } catch (error) {
+          console.error("[BG] Lỗi checktaodon:", error);
+          await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
         }
       } catch (error: any) {
         console.error("[BG] Lỗi xử lý taodon:", error);
@@ -1655,6 +1671,62 @@ async function handleDataChange(
     getMaHieus: async (data: any) => {
       const maHieus = await handleGetMaHieus(data);
       await updateToPhone("getMaHieus", JSON.stringify(maHieus));
+    },
+    checktaodon: async (_data: any) => {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true, currentWindow: true });
+        if (tabs.length === 0 || !tabs[0].url) {
+          await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+          return;
+        }
+        const url = new URL(tabs[0].url);
+        if (url.origin + url.pathname === "https://portalkhl.vnpost.vn/itemdetail/") {
+          const hdrId = url.searchParams.get("hdrId") || "0";
+          if (hdrId != "0") {
+            var infoKhachHang = await getMaHieusFromPortalId([hdrId], token) as NguoiGuiDetailProp[];
+            await updateToPhone("checktaodonok", JSON.stringify({ hdrId, customerCode: infoKhachHang[0].customerCode, customerName: infoKhachHang[0].customerName, contractServiceCode: infoKhachHang[0].contractServiceCode }));
+          } else {
+            await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+          }
+
+        } else {
+          await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+        }
+      } catch (error) {
+        console.error("[BG] Lỗi checktaodon:", error);
+        await updateToPhone("checktaodonok", JSON.stringify({ hdrId: "0" }));
+      }
+    },
+    getaddress: async (data: any) => {
+      try {
+        const address = data.DoiTuong?.trim();
+        if (!address) {
+          await updateToPhone("getaddressok", JSON.stringify({ xa: "", huyen: "", tinh: "" }));
+          return;
+        }
+        const url = `https://api-pre-portalkhl.vnpost.vn/khl-api/khl/address-search/get?inputStr=${encodeURIComponent(address)}&maxResult=5&minscore=0&textType=VN`;
+        const res = await fetch(url, {
+          headers: {
+            accept: "application/json, text/plain, */*",
+            authorization: `Bearer ${token}`,
+            capikey: "19001235",
+          },
+        });
+        const data1 = await res.json();
+        if (Array.isArray(data1) && data1.length > 0) {
+          const item = data1[0];
+          await updateToPhone("getaddressok", JSON.stringify({
+            xa: item.name ?? "",
+            huyen: item.dist_name ?? "",
+            tinh: item.prov_name ?? "",
+          }));
+        } else {
+          await updateToPhone("getaddressok", JSON.stringify({ xa: "", huyen: "", tinh: "" }));
+        }
+      } catch (error: any) {
+        console.error("[BG] Lỗi getaddress:", error);
+        await updateToPhone("getaddressok", JSON.stringify({ xa: "", huyen: "", tinh: "" }));
+      }
     },
   };
 
@@ -3332,15 +3404,15 @@ const handlePrintPageSort = async (data: any) => {
       throw new Error(`Jasper API lỗi: ${response.status} ${response.statusText}`);
     }
 
-    const responseData = await response.json(); 
-    
+    const responseData = await response.json();
+
     // Kiểm tra xem dữ liệu trả về có hợp lệ không
     if (!Array.isArray(responseData) || responseData.length === 0 || !responseData[0]) {
       throw new Error("API không trả về dữ liệu PDF hoặc sai định dạng");
     }
 
     // 2. Lấy trực tiếp chuỗi Base64 từ mảng trả về (ví dụ: "JVBERi0xLjU...")
-    const base64String = responseData[0]; 
+    const base64String = responseData[0];
 
     // Check if offscreen document exists
     const existingContexts = await chrome.runtime.getContexts({
@@ -4060,7 +4132,7 @@ const khoiTaoPortalItemHdr = async (
   data: any,
   tuSinhSoHieu: boolean = true,
   btnLuuVaTim: boolean = false,
-): Promise<{ hdrId: string; tabId: number } | null> => {
+): Promise<{ isOK: string; tabId: number } | null> => {
   try {
     console.log("Bắt đầu khởi tạo Portal (ItemHdr)...", data, "tuSinhSoHieu:", tuSinhSoHieu, "btnLuuVaTim:", btnLuuVaTim);
 
@@ -4124,7 +4196,7 @@ const khoiTaoPortalItemHdr = async (
       if (response && (response.data === "ok_no_save" || response.data === "ok_reloading" || response.data === "ok")) {
         console.log("Content script đã điền xong.");
         updateToPhone("message", "Đã điền thông tin khách hàng thành công.");
-        return { hdrId: "success", tabId: loadedTab.id };
+        return { isOK: 'true', tabId: loadedTab.id };
       } else {
         updateToPhone("message", `Lỗi khởi tạo: ${response?.data || "Unknown"}`);
         return null;
@@ -4632,7 +4704,6 @@ const getMaHieusFromPortalId = async (
               "Response text:",
               textResponse.substring(0, 200) + "...",
             );
-            return { status: 400, error: "Invalid response format" };
           }
 
           return await response.json();
@@ -5496,8 +5567,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       try {
         const { maKH, tuSinhSoHieu = true } = msg.payload;
         if (!db) {
-           sendResponse({ status: "error", error: "Database not initialized" });
-           return;
+          sendResponse({ status: "error", error: "Database not initialized" });
+          return;
         }
         const snapshot = await db.ref("PORTAL/HopDongs/" + maKH).get();
         const hopDong = snapshot.val();

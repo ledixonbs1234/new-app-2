@@ -1,5 +1,3 @@
-import "../asserts/tailwind.css";
-import "./popup.css";
 
 import React from "react";
 
@@ -26,6 +24,9 @@ export type NguoiGuiProp = {
 };
 export type NguoiGuiDetailProp = {
   id: string;
+  customerCode:string,
+  customerName:string,
+  contractServiceCode:string,
   itemDetails: ItemDetailProp[];
 };
 type ItemDetailProp = {

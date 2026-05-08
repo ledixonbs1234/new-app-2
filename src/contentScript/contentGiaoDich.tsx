@@ -1203,29 +1203,46 @@ async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: stri
 
       if (receiverName) {
         const tenKhongDau = removeAccents(receiverName).toLowerCase();
-        if (tenKhongDau.concat("vanda")) {
-          const contentBtn = document.querySelector("#contentNoteBtn") as HTMLElement;
-          if (contentBtn) {
-            contentBtn.click();
-            const modal = await waitForElm("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper", 10);
-            if (modal) {
-              await delay(500);
-              const nameInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(2) > input") as HTMLInputElement;
-              const qtyInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(3) > input") as HTMLInputElement;
-              if (nameInput) {
-                nameInput.value = "HOA LAN";
-                nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-                nameInput.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-              if (qtyInput) {
-                qtyInput.value = "1";
-                qtyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
-              }
-              await delay(200);
-              const okBtn = document.querySelector("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)") as HTMLElement;
-              if (okBtn) {
-                okBtn.click();
+        const noteMap: Record<string, string> = {
+          "van da": "HOA LAN",
+          "vanda": "HOA LAN",
+          "binh tich": "CÁ CẢNH",
+          "phi tan": "CÁ CẢNH",
+          "sac gam": "CÁ CẢNH",
+          "koi": "CÁ CẢNH",
+          "soc ngua": "CÁ CẢNH",
+        };
+        const matchKey = Object.keys(noteMap).find(key => tenKhongDau.includes(key));
+        const itemName = matchKey ? noteMap[matchKey] : undefined;
+        if (itemName) {
+          const expectedValue = `${itemName};1;0;0`;
+          const textarea = document.querySelector('textarea[name="contentNote"]') as HTMLTextAreaElement;
+          if (textarea && textarea.value.trim() === expectedValue) {
+            // already set, skip
+          } else {
+            const contentBtn = document.querySelector("#contentNoteBtn") as HTMLElement;
+            if (contentBtn) {
+              contentBtn.click();
+              const modal = await waitForElm("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper", 10);
+              if (modal) {
+                await delay(500);
+                const nameInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(2) > input") as HTMLInputElement;
+                const qtyInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(3) > input") as HTMLInputElement;
+                if (nameInput) {
+                  nameInput.value = itemName;
+                  nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+                  nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                if (qtyInput) {
+                  qtyInput.value = "1";
+                  qtyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                  qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                await delay(200);
+                const okBtn = document.querySelector("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)") as HTMLElement;
+                if (okBtn) {
+                  okBtn.click();
+                }
               }
             }
           }
