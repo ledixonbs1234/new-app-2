@@ -1388,6 +1388,7 @@ const commandsNoTokenRequired = [
   "loginpns",
   "loginpnsgd",
   "getaddress",
+  "submitnhaphang",
 ];
 
 async function handleDataChange(
@@ -1728,6 +1729,33 @@ async function handleDataChange(
         await updateToPhone("getaddressok", JSON.stringify({ xa: "", huyen: "", tinh: "" }));
       }
     },
+    submitnhaphang: async (data: any) => {
+      try {
+        const payload = JSON.parse(data.DoiTuong);
+        console.log("[BG] Nhận lệnh submitnhaphang từ Phone:", payload);
+
+        const tabs = await chrome.tabs.query({
+          url: "*://portalkhl.vnpost.vn/itemdetail/*"
+        });
+        const tab = tabs.find(t => t.id && !t.discarded && t.status === 'complete');
+
+        if (!tab?.id) {
+          await updateToPhone("error", "Không tìm thấy tab Portal đang mở");
+          return;
+        }
+
+        await chrome.tabs.sendMessage(tab.id, {
+          type: "FILL_TAODON",
+          payload: payload
+        });
+
+        await updateToPhone("submitnhaphangok", "Đã gửi dữ liệu xuống Portal");
+        console.log("[BG] ✅ Đã gửi FILL_TAODON tới tab Portal");
+      } catch (error: any) {
+        console.error("[BG] Lỗi submitnhaphang:", error);
+        await updateToPhone("error", `Lỗi submitnhaphang: ${error.message}`);
+      }
+    },
   };
 
   if (data.Lenh && commandHandlers[data.Lenh]) {
@@ -1917,6 +1945,14 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
         }
       })();
       return true; // Async
+    }
+    if (request.type === "SUBMITNHAPHANG_RESULT") {
+      if (request.status === "ok") {
+        updateToPhone("submitnhaphangok", "ok");
+      } else {
+        updateToPhone("submitnhaphangok", "mismatch");
+      }
+      return false;
     }
     if (request.type === "TRIGGER_SYNC_IMAGES") {
       console.log("[BG] Nhận lệnh sync thủ công từ Sidepanel");
@@ -5397,6 +5433,7 @@ async function handleGetMyPostData(data: any) {
     updateToPhone("message", "Đang lấy token xác thực...");
 
     const response = await getTokenMyVNPost(tabId);
+    
 
     if (!response || !response.token) {
       updateToPhone(

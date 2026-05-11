@@ -8,6 +8,20 @@
 
 import { delay, waitForElm } from "./utils";
 
+// Interface mapping với NhapHangModel từ Flutter
+interface FlutterOrderPayload {
+  hdrId: string;
+  maKH: string;
+  tenKH: string;
+  TenNguoiNhan: string;
+  SoDienThoai: string;
+  DiaChi: string;
+  DichVu: string;
+  KhoiLuong: number;
+  COD: number;
+  NoiDungBG: string;
+}
+
 // ==========================================================================
 // Biến Toàn cục và Cấu hình
 // ==========================================================================
@@ -618,6 +632,43 @@ function listenForFillForm() {
       }
       return true;
     }
+
+    // NHẬN DATA TỪ FLUTTER (QUA FIREBASE -> BACKGROUND)
+    if (msg.type === "FILL_TAODON") {
+      const payload = msg.payload as FlutterOrderPayload;
+      console.log("[GiaoTich] Nhận lệnh FILL_TAODON từ Flutter:", payload);
+
+      fillFormFromFlutter(payload).then(() => {
+        setTimeout(() => {
+          const nameEl = document.querySelector("#receiverName");
+          const addrEl = document.querySelector("#receiverAddress");
+          const phoneEl = document.querySelector("#receiverPhone");
+          const serviceEl = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div:nth-child(2) > div > div > div:nth-child(1) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-8");
+          const codEl = document.querySelector('input[name="codAmount"]');
+
+          const nameOk = nameEl && (nameEl as HTMLInputElement).value === payload.TenNguoiNhan;
+          const addrOk = addrEl && (addrEl as HTMLInputElement).value === payload.DiaChi;
+          const phoneOk = phoneEl && (phoneEl as HTMLInputElement).value === payload.SoDienThoai;
+          const serviceOk = serviceEl && payload.DichVu.toLowerCase().includes(serviceEl.textContent?.trim().toLowerCase() || "");
+          const codOk = codEl && (codEl as HTMLInputElement).value === payload.COD.toString();
+
+          if (nameOk && addrOk && phoneOk && serviceOk && codOk) {
+            console.log("[GiaoTich] ✅ Xác minh thành công, gửi submitnhaphangok về phone");
+            chrome.runtime.sendMessage({ type: "SUBMITNHAPHANG_RESULT", status: "ok" });
+          } else {
+            console.warn("[GiaoTich] ⚠️ Xác minh thất bại:", { nameOk, addrOk, phoneOk, serviceOk, codOk });
+            chrome.runtime.sendMessage({ type: "SUBMITNHAPHANG_RESULT", status: "mismatch" });
+          }
+        }, 1500);
+
+        sendResponse({ status: "success" });
+      }).catch((err) => {
+        console.error("[GiaoTich] Lỗi FILL_TAODON:", err);
+        sendResponse({ status: "error", message: err.message });
+      });
+
+      return true;
+    }
   });
 }
 
@@ -647,32 +698,32 @@ function monitorParcelIndex(): void {
   console.log(`[GiaoTich] Initial parcelIndex value: ${lastParcelIndexValue}`);
 
   // Hàm xử lý logic kiểm tra thay đổi
-const handleChange = (source: string) => {
-  const currentValue = parseInt(parcelIndexInput.value) || 0;
+  const handleChange = (source: string) => {
+    const currentValue = parseInt(parcelIndexInput.value) || 0;
 
-  // Chỉ xử lý khi giá trị TĂNG lên (đơn hàng mới)
-  if (currentValue > lastParcelIndexValue) {
-    console.log(`[GiaoTich] 📈 parcelIndex increased (${source}): ${lastParcelIndexValue} → ${currentValue}`);
-    lastParcelIndexValue = currentValue; // Cập nhật ngay lập tức để chặn các event trùng lặp tiếp theo
-    requestNextImage();
+    // Chỉ xử lý khi giá trị TĂNG lên (đơn hàng mới)
+    if (currentValue > lastParcelIndexValue) {
+      console.log(`[GiaoTich] 📈 parcelIndex increased (${source}): ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue; // Cập nhật ngay lập tức để chặn các event trùng lặp tiếp theo
+      requestNextImage();
 
-    // Focus vào receiverName và bôi đen toàn bộ text để sẵn sàng nhập mới
-    setTimeout(() => {
-      const receiverNameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
-      if (receiverNameInput) {
-        receiverNameInput.focus();
-        receiverNameInput.select(); // Bôi đen toàn bộ text
-        console.log("[GiaoTich] ✅ Focused and selected receiverName for next item");
-      } else {
-        console.warn("[GiaoTich] ❌ receiverName input not found");
-      }
-    }, 1000);
-  } else if (currentValue !== lastParcelIndexValue) {
-    // Cập nhật giá trị mới nếu nó khác (vd: reset về 0) nhưng không trigger next
-    // console.log(`[GiaoTich] parcelIndex changed but not increased: ${lastParcelIndexValue} → ${currentValue}`);
-    lastParcelIndexValue = currentValue;
-  }
-};
+      // Focus vào receiverName và bôi đen toàn bộ text để sẵn sàng nhập mới
+      setTimeout(() => {
+        const receiverNameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
+        if (receiverNameInput) {
+          receiverNameInput.focus();
+          receiverNameInput.select(); // Bôi đen toàn bộ text
+          console.log("[GiaoTich] ✅ Focused and selected receiverName for next item");
+        } else {
+          console.warn("[GiaoTich] ❌ receiverName input not found");
+        }
+      }, 1000);
+    } else if (currentValue !== lastParcelIndexValue) {
+      // Cập nhật giá trị mới nếu nó khác (vd: reset về 0) nhưng không trigger next
+      // console.log(`[GiaoTich] parcelIndex changed but not increased: ${lastParcelIndexValue} → ${currentValue}`);
+      lastParcelIndexValue = currentValue;
+    }
+  };
 
   // Observer để theo dõi thay đổi value attribute
   const observer = new MutationObserver(() => handleChange('MutationObserver'));
@@ -723,6 +774,124 @@ function fillTtNumber(maHieu: string): void {
     recei.focus();
   }
 
+}
+
+/**
+ * Hàm nhận data từ ứng dụng Flutter (thông qua Firebase -> Background Script -> Content Script)
+ * và điền vào form ReactJS của VNPost
+ */
+async function fillFormFromFlutter(data: FlutterOrderPayload): Promise<void> {
+  console.log("[GiaoTich] Bắt đầu điền dữ liệu từ Flutter:", data);
+
+  try {
+    // 1. Tên Người Nhận
+    const nameInput = document.getElementById(ELEMENT_IDS.RECEIVER_NAME) as HTMLInputElement;
+    if (nameInput && data.TenNguoiNhan) {
+      nameInput.value = data.TenNguoiNhan;
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+      nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    // 2. Số Điện Thoại
+    const phoneInput = document.getElementById(ELEMENT_IDS.RECEIVER_PHONE) as HTMLInputElement;
+    if (phoneInput && data.SoDienThoai) {
+      phoneInput.value = data.SoDienThoai;
+      phoneInput.dispatchEvent(new Event('input', { bubbles: true }));
+      phoneInput.dispatchEvent(new Event('change', { bubbles: true }));
+      phoneInput.dispatchEvent(new Event('blur'));
+    }
+
+    // 3. Địa Chỉ
+    const addressInput = document.getElementById(ELEMENT_IDS.RECEIVER_ADDRESS) as HTMLInputElement;
+    if (addressInput && data.DiaChi) {
+      var diabancu = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(4) > div:nth-child(3) > label > input") as HTMLElement;
+      diabancu.click();
+      addressInput.value = data.DiaChi;
+      addressInput.dispatchEvent(new Event('input', { bubbles: true }));
+      addressInput.dispatchEvent(new Event('change', { bubbles: true }));
+      addressInput.focus();
+      addressInput.dispatchEvent(new Event('blur'));
+
+      const findBtn = document.querySelector("#content > div > div > div.sub-content.multiple-item-no-footer > form > div.MuiGrid-root.content-box.MuiGrid-container > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > div > div > div:nth-child(5) > div.MuiGrid-root.MuiGrid-item.MuiGrid-grid-xs-10 > button:nth-child(4)") as HTMLButtonElement;
+      if (findBtn) {
+        findBtn.click();
+      }
+    }
+
+    // 4. Khối lượng
+    const weightInput = document.getElementById(ELEMENT_IDS.WEIGHT) as HTMLInputElement;
+    if (weightInput && data.KhoiLuong) {
+      weightInput.value = data.KhoiLuong.toString();
+      weightInput.dispatchEvent(new Event('input', { bubbles: true }));
+      weightInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    // 5. Nội dung BG (Ghi chú)
+    if (data.NoiDungBG) {
+      const contentBtn = document.querySelector("#contentNoteBtn") as HTMLElement;
+      if (contentBtn) {
+        contentBtn.click();
+        const modal = await waitForElm("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper", 10);
+        if (modal) {
+          await delay(500);
+          const nameInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(2) > input") as HTMLInputElement;
+          const qtyInput = document.querySelector("#popup-note-content > div > div.rt-table > div.rt-tbody > div:nth-child(1) > div > div:nth-child(3) > input") as HTMLInputElement;
+          if (nameInput) {
+            nameInput.value = data.NoiDungBG;
+            nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            nameInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          if (qtyInput) {
+            qtyInput.value = "1";
+            qtyInput.dispatchEvent(new Event('input', { bubbles: true }));
+            qtyInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          await delay(200);
+          const okBtn = document.querySelector("body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)") as HTMLElement;
+          if (okBtn) {
+            okBtn.click();
+          }
+        }
+      }
+    }
+    await delay(1000)
+
+    // 6. Dịch vụ (React-select)
+    if (data.DichVu) {
+      const serviceInput = document.getElementById("serviceCode") as HTMLInputElement;
+      if (serviceInput) {
+        serviceInput.focus();
+        serviceInput.value = data.DichVu;
+        serviceInput.dispatchEvent(new Event("input", { bubbles: true }));
+        serviceInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+        await delay(400);
+
+        const suggestionSelector = 'div[id^="react-select-"][tabindex="-1"]';
+        const suggestions = Array.from(document.querySelectorAll(suggestionSelector)) as HTMLElement[];
+        const option = suggestions.find(el => el.textContent?.trim().startsWith(data.DichVu));
+        if (option) {
+          option.click();
+          console.log(`[GiaoTich] Đã chọn dịch vụ: ${data.DichVu}`);
+        }
+      }
+    }
+
+    // 7. Điền Tiền COD
+    if (data.COD && data.COD > 0) {
+      await delay(1500);
+      console.log(`[GiaoTich] Gọi hàm fillCodAndSubmit với giá trị: ${data.COD}`);
+      await fillCodAndSubmit(data.COD.toString());
+    }
+
+    
+
+
+    console.log("[GiaoTich] ✅ Hoàn tất điền dữ liệu từ ứng dụng Flutter!");
+
+  } catch (error) {
+    console.error("[GiaoTich] ❌ Lỗi khi điền form từ Flutter:", error);
+  }
 }
 
 /**
