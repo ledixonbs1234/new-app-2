@@ -5442,14 +5442,49 @@ async function handleGetMyPostData(data: any) {
       );
       return;
     }
-    console.log("Token MyVNPost:", response.token);
+
+    updateToPhone("message", "Đang lấy thông tin tài khoản MyVNPost...");
+
+    let maKH: string;
+    let tenKH: string | undefined;
+    try {
+      const accountRes = await safeFetch(
+        "https://api-pre-my.vnpost.vn/myvnp-web/v1/Account/getAccountSetting",
+        {
+          headers: {
+            accept: "*/*",
+            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+            authorization: response.token,
+            "cache-control": "no-cache",
+            capikey: "19001111",
+            pragma: "no-cache",
+            "content-type": "application/json",
+          },
+          method: "GET",
+        },
+      );
+
+      if (accountRes?.orgUserList?.length > 0) {
+        maKH = accountRes.orgUserList[0].orgCode;
+        tenKH = accountRes.orgUserList[0].orgName;
+        console.log( `Tìm thấy khách hàng: ${tenKH} (${maKH})`);
+        updateToPhone("message", `Tìm thấy khách hàng: ${tenKH} (${maKH})`);
+      } else {
+        throw new Error("orgUserList rỗng");
+      }
+    } catch (accountErr) {
+      console.warn("getAccountSetting thất bại, fallback sang maKH từ dữ liệu:", accountErr);
+      var dataJson = JSON.parse(data.DoiTuong);
+      maKH = dataJson["maKH"];
+      tenKH = undefined;
+      updateToPhone("message", "Dùng maKH từ dữ liệu gửi lên.");
+    }
 
     updateToPhone("message", "Đang tải dữ liệu đơn hàng...");
-    var dataJson = JSON.parse(data.DoiTuong);
 
     const myPostData = await getDataFromMyPost(
       response.token,
-      dataJson["maKH"],
+      maKH,
     );
 
     if (myPostData === null) {
