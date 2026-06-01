@@ -884,7 +884,7 @@ async function fillFormFromFlutter(data: FlutterOrderPayload): Promise<void> {
       await fillCodAndSubmit(data.COD.toString());
     }
 
-    
+
 
 
     console.log("[GiaoTich] ✅ Hoàn tất điền dữ liệu từ ứng dụng Flutter!");
@@ -1311,8 +1311,22 @@ async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: stri
     case ELEMENT_IDS.RECEIVER_NAME:
       setChiDanPhat();
 
-      const receiverName = ele.value;
+      let receiverName = ele.value;
       if (receiverName) {
+        // Chuyển đổi tên thành dạng Title Case (In hoa chữ cái đầu mỗi từ)
+        const formattedName = receiverName.toLowerCase().replace(/(?:^|\s)\S/g, function(a) { return a.toUpperCase(); });
+        if (formattedName !== receiverName) {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (nativeInputValueSetter) {
+             nativeInputValueSetter.call(ele, formattedName);
+          } else {
+             ele.value = formattedName;
+          }
+          ele.dispatchEvent(new Event('input', { bubbles: true }));
+          ele.dispatchEvent(new Event('change', { bubbles: true }));
+          receiverName = formattedName;
+        }
+
         const tenKhongDau = removeAccents(receiverName).toLowerCase();
         chrome.storage.local.get(tenKhongDau, (result) => {
           if (result && result[tenKhongDau] && result[tenKhongDau].length > 0) {
@@ -1380,6 +1394,7 @@ async function handleTabKey(e: KeyboardEvent, ele: HTMLInputElement, eleId: stri
           "sac gam": "CÁ CẢNH",
           "koi": "CÁ CẢNH",
           "soc ngua": "CÁ CẢNH",
+          "vang": "CÁ CẢNH",
         };
         const matchKey = Object.keys(noteMap).find(key => tenKhongDau.includes(key));
         const itemName = matchKey ? noteMap[matchKey] : undefined;
@@ -2805,3 +2820,99 @@ function updatePriceDisplayLabel() {
 
   update(); // Cập nhật lần đầu
 }
+
+function optimizeSpaceV3() {
+    // 1. Tìm các thành phần
+    const titleEl = document.querySelector("#sub-title") as HTMLElement;
+    const titleContainer = titleEl ? titleEl.parentElement as HTMLElement : null;
+    
+    const container = document.querySelector("form.multiple-item .content-box") as HTMLElement;
+    const senderDiv = container ? container.querySelector(".MuiGrid-grid-xs-2") as HTMLElement : null;
+    const formDiv = container ? container.querySelector(".MuiGrid-grid-xs-10") as HTMLElement : null;
+
+    if (!titleContainer || !senderDiv || !formDiv) {
+        // console.warn("Không tìm thấy đủ các thành phần.");
+        return;
+    }
+
+    if (document.getElementById("btn-toggle-sender")) {
+        return; // Tránh tạo nút nhiều lần
+    }
+
+    // 2. Chỉnh lại Layout tiêu đề: Nằm sát nhau
+    titleContainer.style.display = "flex";
+    titleContainer.style.alignItems = "center";
+    titleContainer.style.gap = "15px"; // Khoảng cách 15px giữa chữ và nút
+    titleEl.style.margin = "0"; // Căn giữa cho chữ ngang hàng với nút
+
+    // 3. Tạo nút mờ (Ít gây phân tâm)
+    const toggleBtn = document.createElement("button");
+    toggleBtn.id = "btn-toggle-sender";
+    toggleBtn.innerHTML = "✖ Ẩn Người Gửi";
+    
+    Object.assign(toggleBtn.style, {
+        padding: "3px 10px",
+        backgroundColor: "transparent",
+        color: "#999", // Chữ màu xám mờ
+        border: "1px solid #ddd", // Viền mờ
+        borderRadius: "4px",
+        cursor: "pointer",
+        fontSize: "12px",
+        opacity: "0.7", // Giảm độ hiển thị
+        transition: "all 0.2s ease" // Hiệu ứng mượt
+    });
+
+    titleContainer.appendChild(toggleBtn);
+
+    let isHidden = false;
+
+    // --- HIỆU ỨNG RÊ CHUỘT (Chỉ sáng màu khi chỉ chuột vào) ---
+    toggleBtn.addEventListener("mouseenter", () => {
+        toggleBtn.style.opacity = "1";
+        toggleBtn.style.color = isHidden ? "#1890ff" : "#ff4d4f";
+        toggleBtn.style.borderColor = isHidden ? "#1890ff" : "#ff4d4f";
+    });
+    
+    toggleBtn.addEventListener("mouseleave", () => {
+        toggleBtn.style.opacity = "0.7";
+        toggleBtn.style.color = "#999";
+        toggleBtn.style.borderColor = "#ddd";
+    });
+
+    // 4. Xử lý Logic Ẩn / Hiện
+    toggleBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        isHidden = !isHidden;
+
+        if (isHidden) {
+            // -- ẨN --
+            senderDiv.style.display = "none";
+            
+            // Ép form rộng 100% bất chấp framework
+            formDiv.style.setProperty("max-width", "100%", "important");
+            formDiv.style.setProperty("flex-basis", "100%", "important");
+            formDiv.style.setProperty("flex-grow", "1", "important"); // Đẩy tràn viền
+            
+            toggleBtn.innerHTML = "👁 Hiện Người Gửi";
+            toggleBtn.style.color = "#1890ff";
+            toggleBtn.style.borderColor = "#1890ff";
+        } else {
+            // -- HIỆN --
+            senderDiv.style.display = "";
+            
+            // Gỡ các ép buộc để giao diện trả về xs-10 chuẩn ban đầu
+            formDiv.style.removeProperty("max-width");
+            formDiv.style.removeProperty("flex-basis");
+            formDiv.style.removeProperty("flex-grow");
+            
+            toggleBtn.innerHTML = "✖ Ẩn Người Gửi";
+            toggleBtn.style.color = "#ff4d4f";
+            toggleBtn.style.borderColor = "#ff4d4f";
+        }
+    });
+
+}
+
+window.addEventListener("load", () => {
+    setInterval(optimizeSpaceV3, 1000);
+});

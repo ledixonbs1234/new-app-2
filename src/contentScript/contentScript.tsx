@@ -84,16 +84,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, callback) => {
             callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
           }
         }
-        else if (msg.message === "PROCESS_SINGLE_ITEM_KHOITAO") {
+       else if (msg.message === "PROCESS_SINGLE_ITEM_KHOITAO") {
           console.log("Processing single item:", msg.current.MaBuuGui);
           try {
-            // Gọi hàm xử lý một item (có thể là hàm startSendCurrentCode đã sửa đổi)
             const result = await processSinglePortalItem_khoitao(msg.current, msg.makh, msg.keyMessage, msg.options, msg.isDeletePhone);
             console.log("Finished processing", msg.current.MaBuuGui, "Result:", result);
-            callback({ status: "success", maBG: msg.current.MaBuuGui }); // Báo thành công
+            callback({ status: "success", maBG: msg.current.MaBuuGui });
           } catch (error: any) {
             console.error(`Error processing ${msg.current.MaBuuGui}:`, error);
-            // --- BÁO LỖI VỀ BACKGROUND ---
             callback({ status: "error", maBG: msg.current.MaBuuGui, error: error.message || "Lỗi không xác định trên Portal" });
           }
         }
@@ -945,9 +943,49 @@ async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInpu
   console.log("Xử lý theo mã khách hàng với giá trị:", customerCode.value);
   await delay(1000);
 
-  // Chờ #customerCode có dữ liệu
+  // Chờ #customerCode có dữ liệu (khi điền mã bưu gửi thành công)
   var customer = await waitForValueElm("#customerCode");
-  if (customer?.value == "C006230404") {
+  if (!customer) {
+    throw new Error("Không thể lấy mã khách hàng từ ô #customerCode");
+  }
+  
+  const maKH = customer.value.trim();
+  let hopDong: any = null;
+
+  // Gửi yêu cầu lên Background lấy thông tin hợp đồng của khách hàng này
+  try {
+    const response = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({
+        type: "GET_HOP_DONG",
+        payload: { maKH }
+      }, resolve);
+    });
+
+    if (response && response.status === "success") {
+      hopDong = response.hopDong;
+    }
+  } catch (error) {
+    console.error("Lỗi gửi yêu cầu lấy hợp đồng lên Background:", error);
+  }
+
+  // Xử lý chọn hợp đồng dựa trên dữ liệu hopDong trả về
+  if (hopDong && hopDong.IsChooseHopDong) {
+    let iCheck = hopDong.STTHopDong;
+    var checker: HTMLInputElement | null = document.querySelector(
+      `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(${iCheck}) > div > div:nth-child(1) > div > input`
+    );
+    if (checker !== null) {
+      (checker as HTMLInputElement)?.click();
+      (
+        document.querySelector(
+          "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+        ) as HTMLButtonElement
+      )?.click();
+
+      await delay(500);
+    }
+  } else if (maKH === "C006230404") {
+    // Dự phòng phương án kiểm tra cứng của tài khoản cũ
     var checker: HTMLInputElement | null = document.querySelector(
       `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(2) > div > div:nth-child(1) > div > input`
     );
@@ -962,9 +1000,23 @@ async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInpu
       await delay(500);
     }
   }
+
+  // Điền thông tin địa chỉ từ hợp đồng
+  if (hopDong && hopDong.Address && hopDong.Address !== "") {
+    var address: HTMLInputElement | null = document.querySelector("input[name='customerAddress'], #customerAddress");
+    if (address) {
+      address.value = hopDong.Address;
+      address.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      address.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      address.dispatchEvent(new Event("blur"));
+      console.log("Đã tự động điền địa chỉ hợp đồng:", hopDong.Address);
+      await delay(300);
+    }
+  }
+
   await delay(300);
 
-  // Nhấn nút "Lưu và tìm kiếm"
+  // Nhấn nút "Lưu và tìm kiếm" sau khi hoàn tất thiết lập
   const saveBtn: HTMLElement | null = document.querySelector(
     "#content > div > div > div.sub-content.multiple-item-no-footer > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > form > div:nth-child(11) > div.MuiGrid-root.content-box-button.MuiGrid-container.MuiGrid-item.MuiGrid-justify-content-xs-center.MuiGrid-grid-xs-6 > div:nth-child(1) > div > button"
   );
@@ -972,6 +1024,7 @@ async function processByCustomerCode(buuGui: BuuGuiProps, customerCode: HTMLInpu
     saveBtn.click();
   }
 }
+
 
 async function processByEmptyCustomerCode(buuGui: BuuGuiProps): Promise<void> {
   console.log("khoiTaoPortalNew: maHieu", buuGui.MaBuuGui);
@@ -996,7 +1049,45 @@ async function processByEmptyCustomerCode(buuGui: BuuGuiProps): Promise<void> {
 
   // Chờ #customerCode có dữ liệu
   var customer = await waitForValueElm("#customerCode");
-  if (customer?.value == "C006230404") {
+  if (!customer) {
+    throw new Error("Không thể lấy mã khách hàng từ ô #customerCode");
+  }
+
+  const maKH = customer.value.trim();
+  let hopDong: any = null;
+
+  // Gọi lên Background lấy thông tin hợp đồng sau khi có mã KH
+  try {
+    const response = await new Promise<any>((resolve) => {
+      chrome.runtime.sendMessage({
+        type: "GET_HOP_DONG",
+        payload: { maKH }
+      }, resolve);
+    });
+
+    if (response && response.status === "success") {
+      hopDong = response.hopDong;
+    }
+  } catch (error) {
+    console.error("Lỗi lấy hợp đồng trong processByEmptyCustomerCode:", error);
+  }
+
+  if (hopDong && hopDong.IsChooseHopDong) {
+    let iCheck = hopDong.STTHopDong;
+    var checker: HTMLInputElement | null = document.querySelector(
+      `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(${iCheck}) > div > div:nth-child(1) > div > input`
+    );
+    if (checker !== null) {
+      (checker as HTMLInputElement)?.click();
+      (
+        document.querySelector(
+          "body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogActions-root.MuiDialogActions-spacing > button:nth-child(1)"
+        ) as HTMLButtonElement
+      )?.click();
+
+      await delay(500);
+    }
+  } else if (customer?.value == "C006230404") {
     var checker: HTMLInputElement | null = document.querySelector(
       `body > div.MuiDialog-root > div.MuiDialog-container.MuiDialog-scrollPaper > div > div.MuiDialogContent-root.MuiDialogContent-dividers > div > div.MuiPaper-root.content-box-info.MuiPaper-elevation1.MuiPaper-rounded > div > div.rt-table > div.rt-tbody > div:nth-child(2) > div > div:nth-child(1) > div > input`
     );
@@ -1012,7 +1103,17 @@ async function processByEmptyCustomerCode(buuGui: BuuGuiProps): Promise<void> {
     }
   }
 
-
+  if (hopDong && hopDong.Address && hopDong.Address !== "") {
+    var address: HTMLInputElement | null = document.querySelector("input[name='customerAddress'], #customerAddress");
+    if (address) {
+      address.value = hopDong.Address;
+      address.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+      address.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+      address.dispatchEvent(new Event("blur"));
+      console.log("Đã tự động điền địa chỉ hợp đồng:", hopDong.Address);
+      await delay(300);
+    }
+  }
 
   await delay(300);
 
@@ -1030,7 +1131,7 @@ async function processSinglePortalItem_khoitao(
   maKH: any,
   keyMessage: string, // keyMessage có thể không cần ở content script nữa
   options: any,
-  isDeletePhone: boolean
+  isDeletePhone: boolean,
 ): Promise<void> { // Trả về Promise để background biết khi nào xong, throw error nếu lỗi
   console.log("Processing Portal item:", buuGui.MaBuuGui);
 

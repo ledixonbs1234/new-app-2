@@ -82,7 +82,7 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
         justifyContent: 'space-between',
         alignItems: 'center'
     });
-    
+
     const title = document.createElement('span');
     title.textContent = `📦 CMS - ${trackingNumber}`;
     Object.assign(title.style, {
@@ -189,7 +189,7 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                         });
                         headerRow.appendChild(th);
                     });
-                    
+
                     headerRow.childNodes[0].style.width = '40px';
                     headerRow.childNodes[1].style.width = '120px';
                     headerRow.childNodes[2].style.width = '140px';
@@ -201,20 +201,20 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                     const tbody = document.createElement('tbody');
                     ticket.actions.forEach((action: any, index: number) => {
                         const tr = document.createElement('tr');
-                        
+
                         const tdStt = document.createElement('td');
                         tdStt.textContent = action.stt || (index + 1).toString();
-                        
+
                         const tdTime = document.createElement('td');
                         tdTime.textContent = action.date || '';
-                        
+
                         const tdUnit = document.createElement('td');
                         tdUnit.textContent = action.unit || '';
-                        
+
                         const tdContent = document.createElement('td');
                         const cleanContent = (action.content || '').replace(/\s+/g, ' ').trim();
                         tdContent.textContent = cleanContent || 'Không có nội dung';
-                        
+
                         const tdNextUnit = document.createElement('td');
                         tdNextUnit.textContent = action.relatedUnit || '';
 
@@ -283,12 +283,12 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                     orgInput.type = 'text';
                     orgInput.placeholder = 'Nhập mã bưu cục (6 số)';
                     orgInput.maxLength = 6;
-                    
+
                     const unitMatch = lastAction?.unit?.match(/(\d{6})/);
                     if (unitMatch) {
                         orgInput.value = unitMatch[1];
                     }
-                    
+
                     Object.assign(orgInput.style, {
                         padding: '6px 10px',
                         border: '1px solid #d9d9d9',
@@ -385,7 +385,7 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                         resize: 'vertical',
                         boxSizing: 'border-box'
                     });
-                    
+
                     templateSelect.addEventListener('change', () => {
                         if (templateSelect.value) {
                             commentInput.value = templateSelect.value;
@@ -418,7 +418,7 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                         if (confirm(`Bạn có muốn chuyển tiếp đến ${currentOrgInfo.orgCode} - ${currentOrgInfo.name}?`)) {
                             submitBtn.textContent = 'Đang gửi...';
                             submitBtn.disabled = true;
-                            
+
                             const dataOrgObj = [{
                                 tempId: 72,
                                 orgCode: currentOrgInfo.orgCode,
@@ -481,35 +481,260 @@ function renderCmsModal(trackingNumber: string, orgCode: string, serviceCode: st
                 marginBottom: '16px'
             });
 
+            const formContainer = document.createElement('div');
+            Object.assign(formContainer.style, {
+                width: '100%',
+                maxWidth: '400px',
+                padding: '16px',
+                backgroundColor: '#f0f5ff',
+                border: '1px solid #adc6ff',
+                borderRadius: '6px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px'
+            });
+
+            const formTitle = document.createElement('div');
+            formTitle.textContent = 'Tạo mới (Hỗ trợ/Khiếu nại)';
+            Object.assign(formTitle.style, {
+                fontWeight: 'bold',
+                color: '#1d39c4',
+                fontSize: '15px',
+                textAlign: 'center'
+            });
+            formContainer.appendChild(formTitle);
+
+            // Ticket type select
+            const typeSelect = document.createElement('select');
+            Object.assign(typeSelect.style, {
+                padding: '8px 10px',
+                border: '1px solid #d9d9d9',
+                borderRadius: '4px',
+                fontSize: '14px',
+                backgroundColor: '#fff'
+            });
+            const optionComplaint = document.createElement('option');
+            optionComplaint.value = 'complaint';
+            optionComplaint.textContent = '🚨 Khiếu nại';
+            const optionSupport = document.createElement('option');
+            optionSupport.value = 'support';
+            optionSupport.textContent = '💡 Hỗ trợ';
+            typeSelect.appendChild(optionSupport);
+            typeSelect.appendChild(optionComplaint);
+            formContainer.appendChild(typeSelect);
+
+            // Org Code input
+            const orgInputContainer = document.createElement('div');
+            const orgInput = document.createElement('input');
+            orgInput.type = 'text';
+            orgInput.placeholder = 'Nhập mã bưu cục (6 số) - Tùy chọn';
+            orgInput.maxLength = 6;
+
+            Object.assign(orgInput.style, {
+                padding: '8px 10px',
+                border: '1px solid #d9d9d9',
+                borderRadius: '4px',
+                fontSize: '14px',
+                width: '100%',
+                boxSizing: 'border-box'
+            });
+
+            const orgInfoText = document.createElement('div');
+            Object.assign(orgInfoText.style, {
+                marginTop: '4px',
+                fontSize: '13px',
+                color: '#52c41a',
+                fontWeight: 'bold',
+                minHeight: '18px'
+            });
+
+            let currentOrgInfo: any = null;
+
+            const fetchOrgInfoForCreate = async (code: string) => {
+                if (code.length !== 6) {
+                    currentOrgInfo = null;
+                    orgInfoText.textContent = '';
+                    return;
+                }
+                try {
+                    const res = await fetch(`https://cms.vnpost.vn/api/admin/organization/autocompleteall/change/${code}`, {
+                        credentials: 'include'
+                    });
+                    const data = await res.json();
+                    if (data && data.length > 0) {
+                        currentOrgInfo = data[0];
+                        orgInfoText.textContent = `✓ ${data[0].orgCode} - ${data[0].name}`;
+                    } else {
+                        currentOrgInfo = null;
+                        orgInfoText.textContent = '❌ Không tìm thấy bưu cục';
+                    }
+                } catch (e) {
+                    console.error(e);
+                }
+            };
+
+            orgInput.addEventListener('input', (e) => {
+                const val = (e.target as HTMLInputElement).value.replace(/\D/g, '').slice(0, 6);
+                orgInput.value = val;
+                fetchOrgInfoForCreate(val);
+            });
+
+            orgInputContainer.appendChild(orgInput);
+            orgInputContainer.appendChild(orgInfoText);
+            formContainer.appendChild(orgInputContainer);
+
+            // Tự động điền mã bưu cục nếu có
+            if (orgCode && orgCode.length === 6) {
+                orgInput.value = orgCode;
+                fetchOrgInfoForCreate(orgCode);
+            }
+
+            // Templates select
+            const templateSelect = document.createElement('select');
+            Object.assign(templateSelect.style, {
+                padding: '8px 10px',
+                border: '1px solid #d9d9d9',
+                borderRadius: '4px',
+                fontSize: '14px',
+                backgroundColor: '#fff'
+            });
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = '📋 Chọn mẫu nội dung...';
+            templateSelect.appendChild(defaultOption);
+
+            chrome.runtime.sendMessage({ event: 'CONTENTMY', type: 'GET_CMS_TEMPLATES' }, (res) => {
+                if (res?.status === 'success' && res.templates) {
+                    res.templates.forEach((t: string) => {
+                        const opt = document.createElement('option');
+                        opt.value = t;
+                        opt.textContent = t.length > 50 ? t.substring(0, 50) + '...' : t;
+                        templateSelect.appendChild(opt);
+                    });
+                }
+            });
+            formContainer.appendChild(templateSelect);
+
+            // Content textarea
+            const contentInput = document.createElement('textarea');
+            contentInput.placeholder = 'Nhập nội dung cần xử lý...';
+            contentInput.rows = 3;
+            Object.assign(contentInput.style, {
+                padding: '8px 10px',
+                border: '1px solid #d9d9d9',
+                borderRadius: '4px',
+                fontSize: '14px',
+                resize: 'vertical',
+                fontFamily: 'inherit'
+            });
+            templateSelect.addEventListener('change', () => {
+                if (templateSelect.value) {
+                    contentInput.value = templateSelect.value;
+                }
+            });
+            formContainer.appendChild(contentInput);
+
             const createBtn = document.createElement('button');
-            createBtn.textContent = 'Tạo khiếu nại mới';
+            createBtn.textContent = '📤 Tạo CMS ngay';
             Object.assign(createBtn.style, {
+                padding: '8px 16px',
                 backgroundColor: '#1890ff',
                 color: '#fff',
                 border: 'none',
                 borderRadius: '4px',
-                padding: '8px 16px',
                 cursor: 'pointer',
-                fontWeight: 'bold'
+                fontWeight: 'bold',
+                fontSize: '14px',
+                marginTop: '4px',
+                transition: 'all 0.3s'
             });
 
+            createBtn.onmouseover = () => { createBtn.style.backgroundColor = '#40a9ff'; };
+            createBtn.onmouseout = () => { createBtn.style.backgroundColor = '#1890ff'; };
+
             createBtn.onclick = () => {
+                const content = contentInput.value.trim();
+                if (!content) {
+                    alert('Vui lòng nhập nội dung!');
+                    return;
+                }
+
+                if (!confirm(`Bạn có muốn tạo ticket ${typeSelect.value === 'support' ? 'Hỗ Trợ' : 'Khiếu Nại'} cho đơn hàng ${trackingNumber}?`)) {
+                    return;
+                }
+
+                createBtn.textContent = 'Đang xử lý...';
+                createBtn.disabled = true;
+                createBtn.style.opacity = '0.5';
+
                 chrome.runtime.sendMessage({
                     event: "CONTENTMY",
-                    type: "DIRECT_CREATE_COMPLAINT",
+                    type: "CREATE_CMS_TICKET_V2",
                     payload: {
-                        itemCode: trackingNumber,
-                        orgCode: customerCode,
+                        maVanDon: trackingNumber,
                         serviceCode: serviceCode,
-                        type: "complaint"
+                        ticketType: typeSelect.value,
+                        content: content
+                    }
+                }, (res) => {
+                    createBtn.textContent = '📤 Tạo CMS ngay';
+                    createBtn.disabled = false;
+                    createBtn.style.opacity = '1';
+
+                    if (res?.status === 'success') {
+                        showToast(`✅ Đã tạo CMS thành công: ${res.ticketCode || ''}`);
+
+                        const ticketCode = res.ticketCode;
+                        if (currentOrgInfo && ticketCode) {
+                            if (confirm(`Bạn có muốn chuyển tiếp ticket đến ${currentOrgInfo.orgCode} - ${currentOrgInfo.name}?`)) {
+                                const dataOrgObj = [
+                                    {
+                                        tempId: 72,
+                                        orgCode: currentOrgInfo.orgCode,
+                                        orgName: `${currentOrgInfo.orgCode} - ${currentOrgInfo.name}`,
+                                        filename: '',
+                                        comment: content,
+                                        file: '',
+                                        type: 2,
+                                        number: 1
+                                    }
+                                ];
+
+                                chrome.runtime.sendMessage(
+                                    {
+                                        event: 'CONTENTMY',
+                                        type: 'FORWARD_CMS_TICKET',
+                                        payload: {
+                                            ticketId: ticketCode,
+                                            dataOrgObj: dataOrgObj
+                                        }
+                                    },
+                                    (fwdRes) => {
+                                        if (fwdRes && fwdRes.status === 'success') {
+                                            showToast('✅ Đã chuyển tiếp thành công');
+                                            closeCmsModal();
+                                        } else {
+                                            alert(`❌ Lỗi khi chuyển tiếp: ${fwdRes?.error || 'Unknown'}`);
+                                            closeCmsModal();
+                                        }
+                                    }
+                                );
+                            } else {
+                                closeCmsModal();
+                            }
+                        } else {
+                            closeCmsModal();
+                        }
+                    } else {
+                        alert(`❌ Lỗi khi tạo: ${res?.error || 'Unknown error'}`);
                     }
                 });
-                showToast('Đang mở CMS và tạo khiếu nại...');
-                closeCmsModal();
             };
 
+            formContainer.appendChild(createBtn);
+
             emptyState.appendChild(emptyText);
-            emptyState.appendChild(createBtn);
+            emptyState.appendChild(formContainer);
             body.appendChild(emptyState);
         }
     });
@@ -564,7 +789,7 @@ function injectCMSButton() {
         const text = barcodeLabel.textContent || '';
         const matchBarcode = text.match(/^([A-Z0-9]+VN)/);
         if (matchBarcode) barcode = matchBarcode[1];
-        
+
         const matchService = text.match(/\(([^-\s]+)/);
         if (matchService) serviceCode = matchService[1];
     }
@@ -601,7 +826,7 @@ function injectCMSButton() {
     btn.style.fontSize = '12px';
     btn.style.boxShadow = '0 2px 0 rgba(0,0,0,0.045)';
     btn.style.transition = 'all 0.3s cubic-bezier(0.645, 0.045, 0.355, 1)';
-    
+
     btn.onmouseover = () => {
         btn.style.backgroundColor = '#40a9ff';
     };
@@ -654,7 +879,7 @@ function injectChinhCodButton() {
     btn.style.fontWeight = 'bold';
     btn.style.fontSize = '12px';
     btn.style.boxShadow = '0 2px 0 rgba(0,0,0,0.045)';
-    
+
     // Đặt nút kế bên text
     btn.style.marginLeft = '10px';
 

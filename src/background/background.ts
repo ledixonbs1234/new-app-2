@@ -5653,6 +5653,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true; // Giữ channel mở
   }
 
+  if (msg.type === "GET_HOP_DONG") {
+    (async () => {
+      try {
+        const { maKH } = msg.payload;
+        if (!db) {
+          sendResponse({ status: "error", error: "Database chưa được khởi tạo" });
+          return;
+        }
+        
+        // Truy vấn thông tin hợp đồng của khách hàng từ Firebase
+        const snapshot = await db.ref(`PORTAL/HopDongs/${maKH}`).get();
+        const hopDong = snapshot.val();
+        
+        sendResponse({ status: "success", hopDong });
+      } catch (error: any) {
+        console.error("[Background] Lỗi nạp dữ liệu hợp đồng:", error);
+        sendResponse({ status: "error", error: error.message });
+      }
+    })();
+    return true; // Giữ kênh kết nối mở để phản hồi bất đồng bộ (Async Response)
+  }
+
   if (msg.type === "GET_INITIAL_DATA" || msg.type === "GET_STATUS") {
     chrome.storage.session.get(
       ["orders", "currentIndex"],
