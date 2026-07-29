@@ -84,7 +84,8 @@ let passwordPortal: string = "";
 let buuCuc = "";
 let aiKeysData: any = {}; // Cache dữ liệu để trả về ngay khi popup mở
 console.log("Background script is running");
-
+// Biến toàn cục để quản lý tiến trình tạo tránh xung đột
+let creatingOffscreen: Promise<void> | null = null;
 // --- TRẠNG THÁI CỤC BỘ (Sử dụng type BuuGuiProps đã import) ---
 /**
  * @description Danh sách đầy đủ các đối tượng BuuGuiProps được quét gần nhất từ Firebase.
@@ -197,6 +198,101 @@ function broadcastPortalListUpdate() {
     type: "PORTAL_LIST_UPDATED",
     data: currentPortalList
   }).catch(() => { }); // Bỏ qua lỗi nếu không có receiver
+}
+/**
+ * Hàm kiểm tra và khởi tạo Offscreen Document tương thích ngược (Hỗ trợ tốt Windows 7 / Chrome 109)
+ */
+async function ensureOffscreenDocument(
+  url: string = "offscreen.html",
+  reason: string = "DOM_SCRAPING",
+  justification: string = "Print PDF files using DOM APIs"
+): Promise<void> {
+  const offscreenUrl = chrome.runtime.getURL(url);
+
+  // 1. Kiểm tra sự tồn tại của API offscreen
+  if (!chrome.offscreen || typeof chrome.offscreen.createDocument !== 'function') {
+    console.warn("[Background] chrome.offscreen không được hỗ trợ. Chuyển sang fallback Tab.");
+    await fallbackPrintTab(url);
+    return;
+  }
+
+  // 2. Kiểm tra tài liệu đã tồn tại chưa bằng cách tương thích với Chrome cũ
+  let hasDoc = false;
+  try {
+    if (chrome.runtime && typeof chrome.runtime.getContexts === 'function') {
+      // Dành cho các phiên bản Chrome 116+
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT' as any],
+        documentUrls: [offscreenUrl]
+      });
+      hasDoc = contexts.length > 0;
+    } else if ('clients' in self && typeof (self as any).clients.matchAll === 'function') {
+      // Fallback dành cho các phiên bản Chrome cũ hơn (như Chrome 109 trên Windows 7)
+      const clients = await (self as any).clients.matchAll({
+        includeUncontrolled: true,
+        type: 'window'
+      });
+      hasDoc = clients.some((client: any) => client.url === offscreenUrl);
+    }
+  } catch (error) {
+    console.warn("[Background] Không thể kiểm tra context offscreen hiện tại:", error);
+    hasDoc = false;
+  }
+
+  if (hasDoc) {
+    console.log("[Background] Offscreen document đã tồn tại.");
+    return;
+  }
+
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+    return;
+  }
+
+  // 3. Tiến hành tạo Offscreen Document an toàn
+  try {
+    creatingOffscreen = chrome.offscreen.createDocument({
+      url: url,
+      reasons: [reason as any],
+      justification: justification
+    });
+    await creatingOffscreen;
+  } catch (err: any) {
+    // Nếu ném lỗi do tài liệu đã được tạo trước đó thì bỏ qua để chạy tiếp
+    if (err && err.message && err.message.includes("Only a single offscreen document may be created")) {
+      console.log("[Background] Offscreen document đã được tạo.");
+    } else {
+      console.warn("[Background] Gặp lỗi tạo offscreen, chuyển sang sử dụng fallback Tab:", err);
+      await fallbackPrintTab(url);
+    }
+  } finally {
+    creatingOffscreen = null;
+  }
+}
+
+/**
+ * Hàm fallback: Mở một Tab in ấn ẩn (không làm gián đoạn người dùng) khi Offscreen không khả dụng
+ */
+async function fallbackPrintTab(url: string): Promise<void> {
+  const fullUrl = chrome.runtime.getURL(url);
+  try {
+    const tabs = await chrome.tabs.query({ url: fullUrl });
+    if (tabs.length > 0) {
+      console.log("[Background] Tab in ấn fallback đã có sẵn.");
+      return;
+    }
+    console.log("[Background] Đang tạo tab in ấn fallback...");
+    const newTab = await chrome.tabs.create({
+      url: fullUrl,
+      active: false
+    });
+    if (newTab && newTab.id) {
+      await waitForTabToLoad(newTab.id);
+      await delay(1000); // Chờ 1 giây để scripts bên trong tab kịp đăng ký lắng nghe sự kiện
+    }
+  } catch (err) {
+    console.error("[Background] Không thể khởi tạo tab fallback:", err);
+  }
 }
 
 // Hàm xử lý chạy lại 1 item từ Panel (tái sử dụng logic cũ)
@@ -3451,18 +3547,7 @@ const handlePrintPageSort = async (data: any) => {
     const base64String = responseData[0];
 
     // Check if offscreen document exists
-    const existingContexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-    });
-
-    // Create if doesn't exist
-    if (existingContexts.length === 0) {
-      await chrome.offscreen.createDocument({
-        url: "offscreen.html",
-        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-        justification: "In PDF bằng DOM APIs",
-      });
-    }
+    await ensureOffscreenDocument("offscreen.html", "DOM_SCRAPING", "In PDF bằng DOM APIs");
 
     // Send to offscreen document for printing
     const printResponse = await chrome.runtime.sendMessage({
@@ -3689,18 +3774,7 @@ const printMaHieus = async (maHieus: string[]) => {
     }
 
     // Kiểm tra xem offscreen document đã tồn tại chưa
-    const existingContexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-    });
-
-    // Nếu chưa có, tạo mới
-    if (existingContexts.length === 0) {
-      await chrome.offscreen.createDocument({
-        url: "offscreen.html",
-        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-        justification: "Print PDF files using DOM APIs",
-      });
-    }
+    await ensureOffscreenDocument("offscreen.html", "DOM_SCRAPING", "Print PDF files using DOM APIs");
 
     var blob = await convertBlobsToBlob(blobs);
     var base64String = await pdfBlobTo64(blob);
@@ -3746,18 +3820,7 @@ const printARPages = async (maHieus: string[]) => {
     }
 
     // Kiểm tra xem offscreen document đã tồn tại chưa
-    const existingContexts = await chrome.runtime.getContexts({
-      contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT],
-    });
-
-    // Nếu chưa có, tạo mới
-    if (existingContexts.length === 0) {
-      await chrome.offscreen.createDocument({
-        url: "offscreen.html",
-        reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-        justification: "Print PDF files using DOM APIs",
-      });
-    }
+    await ensureOffscreenDocument("offscreen.html", "DOM_SCRAPING", "Print PDF files using DOM APIs");
 
     var blob = await convertBlobsToBlob(blobs);
     var base64String = await pdfBlobTo64(blob);
@@ -5433,7 +5496,7 @@ async function handleGetMyPostData(data: any) {
     updateToPhone("message", "Đang lấy token xác thực...");
 
     const response = await getTokenMyVNPost(tabId);
-    
+
 
     if (!response || !response.token) {
       updateToPhone(
@@ -5467,7 +5530,7 @@ async function handleGetMyPostData(data: any) {
       if (accountRes?.orgUserList?.length > 0) {
         maKH = accountRes.orgUserList[0].orgCode;
         tenKH = accountRes.orgUserList[0].orgName;
-        console.log( `Tìm thấy khách hàng: ${tenKH} (${maKH})`);
+        console.log(`Tìm thấy khách hàng: ${tenKH} (${maKH})`);
         updateToPhone("message", `Tìm thấy khách hàng: ${tenKH} (${maKH})`);
       } else {
         throw new Error("orgUserList rỗng");
@@ -5661,11 +5724,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ status: "error", error: "Database chưa được khởi tạo" });
           return;
         }
-        
+
         // Truy vấn thông tin hợp đồng của khách hàng từ Firebase
         const snapshot = await db.ref(`PORTAL/HopDongs/${maKH}`).get();
         const hopDong = snapshot.val();
-        
+
         sendResponse({ status: "success", hopDong });
       } catch (error: any) {
         console.error("[Background] Lỗi nạp dữ liệu hợp đồng:", error);
