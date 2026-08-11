@@ -83,7 +83,7 @@ async function getPortalTokenFromTab(): Promise<string | null> {
 /**
  * Check if CMS and my.vnpost.vn are logged in
  */
-async function checkLoginStatus(): Promise<{ cms: boolean; portal: boolean }> {
+async function checkLoginStatus(): Promise<{ cms: boolean; }> {
     try {
         // Check CMS login by trying to access a CMS endpoint
         const cmsCheck = await fetch("https://cms.vnpost.vn/api/admin/complaints/loadformadd?type=DVBC", {
@@ -101,15 +101,11 @@ async function checkLoginStatus(): Promise<{ cms: boolean; portal: boolean }> {
 
         const cmsLoggedIn = cmsCheck.ok && !cmsCheck.url.includes('login');
 
-        // Check my.vnpost.vn login by fetching from active tab
-        const portalToken = await getPortalTokenFromTab();
-        const portalLoggedIn = !!portalToken;
-
-        return { cms: cmsLoggedIn, portal: portalLoggedIn };
+        return { cms: cmsLoggedIn };
 
     } catch (error) {
         console.error('Error checking login status:', error);
-        return { cms: false, portal: false };
+        return { cms: false };
     }
 }
 
@@ -172,7 +168,7 @@ async function fetchDeliveryOrders(
         // Reverse to match logic in useOrderData
         orders.reverse();
 
-        
+
 
         return orders.map((order: any) => ({
             ...order,
@@ -528,16 +524,7 @@ async function createReminderCMS(order: ExtendedOrder, cmsAutoConfigs: CMSAutoCo
  * Main processing function
  */
 export async function processAutoReminder(orgCode: string): Promise<ProcessResult> {
-    
 
-    // 1. Check if already completed today
-    const alreadyCompleted = await isCompletedToday(orgCode);
-    if (alreadyCompleted) {
-        return {
-            success: false,
-            message: 'Đã xử lý hôm nay rồi, chờ ngày mai'
-        };
-    }
 
     // 2. Try to acquire lock
     const lockAcquired = await acquireLock(orgCode);
@@ -556,13 +543,6 @@ export async function processAutoReminder(orgCode: string): Promise<ProcessResul
             return {
                 success: false,
                 message: 'Chưa đăng nhập CMS. Vui lòng đăng nhập tại https://cms.vnpost.vn'
-            };
-        }
-
-        if (!loginStatus.portal) {
-            return {
-                success: false,
-                message: 'Chưa đăng nhập my.vnpost.vn. Vui lòng đăng nhập'
             };
         }
 
