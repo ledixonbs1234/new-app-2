@@ -107,12 +107,12 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         const mapToUse = providedExcelMap || excelData;
         const cmsToUse = providedCMSCache || cmsCache;
         try {
-            const response = await fetch("https://cms.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=0&ttkSrvIdL2=0&ttkSrvIdL3=0&ttkType=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrg=&searchInfoCode=&searchIsCompen=&ttkStatus=0&searchIsCompensated=&searchIsComp=&searchComplaintCompUnit=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=500&column=ttkId&desending=1&type=5&managedOrg=&managedUsr=&ttkCodeRef=", {
+            const response = await fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=&ttkSrvIdL2=0&ttkSrvIdL3=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=20&column=ttkId&desending=1&type=8&managedOrgLst=&ttkCodeRef=&managedUsrString=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&actResults=&action=2&ttkStatusLstNot=5", {
                 "headers": {
                     "accept": "*/*",
-                    "accept-language": "vi-VN,vi;q=0.9,fr-FR;q=0.8,fr;q=0.7,en-US;q=0.6,en;q=0.5",
+                    "accept-language": "vi,en-US;q=0.9,en;q=0.8",
                     "priority": "u=1, i",
-                    "sec-ch-ua": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\"",
+                    "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
                     "sec-ch-ua-mobile": "?0",
                     "sec-ch-ua-platform": "\"Windows\"",
                     "sec-fetch-dest": "empty",
@@ -120,15 +120,14 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                     "sec-fetch-site": "same-origin",
                     "x-requested-with": "XMLHttpRequest"
                 },
-                "referrer": "https://cms.vnpost.vn/admin/complaints",
+                "referrer": "https://hotrokhachhang.vnpost.vn/",
                 "body": null,
                 "method": "GET",
-                // "mode": "cors",
-                // "credentials": "include"
+                "mode": "cors",
+                "credentials": "include"
             });
             const htmlText = await response.text();
 
-            // Parse HTML - Wrap in table/tbody because DOMParser strips orphan tr tags
             const parser = new DOMParser();
             const doc = parser.parseFromString(`<table><tbody>${htmlText}</tbody></table>`, 'text/html');
             const rows = doc.querySelectorAll('tr');
@@ -139,34 +138,48 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 const id = checkbox?.getAttribute('data-id');
                 const status = checkbox?.getAttribute('data-status');
 
+                if (!id) return; // Bỏ qua các hàng ghi chú comment hoặc không có dữ liệu
+
                 const codeEl = row.querySelector('.cpl-table-code');
+                
+
                 const complaintCode = codeEl?.textContent?.trim();
 
-                const trackingLink = row.querySelector('td:nth-child(5) a');
+                const trackingLink = row.querySelector('td:nth-child(4) a');
                 const trackingNumber = trackingLink?.textContent?.trim();
-
-                const location = row.querySelector('td:nth-child(6)')?.textContent?.trim();
-                const serviceType = row.querySelector('td:nth-child(7)')?.textContent?.trim();
-                const note = row.querySelector('td:nth-child(8)')?.textContent?.trim();
-                const createDate = row.querySelector('td:nth-child(9)')?.textContent?.trim();
-                const deadline = row.querySelector('td:nth-child(10)')?.textContent?.trim();
-                // Find status label inside td with width 170px
-                const statusText = row.querySelector('.label_status')?.textContent?.trim();
-
-                if (id) {
-                    parsedData.push({
-                        id,
-                        status,
-                        complaintCode,
-                        trackingNumber,
-                        location,
-                        serviceType,
-                        note,
-                        createDate,
-                        deadline,
-                        statusText
-                    });
+                if(trackingNumber && trackingNumber.includes(' ')) {
+                    //bỏ qua
+                    return;
                 }
+
+                const complaintType = row.querySelector('td:nth-child(5)')?.textContent?.trim();
+                const reason = row.querySelector('td:nth-child(6)')?.textContent?.trim();
+                const channel = row.querySelector('td:nth-child(7)')?.textContent?.trim();
+                const createdOrg = row.querySelector('td:nth-child(8)')?.textContent?.trim();
+                const createDate = row.querySelector('td:nth-child(9)')?.textContent?.trim();
+                const location = row.querySelector('td:nth-child(10)')?.textContent?.trim();
+                const priority = row.querySelector('td:nth-child(11)')?.textContent?.trim();
+                const deadline = row.querySelector('td:nth-child(12)')?.textContent?.trim();
+                const expirationStatus = row.querySelector('td:nth-child(13)')?.textContent?.trim();
+                const statusText = row.querySelector('.label_status_2')?.textContent?.trim();
+
+                parsedData.push({
+                    id,
+                    status,
+                    complaintCode,
+                    trackingNumber,
+                    complaintType,
+                    reason,
+                    note: reason,
+                    channel,
+                    createdOrg,
+                    createDate,
+                    location,
+                    priority,
+                    deadline,
+                    expirationStatus,
+                    statusText
+                });
             });
 
             console.log('Parsed Data:', parsedData);
@@ -388,10 +401,11 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         }
 
         // Tạo chuỗi ID (mỗi ID một dòng)
-        const idsString = validIds.join('\n');
+        const idsString = validIds.join('\n')
         const targetUrl = "https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2";
 
         message.loading({ content: "Đang mở trang tra cứu và lấy dữ liệu...", key: 'bccp-process', duration: 0 });
+        debugger
 
         // Mở tab mới ở chế độ background
         chrome.tabs.create({ url: targetUrl, active: false }, (tab) => {
@@ -451,6 +465,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
                                     // Điền dữ liệu vào textarea
                                     textarea.value = ids;
+                                    debugger
 
                                     // Chuẩn bị form data thay vì click button
                                     const form = document.getElementById("aspnetForm") as HTMLFormElement;
@@ -552,12 +567,13 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
             if (code && code !== 'Số hiệu BG') { // Skip header rows
                 // Get status from "Kết quả phát" column
-                const status = row['Kết quả phát_1'] ||
+                const status = row['__EMPTY_11'] ||
                     '';
 
                 // Get payment status - it's in __EMPTY_13 based on log
                 const payment = row['Trạng thái'] ||
                     '';
+                debugger
 
                 if (code.toString().trim()) {
                     // Cập nhật hoặc thêm mới vào Map hiện có
