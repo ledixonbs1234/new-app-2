@@ -90,108 +90,95 @@ async function addLog(message: string): Promise<void> {
 
 /**
  * Main function to check and run auto reminder
+ * Executing 2 sequential HTTP fetch requests:
+ * 1. GET complaint waiting assign data (HTML format)
+ * 2. Extract IDs from data-id="..." attributes
+ * 3. POST extracted IDs payload as FormData Blob to receive complaints
  * @param force If true, bypass checks for enabled, time window (dùng cho nút bấm thủ công)
  * @param isLoginEvent If true: Được kích hoạt do đổi tài khoản/token (quan trọng cho multi-user)
  */
 export async function checkAndRunAutoReminder(force: boolean = false, isLoginEvent: boolean = false): Promise<void> {
     try {
-        const config = await getConfig();
+        console.log('[Auto Reminder] Bắt đầu kiểm tra và xử lý tự động khiếu nại...');
 
-        // 1. Kiểm tra bật tắt (Vẫn cần kiểm tra kể cả khi login, nếu user tắt hẳn feature thì không chạy)
-        if (!config.enabled && !force) {
-            console.log('[Auto Reminder] Feature is disabled');
-            return;
-        }
+        // Bước 1: Fetch lấy dữ liệu HTML
+        const loadUrl = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/load-data-waiting-assign?ttkSrvId=&ttkSrvIdL2=&ttkSrvIdL3=&ttkTypeLst=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&type=2&managedOrgLst=&managedUsrString=&ttkCodeRef=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&assignStatus=0&actType=9&actResults=&pageIndex=1&pageSize=20&column=ttkId&desending=1&action=1';
 
-        // 2. Kiểm tra khung giờ
-        // Nếu là force (thủ công) hoặc isLoginEvent (vừa đăng nhập) -> BỎ QUA kiểm tra giờ
-        // User muốn hễ đăng nhập vào là check ngay, bất kể 8h sáng hay 2h chiều
-        if (!isWithinTimeWindow(config) && !force && !isLoginEvent) {
-            console.log('[Auto Reminder] Not within time window');
-            return;
-        }
+        const loadHeaders = {
+            "accept": "*/*",
+            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+            "x-requested-with": "XMLHttpRequest"
+        };
 
-        // 3. Kiểm tra ngày chạy gần nhất (lastRunDate)
-        const today = getTodayDateString();
-
-        // QUAN TRỌNG: Nếu là isLoginEvent -> BỎ QUA check lastRunDate global.
-        // Vì lastRunDate chỉ lưu ngày chạy của "máy tính này", không phân biệt user A hay B.
-        // Việc check đã chạy cho user này chưa sẽ do hàm processAutoReminder lo (check trên server).
-        if (config.lastRunDate === today && !force && !isLoginEvent) {
-            console.log('[Auto Reminder] Already ran today (Global check)');
-            return;
-        }
-
-        // Set Badge to RUN (Blue)
-        chrome.action.setBadgeText({ text: 'RUN' });
-        chrome.action.setBadgeBackgroundColor({ color: '#2196F3' });
-
-        await addLog(force ? '🚀 Bắt đầu chạy thủ công (Run Now)' : '🚀 Bắt đầu kiểm tra tự động');
-
-        // Get orgCode from storage
-        const orgCode = await new Promise<string>((resolve) => {
-            chrome.storage.local.get(['orgCode'], (result) => {
-                resolve(result.orgCode || '');
-            });
+        const response = await fetch(loadUrl, {
+            method: 'GET',
+            headers: loadHeaders,
+            credentials: 'include'
         });
 
-        if (!orgCode) {
-            await addLog('❌ Không tìm thấy mã khách hàng. Vui lòng đăng nhập');
+        if (!response.ok) {
+            console.error(`[Auto Reminder] Lỗi fetch load-data-waiting-assign: ${response.status} ${response.statusText}`);
+            await addLog(`❌ Lỗi fetch HTML (Status ${response.status}): ${response.statusText}`);
             return;
         }
-        const triggerReason = isLoginEvent ? 'Đổi tài khoản' : (force ? 'Thủ công' : 'Định kỳ');
-        await addLog(`🚀 Kích hoạt kiểm tra (${triggerReason}) cho khách hàng: ${orgCode}`);
 
-        // Set Badge đang chạy
-        chrome.action.setBadgeText({ text: '...' });
-        chrome.action.setBadgeBackgroundColor({ color: '#FFA500' });
+        const htmlText = await response.text();
 
-        // Run the auto reminder process
-        // Hàm này bên trong đã có logic check isCompletedToday(orgCode) trên Firebase
-        // Nên nó sẽ tự động skip nếu Customer A đã chạy rồi, và chạy tiếp nếu Customer B chưa chạy.
-        const result = await processAutoReminder(orgCode);
+        // Bước 2: Trích xuất danh sách ID
+        const regex = /data-id="(\d+)"/g;
+        const extractedIds: number[] = [];
+        let match: RegExpExecArray | null;
 
-        if (result.success) {
-            // Set Badge to Count (Green)
-            const countText = result.ordersProcessed !== undefined ? result.ordersProcessed.toString() : 'OK';
-            chrome.action.setBadgeText({ text: countText });
-            chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
-
-            await addLog(`✅ ${result.message}`);
-            if (result.ordersProcessed !== undefined) {
-                await addLog(`📦 Đã xử lý ${result.ordersProcessed} đơn hàng`);
-            }
-            // Chỉ cập nhật lastRunDate global nếu là chạy định kỳ
-            // Nếu chạy do login nhiều acc, ta không chặn global để acc sau còn chạy được
-            if (!isLoginEvent && !force) {
-                config.lastRunDate = today;
-                await saveConfig(config);
-            }
-
-        } else {
-            // Set Badge to ERR (Red)
-            chrome.action.setBadgeText({ text: 'ERR' });
-            chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
-
-            await addLog(`⚠️ ${result.message}`);
-        }
-
-        if (result.errors && result.errors.length > 0) {
-            for (const error of result.errors) {
-                await addLog(`❌ ${error}`);
+        while ((match = regex.exec(htmlText)) !== null) {
+            const idNum = Number(match[1]);
+            if (!isNaN(idNum) && !extractedIds.includes(idNum)) {
+                extractedIds.push(idNum);
             }
         }
 
-        // Cleanup old data
-        await cleanupExpiredLocks();
-        await cleanupOldCompletions();
+        if (extractedIds.length === 0) {
+            console.log("Không có dữ liệu cần nhận");
+            await addLog("Không có dữ liệu cần nhận");
+            return;
+        }
+
+        console.log(`[Auto Reminder] Trích xuất được ${extractedIds.length} ID:`, extractedIds);
+        await addLog(`🔎 Trích xuất được ${extractedIds.length} ID khiếu nại chờ giao: ${extractedIds.join(', ')}`);
+
+        // Bước 3: Fetch thực hiện nhận yêu cầu (Receive)
+        const receiveUrl = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/receive';
+
+        const formData = new FormData();
+        const jsonPayload = JSON.stringify({ ids: extractedIds, relation: "true" });
+        const blobPayload = new Blob([jsonPayload], { type: 'application/json' });
+
+        formData.append("createUnitTicket", blobPayload, "blob");
+
+        const receiveHeaders = {
+            "accept": "*/*",
+            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+            "x-requested-with": "XMLHttpRequest"
+        };
+
+        const receiveResponse = await fetch(receiveUrl, {
+            method: 'POST',
+            headers: receiveHeaders,
+            body: formData,
+            credentials: 'include'
+        });
+
+        if (!receiveResponse.ok) {
+            console.error(`[Auto Reminder] Lỗi POST receive: ${receiveResponse.status} ${receiveResponse.statusText}`);
+            await addLog(`❌ Lỗi POST receive (Status ${receiveResponse.status}): ${receiveResponse.statusText}`);
+            return;
+        }
+
+        const receiveResult = await receiveResponse.text();
+        console.log("[Auto Reminder] Nhận khiếu nại thành công:", receiveResult);
+        await addLog(`✅ Nhận khiếu nại thành công cho ${extractedIds.length} ID`);
 
     } catch (error) {
-        // Set Badge to ERR (Red)
-        chrome.action.setBadgeText({ text: 'ERR' });
-        chrome.action.setBadgeBackgroundColor({ color: '#F44336' });
-
-        console.error('[Auto Reminder] Error in checkAndRunAutoReminder:', error);
+        console.error("[Auto Reminder] Lỗi trong quá trình xử lý auto reminder:", error);
         await addLog(`❌ Lỗi hệ thống: ${error}`);
     }
 }

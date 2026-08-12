@@ -6427,7 +6427,7 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
  */
 async function handleFetchCMSData(
   payload: { maVanDon: string },
-  sendResponse: (response: any) => void,
+  sendResponse: (response: any) => void
 ) {
   const { maVanDon } = payload;
   console.log(`[BG CMS] Fetching data for ${maVanDon}...`);
