@@ -107,7 +107,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         const mapToUse = providedExcelMap || excelData;
         const cmsToUse = providedCMSCache || cmsCache;
         try {
-            const response = await fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=&ttkSrvIdL2=0&ttkSrvIdL3=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=20&column=ttkId&desending=1&type=8&managedOrgLst=&ttkCodeRef=&managedUsrString=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&actResults=&action=2&ttkStatusLstNot=5", {
+            const fetchOptions = {
                 "headers": {
                     "accept": "*/*",
                     "accept-language": "vi,en-US;q=0.9,en;q=0.8",
@@ -123,64 +123,74 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 "referrer": "https://hotrokhachhang.vnpost.vn/",
                 "body": null,
                 "method": "GET",
-                "mode": "cors",
-                "credentials": "include"
-            });
-            const htmlText = await response.text();
+                "mode": "cors" as RequestMode,
+                "credentials": "include" as RequestCredentials
+            };
 
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(`<table><tbody>${htmlText}</tbody></table>`, 'text/html');
-            const rows = doc.querySelectorAll('tr');
+            const fetchApi1 = fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=&ttkSrvIdL2=0&ttkSrvIdL3=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=500&column=ttkId&desending=1&type=8&managedOrgLst=&ttkCodeRef=&managedUsrString=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&actResults=&action=2&ttkStatusLstNot=5", fetchOptions);
+            const fetchApi2 = fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/loaddata?ttkSrvId=&ttkSrvIdL2=&ttkSrvIdL3=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&pageIndex=1&pageSize=500&column=ttkId&desending=1&type=2&managedOrgLst=&ttkCodeRef=&managedUsrString=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&actResults=&action=2&ttkStatusLstNot=5", fetchOptions);
 
-            const parsedData: any[] = [];
-            rows.forEach((row) => {
-                const checkbox = row.querySelector('.chkcheck');
-                const id = checkbox?.getAttribute('data-id');
-                const status = checkbox?.getAttribute('data-status');
+            const [response1, response2] = await Promise.all([fetchApi1, fetchApi2]);
+            const [htmlText1, htmlText2] = await Promise.all([response1.text(), response2.text()]);
 
-                if (!id) return; // Bỏ qua các hàng ghi chú comment hoặc không có dữ liệu
+            const parseHtml = (htmlText: string) => {
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(`<table><tbody>${htmlText}</tbody></table>`, 'text/html');
+                const rows = doc.querySelectorAll('tr');
 
-                const codeEl = row.querySelector('.cpl-table-code');
-                
+                const items: any[] = [];
+                rows.forEach((row) => {
+                    const checkbox = row.querySelector('.chkcheck');
+                    const id = checkbox?.getAttribute('data-id');
+                    const status = checkbox?.getAttribute('data-status');
 
-                const complaintCode = codeEl?.textContent?.trim();
+                    if (!id) return; // Bỏ qua các hàng ghi chú comment hoặc không có dữ liệu
 
-                const trackingLink = row.querySelector('td:nth-child(4) a');
-                const trackingNumber = trackingLink?.textContent?.trim();
-                if(trackingNumber && trackingNumber.includes(' ')) {
-                    //bỏ qua
-                    return;
-                }
+                    const codeEl = row.querySelector('.cpl-table-code');
+                    const complaintCode = codeEl?.textContent?.trim();
 
-                const complaintType = row.querySelector('td:nth-child(5)')?.textContent?.trim();
-                const reason = row.querySelector('td:nth-child(6)')?.textContent?.trim();
-                const channel = row.querySelector('td:nth-child(7)')?.textContent?.trim();
-                const createdOrg = row.querySelector('td:nth-child(8)')?.textContent?.trim();
-                const createDate = row.querySelector('td:nth-child(9)')?.textContent?.trim();
-                const location = row.querySelector('td:nth-child(10)')?.textContent?.trim();
-                const priority = row.querySelector('td:nth-child(11)')?.textContent?.trim();
-                const deadline = row.querySelector('td:nth-child(12)')?.textContent?.trim();
-                const expirationStatus = row.querySelector('td:nth-child(13)')?.textContent?.trim();
-                const statusText = row.querySelector('.label_status_2')?.textContent?.trim();
+                    const trackingLink = row.querySelector('td:nth-child(4) a');
+                    const trackingNumber = trackingLink?.textContent?.trim();
+                    if (trackingNumber && trackingNumber.includes(' ')) {
+                        // Bỏ qua
+                        return;
+                    }
 
-                parsedData.push({
-                    id,
-                    status,
-                    complaintCode,
-                    trackingNumber,
-                    complaintType,
-                    reason,
-                    note: reason,
-                    channel,
-                    createdOrg,
-                    createDate,
-                    location,
-                    priority,
-                    deadline,
-                    expirationStatus,
-                    statusText
+                    const complaintType = row.querySelector('td:nth-child(5)')?.textContent?.trim();
+                    const reason = row.querySelector('td:nth-child(6)')?.textContent?.trim();
+                    const channel = row.querySelector('td:nth-child(7)')?.textContent?.trim();
+                    const createdOrg = row.querySelector('td:nth-child(8)')?.textContent?.trim();
+                    const createDate = row.querySelector('td:nth-child(9)')?.textContent?.trim();
+                    const location = row.querySelector('td:nth-child(10)')?.textContent?.trim();
+                    const priority = row.querySelector('td:nth-child(11)')?.textContent?.trim();
+                    const deadline = row.querySelector('td:nth-child(12)')?.textContent?.trim();
+                    const expirationStatus = row.querySelector('td:nth-child(13)')?.textContent?.trim();
+                    const statusText = row.querySelector('.label_status_2')?.textContent?.trim();
+
+                    items.push({
+                        id,
+                        status,
+                        complaintCode,
+                        trackingNumber,
+                        complaintType,
+                        reason,
+                        note: reason,
+                        channel,
+                        createdOrg,
+                        createDate,
+                        location,
+                        priority,
+                        deadline,
+                        expirationStatus,
+                        statusText
+                    });
                 });
-            });
+                return items;
+            };
+
+            const dataFromApi1 = parseHtml(htmlText1);
+            const dataFromApi2 = parseHtml(htmlText2);
+            const parsedData = [...dataFromApi1, ...dataFromApi2];
 
             console.log('Parsed Data:', parsedData);
 
