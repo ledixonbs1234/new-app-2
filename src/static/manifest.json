@@ -41,8 +41,19 @@
         "scripting",
         "sidePanel",
         "cookies",
-        "downloads"
+        "downloads",
+        "declarativeNetRequest",
+        "declarativeNetRequestWithHostAccess"
     ],
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "ruleset_cors",
+                "enabled": true,
+                "path": "dnr_rules.json"
+            }
+        ]
+    },
     "web_accessible_resources": [
         {
             "resources": [

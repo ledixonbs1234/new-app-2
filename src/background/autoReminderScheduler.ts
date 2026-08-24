@@ -2,9 +2,7 @@
  * Auto Reminder Scheduler - Daily alarm scheduler for auto reminder feature
  * Runs between 8:00 AM - 10:00 AM every day
  */
-
-import { processAutoReminder } from './autoReminderProcessor';
-import { cleanupExpiredLocks, cleanupOldCompletions } from '../services/autoReminderSync';
+// Unused imports removed
 
 interface AutoReminderConfig {
     enabled: boolean;
@@ -20,7 +18,7 @@ const DEFAULT_CONFIG: AutoReminderConfig = {
 };
 
 const ALARM_NAME = 'auto-reminder-daily';
-const CHECK_INTERVAL_MINUTES = 15; // Check every 15 minutes
+const CHECK_INTERVAL_MINUTES = 60; // Check every 60 minutes
 
 /**
  * Get auto reminder configuration from storage
@@ -89,67 +87,113 @@ async function addLog(message: string): Promise<void> {
 }
 
 /**
- * Main function to check and run auto reminder
- * Executing 2 sequential HTTP fetch requests:
- * 1. GET complaint waiting assign data (HTML format)
- * 2. Extract IDs from data-id="..." attributes
- * 3. POST extracted IDs payload as FormData Blob to receive complaints
- * @param force If true, bypass checks for enabled, time window (dùng cho nút bấm thủ công)
- * @param isLoginEvent If true: Được kích hoạt do đổi tài khoản/token (quan trọng cho multi-user)
+ * Helper function to fetch complaint data, extract IDs, and POST to receive
+ * @param label Label for logging (e.g., "Type 1", "Type 2")
+ * @param loadUrl URL to fetch HTML complaint data from
+ * @returns Array of received IDs, or empty array if no data/error
  */
-export async function checkAndRunAutoReminder(force: boolean = false, isLoginEvent: boolean = false): Promise<void> {
-    try {
-        console.log('[Auto Reminder] Bắt đầu kiểm tra và xử lý tự động khiếu nại...');
+async function fetchAndReceiveComplaints(label: string, loadUrl: string, isLienQuan: boolean): Promise<number[]> {
+    const loadHeaders = {
+        "accept": "*/*",
+        "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+        "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": "\"Windows\"",
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "x-requested-with": "XMLHttpRequest"
+    };
 
-        // Bước 1: Fetch lấy dữ liệu HTML
-        const loadUrl = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/load-data-waiting-assign?ttkSrvId=&ttkSrvIdL2=&ttkSrvIdL3=&ttkTypeLst=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&type=2&managedOrgLst=&managedUsrString=&ttkCodeRef=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&assignStatus=0&actType=9&actResults=&pageIndex=1&pageSize=20&column=ttkId&desending=1&action=1';
+    // Bước 1: Fetch lấy dữ liệu HTML
+    const response = await fetch(loadUrl, {
+        method: 'GET',
+        headers: loadHeaders,
+        referrer: "https://hotrokhachhang.vnpost.vn/",
+        mode: 'cors',
+        credentials: 'include'
+    });
 
-        const loadHeaders = {
-            "accept": "*/*",
-            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
-            "x-requested-with": "XMLHttpRequest"
-        };
+    if (!response.ok) {
+        console.error(`[Auto Reminder][${label}] Lỗi fetch load-data-waiting-assign: ${response.status} ${response.statusText}`);
+        await addLog(`❌ [${label}] Lỗi fetch HTML (Status ${response.status}): ${response.statusText}`);
+        return [];
+    }
 
-        const response = await fetch(loadUrl, {
-            method: 'GET',
-            headers: loadHeaders,
-            credentials: 'include'
-        });
+    const htmlText = await response.text();
 
-        if (!response.ok) {
-            console.error(`[Auto Reminder] Lỗi fetch load-data-waiting-assign: ${response.status} ${response.statusText}`);
-            await addLog(`❌ Lỗi fetch HTML (Status ${response.status}): ${response.statusText}`);
-            return;
+    // Bước 2: Trích xuất danh sách ID
+    const regex = /data-id="(\d+)"/g;
+    const extractedIds: number[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(htmlText)) !== null) {
+        const idNum = Number(match[1]);
+        if (!isNaN(idNum) && !extractedIds.includes(idNum)) {
+            extractedIds.push(idNum);
         }
+    }
 
-        const htmlText = await response.text();
+    if (extractedIds.length === 0) {
+        console.log(`[Auto Reminder][${label}] Không có dữ liệu cần nhận`);
+        await addLog(`[${label}] Không có dữ liệu cần nhận`);
+        return [];
+    }
 
-        // Bước 2: Trích xuất danh sách ID
-        const regex = /data-id="(\d+)"/g;
-        const extractedIds: number[] = [];
-        let match: RegExpExecArray | null;
+    console.log(`[Auto Reminder][${label}] Trích xuất được ${extractedIds.length} ID:`, extractedIds);
+    await addLog(`🔎 [${label}] Trích xuất được ${extractedIds.length} ID khiếu nại chờ giao: ${extractedIds.join(', ')}`);
 
-        while ((match = regex.exec(htmlText)) !== null) {
-            const idNum = Number(match[1]);
-            if (!isNaN(idNum) && !extractedIds.includes(idNum)) {
-                extractedIds.push(idNum);
+    // Bước 3: Fetch thực hiện nhận yêu cầu (Receive)
+    let success = false;
+    let receiveResultText = "";
+
+    // Ưu tiên gửi request qua tab hotrokhachhang.vnpost.vn đang mở để tránh triệt để lỗi 403 Forbidden do CORS/Cookie SameSite
+    try {
+        const tabs = await chrome.tabs.query({ url: "*://hotrokhachhang.vnpost.vn/*" });
+        if (tabs.length > 0 && tabs[0].id) {
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tabs[0].id },
+                func: async (idsToReceive: number[], isLienQuan: boolean) => {
+                    try {
+                        const receiveUrl = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/receive';
+                        const formData = new FormData();
+                        const jsonPayload = JSON.stringify({ ids: idsToReceive, relation: isLienQuan ? "true" : "false" });
+                        const blobPayload = new Blob([jsonPayload], { type: 'application/json' });
+                        formData.append("createUnitTicket", blobPayload, "blob");
+
+                        const res = await fetch(receiveUrl, {
+                            method: 'POST',
+                            headers: {
+                                "accept": "*/*",
+                                "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+                                "x-requested-with": "XMLHttpRequest"
+                            },
+                            body: formData,
+                            credentials: 'include'
+                        });
+                        const text = await res.text();
+                        return { ok: res.ok, status: res.status, text };
+                    } catch (err: any) {
+                        return { ok: false, status: 0, text: err?.message || String(err) };
+                    }
+                },
+                args: [extractedIds, isLienQuan]
+            });
+
+            if (results && results[0]?.result && results[0].result.ok) {
+                success = true;
+                receiveResultText = results[0].result.text;
+                console.log(`[Auto Reminder][${label}] Gửi POST receive qua Tab thành công:`, receiveResultText);
             }
         }
+    } catch (tabErr) {
+        console.warn(`[Auto Reminder][${label}] Không thể gửi qua tab, chuyển sang fetch từ Background:`, tabErr);
+    }
 
-        if (extractedIds.length === 0) {
-            console.log("Không có dữ liệu cần nhận");
-            await addLog("Không có dữ liệu cần nhận");
-            return;
-        }
-
-        console.log(`[Auto Reminder] Trích xuất được ${extractedIds.length} ID:`, extractedIds);
-        await addLog(`🔎 Trích xuất được ${extractedIds.length} ID khiếu nại chờ giao: ${extractedIds.join(', ')}`);
-
-        // Bước 3: Fetch thực hiện nhận yêu cầu (Receive)
+    if (!success) {
         const receiveUrl = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/receive';
-
         const formData = new FormData();
-        const jsonPayload = JSON.stringify({ ids: extractedIds, relation: "true" });
+        const jsonPayload = JSON.stringify({ ids: extractedIds, relation: isLienQuan ? "true" : "false" });
         const blobPayload = new Blob([jsonPayload], { type: 'application/json' });
 
         formData.append("createUnitTicket", blobPayload, "blob");
@@ -157,25 +201,71 @@ export async function checkAndRunAutoReminder(force: boolean = false, isLoginEve
         const receiveHeaders = {
             "accept": "*/*",
             "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+            "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
             "x-requested-with": "XMLHttpRequest"
         };
 
         const receiveResponse = await fetch(receiveUrl, {
             method: 'POST',
             headers: receiveHeaders,
+            referrer: "https://hotrokhachhang.vnpost.vn/",
             body: formData,
+            mode: 'cors',
             credentials: 'include'
         });
 
         if (!receiveResponse.ok) {
-            console.error(`[Auto Reminder] Lỗi POST receive: ${receiveResponse.status} ${receiveResponse.statusText}`);
-            await addLog(`❌ Lỗi POST receive (Status ${receiveResponse.status}): ${receiveResponse.statusText}`);
-            return;
+            console.error(`[Auto Reminder][${label}] Lỗi POST receive: ${receiveResponse.status} ${receiveResponse.statusText}`);
+            await addLog(`❌ [${label}] Lỗi POST receive (Status ${receiveResponse.status}): ${receiveResponse.statusText}`);
+            return [];
         }
 
-        const receiveResult = await receiveResponse.text();
-        console.log("[Auto Reminder] Nhận khiếu nại thành công:", receiveResult);
-        await addLog(`✅ Nhận khiếu nại thành công cho ${extractedIds.length} ID`);
+        receiveResultText = await receiveResponse.text();
+    }
+
+    console.log(`[Auto Reminder][${label}] Nhận khiếu nại thành công:`, receiveResultText);
+    await addLog(`✅ [${label}] Nhận khiếu nại thành công cho ${extractedIds.length} ID`);
+
+    return extractedIds;
+}
+
+/**
+ * Main function to check and run auto reminder
+ * Executing fetch requests for both type=1 and type=2 complaint data:
+ * 1. GET complaint waiting assign data (HTML format) for each type
+ * 2. Extract IDs from data-id="..." attributes
+ * 3. POST extracted IDs payload as FormData Blob to receive complaints
+ * @param force If true, bypass checks for enabled, time window (dùng cho nút bấm thủ công)
+ * @param isLoginEvent If true: Được kích hoạt do đổi tài khoản/token (quan trọng cho multi-user)
+ */
+export async function checkAndRunAutoReminder(_force: boolean = false, _isLoginEvent: boolean = false): Promise<void> {
+    try {
+        console.log('[Auto Reminder] Bắt đầu kiểm tra và xử lý tự động khiếu nại...');
+
+        // URL type=2: Sắp xếp theo ttkId
+        const loadUrlType2 = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/load-data-waiting-assign?ttkSrvId=&ttkSrvIdL2=&ttkSrvIdL3=&ttkTypeLst=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&type=2&managedOrgLst=&managedUsrString=&ttkCodeRef=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&assignStatus=0&actType=9&actResults=&pageIndex=1&pageSize=20&column=ttkId&desending=1&action=1';
+
+        // URL type=1: Sắp xếp theo createdDate
+        const loadUrlType1 = 'https://hotrokhachhang.vnpost.vn/api/admin/complaints/load-data-waiting-assign?ttkSrvId=&ttkSrvIdL2=&ttkSrvIdL3=&ttkTypeLst=&ttkType=&reasonClassifications=&ttkCode=&ttkGroup=&searchFromDate=&searchToDate=&createdOrgLst=&relationOrgLst=&searchInfoCode=&searchIsCompen=&ttkStatusLst=&searchIsComps=&ttkCustomerNumber=&accntTypes=&ttkContactNumber=&ttkContactEmail=&type=1&managedOrgLst=&managedUsrString=&ttkCodeRef=&managedOrgComplaintLst=&createdOrgComplaintLst=&ttkSourceLst=&assignStatus=0&actType=9&actResults=&pageIndex=1&pageSize=20&column=createdDate&desending=1&action=1';
+
+        // Xử lý type=2
+        const idsType2 = await fetchAndReceiveComplaints('Type 2', loadUrlType2, true);
+
+        // Xử lý type=1
+        const idsType1 = await fetchAndReceiveComplaints('Type 1', loadUrlType1, false);
+
+        // Tổng kết
+        const totalIds = idsType2.length + idsType1.length;
+        if (totalIds > 0) {
+            await addLog(`📊 Tổng kết: Đã nhận ${totalIds} khiếu nại (Type 2: ${idsType2.length}, Type 1: ${idsType1.length})`);
+        } else {
+            await addLog(`📊 Tổng kết: Không có khiếu nại nào cần nhận`);
+        }
 
     } catch (error) {
         console.error("[Auto Reminder] Lỗi trong quá trình xử lý auto reminder:", error);

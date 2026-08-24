@@ -1,0 +1,30 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": {
+            "type": "modifyHeaders",
+            "requestHeaders": [
+                {
+                    "header": "Origin",
+                    "operation": "set",
+                    "value": "https://hotrokhachhang.vnpost.vn"
+                },
+                {
+                    "header": "Referer",
+                    "operation": "set",
+                    "value": "https://hotrokhachhang.vnpost.vn/"
+                },
+                {
+                    "header": "Sec-Fetch-Site",
+                    "operation": "set",
+                    "value": "same-origin"
+                }
+            ]
+        },
+        "condition": {
+            "urlFilter": "||hotrokhachhang.vnpost.vn/",
+            "resourceTypes": ["xmlhttprequest", "other", "main_frame", "sub_frame"]
+        }
+    }
+]

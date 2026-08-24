@@ -1652,22 +1652,30 @@ const Options: React.FC = () => {
                                             formData.append('actType', '4');
                                             formData.append('actResult', '490'); // PTC result code
                                             formData.append('ttkId', item.ticketId);
-                                            formData.append('actContent', 'PTC');
+                                            formData.append('actContent', 'ptc');
+                                            formData.append('compType', '');
+                                            formData.append('compensationRate', '1');
+                                            formData.append('chkIsIndemnify', '2');
+                                            formData.append('isCompensated', '2');
+                                            formData.append('paymentType', '2');
                                             formData.append('isProcess', 'true');
-                                            formData.append('isCompensated', 'false');
 
-                                            const saveRes = await fetch('https://cms.vnpost.vn/api/admin/complaints/save-result', {
+                                            const saveRes = await fetch('https://hotrokhachhang.vnpost.vn/api/admin/complaints/save-results', {
                                                 method: 'POST',
                                                 headers: {
                                                     'accept': '*/*',
                                                     'x-requested-with': 'XMLHttpRequest'
                                                 },
+                                                referrer: 'https://hotrokhachhang.vnpost.vn/',
                                                 body: formData,
                                                 credentials: 'include'
                                             });
 
-                                            const saveData = await saveRes.json();
-                                            if (!saveData.result || saveData.message !== 'Success') {
+                                            if (!saveRes.ok) {
+                                                throw new Error(`Failed to save result: HTTP ${saveRes.status}`);
+                                            }
+                                            const saveData = await saveRes.json().catch(() => null);
+                                            if (saveData && saveData.result === false) {
                                                 throw new Error(saveData.message || 'Failed to save result');
                                             }
 
@@ -1675,19 +1683,23 @@ const Options: React.FC = () => {
                                             await new Promise(resolve => setTimeout(resolve, 1000));
 
                                             // Step 2: Change Status
-                                            const changeRes = await fetch('https://cms.vnpost.vn/api/admin/complaints/changestatus', {
+                                            const changeRes = await fetch('https://hotrokhachhang.vnpost.vn/api/admin/complaints/changestatus', {
                                                 method: 'POST',
                                                 headers: {
                                                     'accept': '*/*',
                                                     'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
                                                     'x-requested-with': 'XMLHttpRequest'
                                                 },
-                                                body: `ids=${item.ticketId}`,
+                                                referrer: 'https://hotrokhachhang.vnpost.vn/',
+                                                body: `ids=${item.ticketId}&compensatedType=2`,
                                                 credentials: 'include'
                                             });
 
-                                            const changeData = await changeRes.json();
-                                            if (!changeData.result || changeData.message !== 'Success') {
+                                            if (!changeRes.ok) {
+                                                throw new Error(`Failed to change status: HTTP ${changeRes.status}`);
+                                            }
+                                            const changeData = await changeRes.json().catch(() => null);
+                                            if (changeData && changeData.result === false) {
                                                 throw new Error(changeData.message || 'Failed to change status');
                                             }
 

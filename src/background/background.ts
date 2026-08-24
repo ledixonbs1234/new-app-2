@@ -6056,47 +6056,68 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       (async () => {
         try {
           const { ticketId } = msg.payload;
+          const actContent = msg.payload?.actContent || msg.payload?.reason || "PTC";
           console.log(`[BG] Closing ticket ${ticketId}...`);
 
-          // BƯỚC 1: Lưu kết quả xử lý (Save Result)
+          // BƯỚC 1: Lưu kết quả xử lý (Save Results)
           const formData = new FormData();
           formData.append("actType", "4");
           formData.append("actResult", "490"); // 490 = Phát thành công/Giải quyết xong
-          formData.append("ttkId", ticketId);
-          formData.append("actContent", "<-Tạm đóng->");
-          formData.append("file", "undefined");
+          formData.append("ttkId", String(ticketId));
+          formData.append("actContent", actContent);
+          formData.append("compType", "");
+          formData.append("compensationRate", "1");
+          formData.append("chkIsIndemnify", "2");
+          formData.append("isCompensated", "2");
+          formData.append("paymentType", "2");
           formData.append("isProcess", "true");
-          formData.append("isCompensated", "false");
 
-          const saveRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/save-result", {
+          const saveRes = await fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/save-results", {
             method: "POST",
+            headers: {
+              "accept": "*/*",
+              "x-requested-with": "XMLHttpRequest"
+            },
+            referrer: "https://hotrokhachhang.vnpost.vn/",
             body: formData,
+            mode: "cors",
             credentials: "include"
           });
 
-          const saveData = await saveRes.json();
-
           // Kiểm tra kết quả bước 1
-          if (!saveData.result) {
-            throw new Error(`Lỗi lưu kết quả: ${saveData.message || 'Unknown error'}`);
+          if (!saveRes.ok) {
+            throw new Error(`Lỗi lưu kết quả: HTTP ${saveRes.status} ${saveRes.statusText}`);
           }
 
+          const saveData = await saveRes.json().catch(() => null);
+          if (saveData && saveData.result === false) {
+            throw new Error(`Lỗi lưu kết quả: ${saveData.message || 'Unknown error'}`);
+          }
+          await delay(500); // Delay 0.5s để đảm bảo server xử lý xong trước khi đóng hồ sơ
+
           // BƯỚC 2: Đóng hồ sơ (Change Status)
-          // API này dùng x-www-form-urlencoded
-          const closeRes = await fetch("https://cms.vnpost.vn/api/admin/complaints/changestatus", {
+          const closeRes = await fetch("https://hotrokhachhang.vnpost.vn/api/admin/complaints/changestatus", {
             method: "POST",
             headers: {
+              "accept": "*/*",
               "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+              "x-requested-with": "XMLHttpRequest"
             },
-            body: `ids=${ticketId}`,
+            referrer: "https://hotrokhachhang.vnpost.vn/",
+            body: `ids=${ticketId}&compensatedType=2`,
+            mode: "cors",
             credentials: "include"
           });
 
           // API changestatus thường trả về text hoặc json, kiểm tra ok là được
           if (closeRes.ok) {
+            const closeData = await closeRes.json().catch(() => null);
+            if (closeData && closeData.result === false) {
+              throw new Error(`Lỗi đóng hồ sơ: ${closeData.message || 'Unknown error'}`);
+            }
             sendResponse({ status: 'success' });
           } else {
-            throw new Error(`Lỗi đóng hồ sơ: ${closeRes.statusText}`);
+            throw new Error(`Lỗi đóng hồ sơ: HTTP ${closeRes.status} ${closeRes.statusText}`);
           }
 
         } catch (error: any) {
