@@ -190,7 +190,15 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
             const dataFromApi1 = parseHtml(htmlText1);
             const dataFromApi2 = parseHtml(htmlText2);
-            const parsedData = [...dataFromApi1, ...dataFromApi2];
+
+            // Khử trùng lặp theo id (nếu API 1 và API 2 trả về cùng một đơn)
+            const uniqueMap = new Map<string, any>();
+            [...dataFromApi1, ...dataFromApi2].forEach(item => {
+                if (item.id && !uniqueMap.has(item.id)) {
+                    uniqueMap.set(item.id, item);
+                }
+            });
+            const parsedData = Array.from(uniqueMap.values());
 
             console.log('Parsed Data:', parsedData);
 
@@ -404,7 +412,9 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             return;
         }
 
-        const validIds = data.map(item => item.trackingNumber).filter(Boolean);
+        const validIds = data
+            .map(item => item.trackingNumber?.trim())
+            .filter((id): id is string => Boolean(id && id.length === 13));
         if (validIds.length === 0) {
             message.warning("Không tìm thấy mã vận đơn hợp lệ");
             return;
@@ -415,7 +425,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
         const targetUrl = "https://bccp.vnpost.vn/BCCP.aspx?act=TraceListv2";
 
         message.loading({ content: "Đang mở trang tra cứu và lấy dữ liệu...", key: 'bccp-process', duration: 0 });
-        debugger
+
 
         // Mở tab mới ở chế độ background
         chrome.tabs.create({ url: targetUrl, active: false }, (tab) => {
@@ -475,7 +485,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
 
                                     // Điền dữ liệu vào textarea
                                     textarea.value = ids;
-                                    debugger
+
 
                                     // Chuẩn bị form data thay vì click button
                                     const form = document.getElementById("aspnetForm") as HTMLFormElement;
@@ -553,11 +563,36 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
     };
 
     const mergeExcelData = (jsonData: any[], onComplete?: (newData: any[]) => void) => {
-        // DEBUG: Log first row to see column names
-        if (jsonData.length > 0) {
-            console.log('Excel Column Names (Row 2):', Object.keys(jsonData[0] as any));
-            console.log('First Data Row Sample:', jsonData[0]);
+        // ================= BẮT ĐẦU: LIỆT KÊ TOÀN BỘ DỮ LIỆU EXCEL =================
+        // 1. Lọc ra toàn bộ các hàng thực sự có dữ liệu (loại bỏ các hàng rỗng hoàn toàn)
+        const validRows = jsonData.filter((row: any) => {
+            if (!row || typeof row !== 'object') return false;
+            return Object.values(row).some(
+                val => val !== null && val !== undefined && String(val).trim() !== ''
+            );
+        });
+
+        console.group(`%c[DEBUG EXCEL] TOÀN BỘ DỮ LIỆU (${validRows.length} HÀNG)`, 'color: #0088cc; font-weight: bold; font-size: 13px;');
+
+        if (validRows.length > 0) {
+            // 2. Gom tất cả tên cột (Key) xuất hiện trong toàn bộ file (tránh trường hợp hàng thiếu/thừa cột)
+            const allColumnKeys = Array.from(
+                new Set(validRows.flatMap(row => Object.keys(row)))
+            );
+
+            console.log('%c1. Danh sách toàn bộ tên cột (Keys) trong file:', 'font-weight: bold; color: #d9534f;', allColumnKeys);
+
+            // 3. Hiển thị toàn bộ các hàng dưới dạng Bảng trực quan (có thể cuộn và click tiêu đề để sắp xếp)
+            console.log('%c2. Bảng dữ liệu toàn bộ các hàng:', 'font-weight: bold;');
+            console.table(validRows);
+
+            // 4. In ra mảng Object gốc (có thể click vào dấu ▶ để bung từng hàng ra xem nếu muốn)
+            console.log('3. Mảng Object chi tiết (Raw Array):', validRows);
+        } else {
+            console.warn('⚠️ File Excel không có hàng nào chứa dữ liệu hợp lệ!');
         }
+        console.groupEnd();
+        // ================= KẾT THÚC PHẦN DEBUG =================
 
         // Mapping
         interface ExcelData {
@@ -583,7 +618,6 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
                 // Get payment status - it's in __EMPTY_13 based on log
                 const payment = row['Trạng thái'] ||
                     '';
-                debugger
 
                 if (code.toString().trim()) {
                     // Cập nhật hoặc thêm mới vào Map hiện có
@@ -624,7 +658,7 @@ const CheckComplete: React.FC<CheckCompleteProps> = ({ onBack }) => {
             message.success(`Đã gộp dữ liệu Excel thành công. Tổng cộng có ${nextExcelMap.size} mã vận đơn.`);
             if (onComplete) onComplete(newData);
         });
-    };
+    }
 
     const handleExcelUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];

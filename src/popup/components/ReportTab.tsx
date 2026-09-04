@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Button, Table, DatePicker, Space, Card, message, Typography, Radio, Progress } from 'antd';
+import { Button, Table, DatePicker, Space, Card, message, Typography, Progress, Select } from 'antd';
 import dayjs from 'dayjs';
-import { DownloadOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface Customer {
     code: string;
@@ -127,11 +127,22 @@ export default function ReportTab() {
 
     const [token, setToken] = useState("");
     const [buuCuc, setBuuCuc] = useState("593200");
+    const [reportSite, setReportSite] = useState<string>("portalkhl");
 
     useEffect(() => {
-        chrome.storage.local.get(['token', 'buuCuc'], (result) => {
+        chrome.storage.local.get(['token', 'buuCuc', 'reportStartDate'], (result) => {
             setToken(result.token || "");
             setBuuCuc(result.buuCuc || "593200");
+            if (result.reportStartDate) {
+                const savedStart = dayjs(result.reportStartDate);
+                setStartDate(savedStart);
+                const today = dayjs();
+                let calculatedEndDate = savedStart.endOf('month');
+                if (savedStart.isSame(today, 'month')) {
+                    calculatedEndDate = today;
+                }
+                setEndDate(calculatedEndDate);
+            }
         });
     }, []);
 
@@ -299,10 +310,237 @@ export default function ReportTab() {
         isRunningRef.current = false;
     };
 
+    const getCasReportToken = async (): Promise<string | null> => {
+        try {
+            const tabs = await chrome.tabs.query({ url: "*://casreport.vnpost.vn/*" });
+            if (tabs.length === 0) {
+                message.error("Vui lòng mở trang web casreport.vnpost.vn và đăng nhập!");
+                return null;
+            }
+
+            const tabId = tabs[0].id;
+            if (!tabId) {
+                message.error("Không tìm thấy tab casreport.vnpost.vn hợp lệ!");
+                return null;
+            }
+
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: () => {
+                    return sessionStorage.getItem("accessToken");
+                }
+            });
+
+            const casToken = results?.[0]?.result;
+            if (!casToken) {
+                message.error("Không lấy được accessToken từ session storage của trang casreport.vnpost.vn. Vui lòng đăng nhập lại!");
+                return null;
+            }
+
+            return casToken;
+        } catch (error) {
+            console.error("Lỗi lấy token từ casreport.vnpost.vn:", error);
+            message.error("Không thể kết nối để lấy thông tin từ tab casreport.vnpost.vn!");
+            return null;
+        }
+    };
+
+    const runCasReport = async (customer: Customer, casToken: string): Promise<boolean> => {
+        const tuNgayCas = startDate.format('YYYYMMDD');
+        const denNgayCas = endDate.format('YYYYMMDD');
+
+        const requestBody = {
+            "reportGroupCode": "bcds",
+            "reportCode": "BCGDPSKH",
+            "tuNgay": tuNgayCas,
+            "denNgay": denNgayCas,
+            "orgLogin": "593200",
+            "maTCT": "00",
+            "maBDT": "60",
+            "maBDH": "5962",
+            "maBCVHX": "593200",
+            "nguon": "",
+            "businessCode": "",
+            "dvt": "1",
+            "reportFormat": "ALL",
+            "codeCrm": customer.code,
+            "codeCms": customer.code,
+            "maHopDong": null,
+            "inCludeChildCMS": false,
+            "currentUser": {
+                "accessToken": casToken,
+                "tokenType": "Bearer ",
+                "username": "593200_tbc",
+                "employeeInfo": {
+                    "code": "00006822",
+                    "fullname": "NGUYỄN THỊ KIM HOANH",
+                    "dateOfBirth": "1982-10-12T00:00:00.000+0700",
+                    "idCard": "123456789",
+                    "email": "hoanhntk.bdbdh@gmail.com",
+                    "orgCode": "593522",
+                    "phoneNumber": "0914567259",
+                    "status": 1,
+                    "idCardType": 1,
+                    "positionId": null,
+                    "positionName": "Tổ trưởng",
+                    "titleId": "NVKD",
+                    "titleName": "Nhân Viên Kinh Doanh",
+                    "gender": 1,
+                    "address": "Bưu điện Bình Định",
+                    "objMcasOrganizationDto": null
+                },
+                "organizationInfo": {
+                    "orgCode": "593200",
+                    "name": "Bồng Sơn 1",
+                    "description": "Bồng Sơn 1",
+                    "status": 1,
+                    "parentCode": "5962",
+                    "orgLevel": 4,
+                    "orgType": "POST",
+                    "address": "Khối Phụ Đức",
+                    "phoneNumber": "2563861718",
+                    "administrativeCode": null,
+                    "postalCode": "55406",
+                    "postType": "GD2",
+                    "startDate": null,
+                    "communeCode": "55406",
+                    "notReal": 0
+                },
+                "rptdbUserDTO": {
+                    "username": "593200_tbc",
+                    "userId": 1,
+                    "description": null,
+                    "employeeCode": "00006822",
+                    "lastChangePassDt": "2026-08-15",
+                    "dateCreate": null,
+                    "status": 1,
+                    "orgCode": "593200",
+                    "orgLevel": 3,
+                    "orgCodeTct": "00",
+                    "orgCodeBdt": "60",
+                    "orgCodeBdh": "5962",
+                    "orgCodeBcvhx": "593200",
+                    "orgCodeNameTct": "00_Tổng Công Ty",
+                    "orgCodeNameBdt": "60_BĐT Gia Lai",
+                    "orgCodeNameBdh": "5962_Bưu điện Phường Bồng Sơn",
+                    "orgCodeNameBcvhx": "593200_Bồng Sơn 1"
+                }
+            }
+        };
+
+        const headers = {
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "vi,en-US;q=0.9,en;q=0.8",
+            "authorization": casToken,
+            "capikey": "19001234",
+            "content-type": "application/json; charset=UTF-8",
+            "priority": "u=1, i",
+            "sec-ch-ua": "\"Not=A?Brand\";v=\"99\", \"Microsoft Edge\";v=\"151\", \"Chromium\";v=\"151\"",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Windows\"",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-site"
+        };
+
+        try {
+            // 1. Fetch checkExistReport
+            const checkUrl = "https://api-casreport.vnpost.vn/vnpost-rpt-db/api/report/checkExistReport";
+            const responseCheck = await fetch(checkUrl, {
+                method: "POST",
+                headers: headers,
+                body: JSON.stringify(requestBody),
+                mode: "cors",
+                credentials: "include"
+            });
+
+            if (!responseCheck.ok) {
+                throw new Error(`Kiểm tra báo cáo thất bại (HTTP ${responseCheck.status})`);
+            }
+
+            const dataCheck = await responseCheck.json();
+            
+            // Nếu đúng (đây là response [] nếu đúng)
+            if (Array.isArray(dataCheck) && dataCheck.length === 0) {
+                // 2. Fetch tiếp theo: save
+                const saveUrl = "https://api-casreport.vnpost.vn/vnpost-rpt-db/api/report/save";
+                const responseSave = await fetch(saveUrl, {
+                    method: "POST",
+                    headers: headers,
+                    body: JSON.stringify(requestBody),
+                    mode: "cors",
+                    credentials: "include"
+                });
+
+                if (!responseSave.ok) {
+                    throw new Error(`Lưu báo cáo thất bại (HTTP ${responseSave.status})`);
+                }
+
+                const dataSave = await responseSave.json();
+                if (dataSave && dataSave.success === true) {
+                    return true;
+                } else {
+                    throw new Error(dataSave?.message || "Lưu báo cáo thất bại.");
+                }
+            } else {
+                throw new Error("Kiểm tra báo cáo thất bại hoặc báo cáo đã tồn tại!");
+            }
+        } catch (error: any) {
+            console.error("Lỗi khi chạy báo cáo Cas Report:", error);
+            message.error(error.message || "Đã xảy ra lỗi khi gọi Cas Report!");
+            return false;
+        }
+    };
+
     const handleRun = async (mode: 'single' | 'from_selected' | 'all') => {
         setIsRunning(true);
         isRunningRef.current = true;
 
+        if (reportSite === 'casreport') {
+            if (mode !== 'single') {
+                message.warning("Trang web mới chỉ tích hợp với chạy đơn!");
+                setIsRunning(false);
+                isRunningRef.current = false;
+                return;
+            }
+            if (selectedRowKeys.length === 0) {
+                message.warning("Vui lòng chọn một khách hàng!");
+                setIsRunning(false);
+                isRunningRef.current = false;
+                return;
+            }
+
+            const casToken = await getCasReportToken();
+            if (!casToken) {
+                setIsRunning(false);
+                isRunningRef.current = false;
+                return;
+            }
+
+            const selectedIdx = CUSTOMER_DATA.findIndex(c => c.code === selectedRowKeys[0]);
+            const customer = CUSTOMER_DATA[selectedIdx];
+            setCurrentCode(customer.code);
+            setProgress(0);
+
+            try {
+                const success = await runCasReport(customer, casToken);
+                if (success) {
+                    setProgress(100);
+                    message.success(`Hoàn thành! Đã chạy báo cáo đơn cho khách hàng ${customer.code}.`);
+                } else {
+                    message.error(`Chạy báo cáo cho khách hàng ${customer.code} thất bại.`);
+                }
+            } catch (error: any) {
+                message.error(`Lỗi: ${error.message || error}`);
+            } finally {
+                setIsRunning(false);
+                isRunningRef.current = false;
+                setCurrentCode("");
+            }
+            return;
+        }
+
+        // --- Portal KHL (Original Logic) ---
         const activeToken = await ensureValidToken();
         if (!activeToken) {
             message.error("Không thể xác thực hoặc đăng nhập lại. Vui lòng kiểm tra tài khoản!");
@@ -384,18 +622,49 @@ export default function ReportTab() {
         <div style={{ padding: '0px' }}>
             <Card size="small" title="Cấu hình báo cáo">
                 <Space direction="vertical" style={{ width: '100%' }}>
-                    <Space>
+                    <Space wrap>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <Text strong>Trang web:</Text>
+                            <Select
+                                value={reportSite}
+                                onChange={(val) => setReportSite(val)}
+                                style={{ width: 140 }}
+                                options={[
+                                    { value: 'portalkhl', label: 'Portal KHL' },
+                                    { value: 'casreport', label: 'Cas Report' }
+                                ]}
+                                disabled={isRunning}
+                            />
+                        </div>
+                    </Space>
+
+                    <Space wrap style={{ marginTop: '4px' }}>
                         <Text strong>Từ ngày:</Text>
                         <DatePicker
                             format="DD/MM/YYYY"
                             value={startDate}
-                            onChange={(date) => date && setStartDate(date)}
+                            onChange={(date) => {
+                                if (date) {
+                                    setStartDate(date);
+                                    chrome.storage.local.set({ reportStartDate: date.format('YYYY-MM-DD') });
+                                    const today = dayjs();
+                                    let calculatedEndDate = date.endOf('month');
+                                    if (date.isSame(today, 'month')) {
+                                        calculatedEndDate = today;
+                                    }
+                                    setEndDate(calculatedEndDate);
+                                }
+                            }}
+                            disabled={isRunning}
+                            style={{ width: '125px' }}
                         />
                         <Text strong>Đến ngày:</Text>
                         <DatePicker
                             format="DD/MM/YYYY"
                             value={endDate}
                             onChange={(date) => date && setEndDate(date)}
+                            disabled={isRunning}
+                            style={{ width: '125px' }}
                         />
                     </Space>
 
@@ -434,7 +703,7 @@ export default function ReportTab() {
                             type="default"
                             icon={<PlayCircleOutlined />}
                             onClick={() => handleRun('from_selected')}
-                            disabled={isRunning}
+                            disabled={isRunning || reportSite === 'casreport'}
                         >
                             Chạy từ chọn đến hết
                         </Button>
@@ -442,7 +711,7 @@ export default function ReportTab() {
                             type="dashed"
                             icon={<PlayCircleOutlined />}
                             onClick={() => handleRun('all')}
-                            disabled={isRunning}
+                            disabled={isRunning || reportSite === 'casreport'}
                         >
                             Chạy tất cả
                         </Button>
